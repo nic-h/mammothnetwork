@@ -5,12 +5,14 @@ import { throttle, screenToWorld, clamp } from './utils.js';
 const stageEl = document.getElementById('stage');
 const modeEl = document.getElementById('mode');
 const edgesEl = document.getElementById('edges');
+const edgesToggleEl = document.getElementById('edges-toggle');
 const fpsEl = document.getElementById('fps');
 const nodeCountEl = document.getElementById('node-count');
 const edgeCountEl = document.getElementById('edge-count');
 const toggleSimBtn = document.getElementById('toggle-sim');
 const resetBtn = document.getElementById('reset');
 const searchEl = document.getElementById('search');
+const clearSearchBtn = document.getElementById('clear-search');
 const tooltip = document.getElementById('tooltip');
 
 const app = new PIXI.Application();
@@ -54,6 +56,7 @@ let paused = false;
 let worker = null;
 let filter = { type: 'none', ids: null, address: null };
 let lastHoverIndex = -1;
+let edgesVisible = true;
 
 function setupWorker(count, edges) {
   if (worker) worker.terminate();
@@ -122,6 +125,7 @@ async function load(mode, edges) {
   createGraph(nodes.length, colors);
   edgesData = data.edges || [];
   edgesLayer.clear();
+  edgesLayer.visible = edgesVisible;
   setupWorker(nodes.length, data.edges);
 }
 
@@ -221,6 +225,16 @@ searchEl.addEventListener('keydown', async (e) => {
   }
 });
 
+clearSearchBtn.addEventListener('click', () => {
+  searchEl.value = '';
+  clearFilter();
+});
+
+edgesToggleEl.addEventListener('change', () => {
+  edgesVisible = !!edgesToggleEl.checked;
+  edgesLayer.visible = edgesVisible;
+});
+
 async function applyFilter(q) {
   if (!q) return clearFilter();
   if (/^\d+$/.test(q)) {
@@ -277,6 +291,7 @@ await load(modeEl.value, Number(edgesEl.value));
 
 // Edges drawing helper
 function drawEdges(px, py) {
+  if (!edgesVisible) return;
   edgesLayer.clear();
   edgesLayer.alpha = 0.25;
   edgesLayer.stroke({ width: 1, color: 0x00ff66, alpha: 0.25 });

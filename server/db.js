@@ -3,7 +3,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 export function openDatabase(rootDir) {
-  const envPath = process.env.DATABASE_PATH || process.env.DB_PATH;
+  const envPath = process.env.DATABASE_PATH;
   const defaultPath = path.join(rootDir, 'data', 'mammoths.db');
   const dbPath = envPath ? envPath : defaultPath;
 
@@ -67,4 +67,3 @@ export function runMigrations(db) {
     );
   `);
 }
-

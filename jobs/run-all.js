@@ -11,5 +11,7 @@ run('node scripts/db.migrate.js');
 run('node jobs/sync-holders.js');
 run('node jobs/sync-activity.js');
 run('node jobs/enrich-wallets.js');
-run('node jobs/compute-edges.js', { MODE: process.env.MODE || 'holders', EDGES: process.env.EDGES || '500' });
-
+// Precompute edges for all modes (holders, transfers, traits)
+run('node jobs/compute-edges.js', { MODE: 'holders', EDGES: process.env.EDGES || '500' });
+run('node jobs/compute-edges.js', { MODE: 'transfers', EDGES: process.env.EDGES || '500' });
+run('node jobs/compute-edges.js', { MODE: 'traits', EDGES: process.env.EDGES || '500' });

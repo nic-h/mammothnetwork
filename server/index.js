@@ -31,7 +31,7 @@ if (haveDb) {
   runMigrations(db);
   console.log(`Connected to SQLite at ${dbPath}`);
 } else {
-  console.warn(`SQLite DB not found at ${path.join(ROOT, 'data', 'mammoths.db')} (and no DATABASE_PATH). Running in fallback demo mode.`);
+  console.warn(`SQLite DB not found at ${path.join(ROOT, 'data', 'mammoths.db')} (set DATABASE_PATH to override). Running in fallback demo mode.`);
 }
 
 function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }

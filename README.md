@@ -44,4 +44,3 @@ Modularium
 
 Environment
 - Copy `.env.example` to `.env` and set `DATABASE_PATH` as needed (or export env var in Render)
-
