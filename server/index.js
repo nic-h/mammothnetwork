@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import morgan from 'morgan';
 import fs from 'fs';
@@ -22,6 +23,11 @@ app.use(express.json({ limit: '2mb' }));
 // Static
 app.use('/vendor', express.static(path.join(ROOT, 'node_modules')));
 app.use('/lib', express.static(path.join(ROOT, 'node_modules', 'pixi.js', 'dist')));
+// Serve images if present (local data folder or mounted disk)
+const localImages = path.join(ROOT, 'data', 'images');
+const diskImages = '/data/images';
+if (fs.existsSync(localImages)) app.use('/images', express.static(localImages, { maxAge: '365d', immutable: true }));
+if (fs.existsSync(diskImages)) app.use('/images', express.static(diskImages, { maxAge: '365d', immutable: true }));
 app.use(express.static(path.join(ROOT, 'public'), { fallthrough: true }));
 
 // DB

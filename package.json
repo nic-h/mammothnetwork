@@ -12,10 +12,15 @@
     "jobs:sync-holders": "node jobs/sync-holders.js",
     "jobs:sync-activity": "node jobs/sync-activity.js",
     "jobs:enrich-wallets": "node jobs/enrich-wallets.js",
+    "jobs:sync-metadata": "node jobs/sync-metadata.js",
     "jobs:all": "node jobs/run-all.js"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.33.4"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.0",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "morgan": "^1.10.0",
     "pixi.js": "^7.4.0",

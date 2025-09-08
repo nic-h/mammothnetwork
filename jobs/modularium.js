@@ -37,6 +37,26 @@ export async function fetchTokenIds() {
   return Array.isArray(data) ? data : (data.ids || []);
 }
 
+// Try a direct holders endpoint to avoid N calls
+export async function fetchHolders() {
+  if (!CONTRACT) throw new Error('CONTRACT_ADDRESS not set');
+  const urls = [
+    urlJoin(BASE, 'collection', CONTRACT, 'holders'),
+    urlJoin(BASE, 'v1', 'collection', CONTRACT, 'holders'),
+    urlJoin(BASE, 'v1', 'collections', 'forma', CONTRACT, 'holders'),
+    urlJoin(BASE, 'collection', CONTRACT, 'owners'),
+    urlJoin(BASE, 'v1', 'collection', CONTRACT, 'owners'),
+  ];
+  const data = await tryJson(urls);
+  if (Array.isArray(data)) return data; // [{tokenId, owner}] or [{id, owner}]
+  if (data && Array.isArray(data.items)) return data.items;
+  // Map form { tokenId: owner }
+  if (data && typeof data === 'object') {
+    return Object.entries(data).map(([k, v]) => ({ tokenId: Number(k), owner: String(v) }));
+  }
+  return [];
+}
+
 export async function fetchTokenMeta(id) {
   if (!CONTRACT) throw new Error('CONTRACT_ADDRESS not set');
   const urls = [
@@ -98,4 +118,3 @@ export async function fetchHoldersViaMetadata(ids, { concurrency = 10 } = {}) {
 export function envEnabled() {
   return !!(process.env.MODULARIUM_API && process.env.CONTRACT_ADDRESS);
 }
-

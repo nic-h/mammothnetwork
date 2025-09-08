@@ -7,10 +7,11 @@ export function openDatabase(rootDir) {
   const defaultPath = path.join(rootDir, 'data', 'mammoths.db');
   const dbPath = envPath ? envPath : defaultPath;
 
-  let db = null;
-  if (fs.existsSync(dbPath)) {
-    db = new Database(dbPath, { fileMustExist: true });
-  }
+  // Create if missing at default path; if env provided and missing, also create unless READONLY
+  const mustExist = false;
+  const dir = path.dirname(dbPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const db = new Database(dbPath, { fileMustExist: mustExist });
   return { db, dbPath };
 }
 

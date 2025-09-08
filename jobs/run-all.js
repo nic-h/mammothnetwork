@@ -8,6 +8,8 @@ function run(cmd, env = {}) {
 }
 
 run('node scripts/db.migrate.js');
+// Fill metadata/images first (optional images if DOWNLOAD_IMAGES=1)
+run('node jobs/sync-metadata.js', { DOWNLOAD_IMAGES: process.env.DOWNLOAD_IMAGES || '0', METADATA_CONC: process.env.METADATA_CONC || '8', START_ID: process.env.START_ID || '', END_ID: process.env.END_ID || '' });
 run('node jobs/sync-holders.js');
 run('node jobs/sync-activity.js');
 run('node jobs/enrich-wallets.js');

@@ -16,6 +16,10 @@ services:
         value: production
       - key: DATABASE_PATH
         value: /data/mammoths.db
+      - key: CONTRACT_ADDRESS
+        value: 0xbE25A97896b9CE164a314C70520A4df55979a0c6
+      - key: MODULARIUM_API
+        value: https://api.modularium.art
       - key: NODE_VERSION
         value: 20
 
