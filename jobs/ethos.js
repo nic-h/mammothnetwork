@@ -13,7 +13,7 @@ runMigrations(db);
 
 function uniq(arr) { return Array.from(new Set(arr.filter(Boolean).map(a => a.toLowerCase()))); }
 
-const ETHOS_HEADERS = { 'content-type': 'application/json', 'accept': 'application/json', 'X-Ethos-Client': 'mammoths-network/1.0' };
+const ETHOS_HEADERS = { 'content-type': 'application/json', 'accept': 'application/json', 'X-Ethos-Client': (process.env.ETHOS_CLIENT || 'mammothnetwork/0.1.0') };
 
 async function postJson(url, body) {
   const r = await fetch(url, { method: 'POST', headers: ETHOS_HEADERS, body: JSON.stringify(body) });

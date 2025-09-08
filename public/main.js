@@ -349,6 +349,12 @@ async function showDetails(id) {
               </div>
               ${ep.links?.profile ? `<a href="${ep.links.profile}" target="_blank" rel="noopener">Open Ethos</a>` : ''}
             `;
+            if (typeof ep.score === 'number') {
+              const level = (ep.level || '').toLowerCase();
+              const high = ep.score >= 1400 || ['established','reputable','exemplary','distinguished','revered','renowned'].includes(level);
+              if (high) sbEthos.innerHTML = `${ep.score} <span class="badge core">${ep.level || 'core'}</span>`;
+              else sbEthos.textContent = String(ep.score);
+            }
           }
         }
       } catch {}

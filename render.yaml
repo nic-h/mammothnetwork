@@ -22,6 +22,12 @@ services:
         value: https://api.modularium.art
       - key: ETHOS_API
         value: https://api.ethos.network
+      - key: ETHOS_BASE
+        value: https://api.ethos.network
+      - key: ETHOS_CLIENT
+        value: mammothnetwork/0.1.0
+      - key: ETHOS_API
+        value: https://api.ethos.network
       - key: NODE_VERSION
         value: 20
 
@@ -34,6 +40,16 @@ services:
     envVars:
       - key: DATABASE_PATH
         value: /data/mammoths.db
+      - key: CONTRACT_ADDRESS
+        value: 0xbE25A97896b9CE164a314C70520A4df55979a0c6
+      - key: MODULARIUM_API
+        value: https://api.modularium.art
+      - key: ETHOS_API
+        value: https://api.ethos.network
+      - key: ETHOS_BASE
+        value: https://api.ethos.network
+      - key: ETHOS_CLIENT
+        value: mammothnetwork/0.1.0
     disk:
       name: mammoths-db
       mountPath: /data

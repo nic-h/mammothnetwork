@@ -576,7 +576,7 @@ app.get('/api/wallet/:address/meta', (req, res) => {
 
 async function refreshEthos(addr) {
   const ETHOS_API = process.env.ETHOS_API || 'https://api.ethos.network';
-  const headers = { 'accept': 'application/json', 'X-Ethos-Client': 'mammoths-network/1.0' };
+  const headers = { 'accept': 'application/json', 'X-Ethos-Client': (process.env.ETHOS_CLIENT || 'mammothnetwork/0.1.0') };
   const [score, user] = await Promise.all([
     fetch(`${ETHOS_API}/api/v2/score/address?address=${addr}`, { headers }).then(r => r.ok ? r.json() : null).catch(()=>null),
     fetch(`${ETHOS_API}/api/v2/user/by/address/${addr}`, { headers }).then(r => r.ok ? r.json() : null).catch(()=>null),

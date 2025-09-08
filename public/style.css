@@ -56,6 +56,10 @@ button.ghost { background: transparent; color: var(--accent); border: 1px solid 
 .thumb img { max-width:100%; border:1px solid #0a3; border-radius:2px; margin-top:8px; }
 .card { margin-top:8px; border:1px solid #0a3; padding:8px; border-radius:2px; }
 .card .row { display:flex; gap:8px; align-items:center; }
+.badge { display:inline-block; padding:1px 6px; border:1px solid #0a3; color:#9f9; border-radius:10px; font-size:10px; margin-left:6px; }
+.badge.high { background:#041; border-color:#0c4; color:#9f9; }
+.badge.core { background:#062; border-color:#0e6; color:#cfc; }
+.badge.warn { background:#220; border-color:#a60; color:#fd6; }
 
 .tooltip { position: fixed; pointer-events: none; background: #020; color: var(--accent); border: 1px solid #0a3; padding: 4px 6px; font-size: 12px; border-radius: 2px; }
 
