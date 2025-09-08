@@ -1,4 +1,4 @@
-// Ethos lightweight proxy with in-memory TTL cache (ESM)
+// Ethos v2 lightweight proxy with in-memory TTL cache (ESM)
 const ETHOS_BASE = process.env.ETHOS_BASE || 'https://api.ethos.network';
 const ETHOS_CLIENT = process.env.ETHOS_CLIENT || 'mammothnetwork/dev';
 
@@ -18,46 +18,32 @@ async function ethosFetchJson(path) {
   return await res.json();
 }
 
-async function ethosSearchByQuery(q) {
-  const key = `ethos:search:${q.toLowerCase()}`;
-  const hit = get(key); if (hit) return hit;
-  const json = await ethosFetchJson(`/api/v1/search?query=${encodeURIComponent(q)}&limit=1`);
-  put(key, json, 24*60*60*1000);
-  return json;
-}
-
-async function ethosUserStats(userkey) {
-  const key = `ethos:stats:${userkey}`;
-  const hit = get(key); if (hit) return hit;
-  const json = await ethosFetchJson(`/api/v1/users/${encodeURIComponent(userkey)}/stats`);
-  put(key, json, 24*60*60*1000);
-  return json;
-}
-
 export async function getEthosForAddress(address) {
-  const search = await ethosSearchByQuery(address);
-  const first = search?.data?.values?.[0];
-  if (!first) return { ok: true, found: false };
-  const userkey = first.userkey || (first.profileId ? `profileId:${first.profileId}` : null);
-  let stats = null;
-  if (userkey) {
-    try { stats = await ethosUserStats(userkey); } catch { /* optional */ }
+  // v2 user + score by address
+  try {
+    const key = `ethos:v2:user:${address.toLowerCase()}`;
+    const hit = get(key);
+    let user;
+    if (hit) {
+      user = hit;
+    } else {
+      user = await ethosFetchJson(`/api/v2/user/by/address/${address}`);
+      put(key, user, 24*60*60*1000);
+    }
+    const score = await ethosFetchJson(`/api/v2/score/address?address=${address}`).catch(()=>null);
+    if (!user) return { ok: true, found: false };
+    return {
+      ok: true,
+      found: true,
+      id: user.id ?? null,
+      displayName: user.displayName || null,
+      username: user.username || null,
+      avatarUrl: user.avatarUrl || null,
+      score: (score && typeof score.score === 'number') ? score.score : (typeof user.score === 'number' ? user.score : null),
+      level: score?.level || null,
+      links: user.links || null,
+    };
+  } catch (e) {
+    return { ok: false, error: 'ethos-v2-failed' };
   }
-  return {
-    ok: true,
-    found: true,
-    userkey,
-    profileId: first.profileId || null,
-    primaryAddress: first.primaryAddress || null,
-    name: first.name || null,
-    username: first.username || null,
-    avatar: first.avatar || null,
-    score: first.score ?? null,
-    links: first.profileId ? {
-      profile: `https://app.ethos.network/profile/${first.profileId}`,
-      scoreBreakdown: `https://app.ethos.network/profile/${first.profileId}#score`
-    } : null,
-    stats: stats?.data || null,
-  };
 }
-

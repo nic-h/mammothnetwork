@@ -331,7 +331,7 @@ async function showDetails(id) {
         trades = wm.trade_count ?? null;
         if (!last) last = wm.last_activity || null;
       }
-      // Ethos profile proxy (v1 search+stats) enrich panel
+      // Ethos profile proxy (v2 user + score) enrich panel
       try {
         const ep = await fetch(`/api/ethos/profile?address=${t.owner.toLowerCase()}`).then(r=>r.json());
         const box = document.getElementById('detail-ethos');
@@ -339,19 +339,14 @@ async function showDetails(id) {
           if (!ep || !ep.ok || !ep.found) {
             box.innerHTML = '<div class="row">No Ethos profile</div>';
           } else {
-            const s = ep.stats || {};
             box.innerHTML = `
               <div class="row">
-                ${ep.avatar ? `<img src="${ep.avatar}" width="28" height="28" style="border-radius:50%;object-fit:cover;margin-right:8px"/>` : ''}
+                ${ep.avatarUrl ? `<img src="${ep.avatarUrl}" width="28" height="28" style="border-radius:50%;object-fit:cover;margin-right:8px"/>` : ''}
                 <div>
-                  <div>${ep.name || ''} ${ep.username ? `@${ep.username}` : ''}</div>
-                  <div>Ethos score: <b>${ep.score ?? 'n/a'}</b></div>
+                  <div>${ep.displayName || ''} ${ep.username ? `@${ep.username}` : ''}</div>
+                  <div>Ethos score: <b>${ep.score ?? 'n/a'}</b> ${ep.level ? `(${ep.level})` : ''}</div>
                 </div>
               </div>
-              <div class="row">Reviews +: ${s?.reviews?.positiveReviewCount ?? 0}</div>
-              <div class="row">Reviews −: ${s?.reviews?.negativeReviewCount ?? 0}</div>
-              <div class="row">Vouches recv: ${s?.vouches?.count?.received ?? 0}</div>
-              <div class="row">Vouch ETH recv: ${s?.vouches?.staked?.received ?? 0}</div>
               ${ep.links?.profile ? `<a href="${ep.links.profile}" target="_blank" rel="noopener">Open Ethos</a>` : ''}
             `;
           }
