@@ -1,0 +1,44 @@
+:root {
+  --bg: #000;
+  --fg: #fff;
+  --muted: #999;
+  --accent: #00ff66;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", Consolas, "Liberation Mono", monospace;
+}
+
+.bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 44px;
+  display: grid;
+  grid-template-columns: 180px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #111;
+  background: rgba(0,0,0,0.9);
+}
+.brand { color: var(--accent); font-weight: 600; }
+.controls { display: flex; align-items: center; gap: 10px; }
+.controls label { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+select, input[type="text"] {
+  background: #000; color: #fff; border: 1px solid #111; padding: 4px 6px; border-radius: 2px;
+}
+input#search { width: 220px; }
+input[type="range"] { accent-color: var(--accent); }
+button { background: var(--accent); color: #000; border: none; padding: 4px 8px; border-radius: 2px; cursor: pointer; }
+button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+
+.stats { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+
+#stage { position: absolute; top: 44px; left: 0; right: 0; bottom: 0; }
+
+.tooltip { position: fixed; pointer-events: none; background: #020; color: var(--accent); border: 1px solid #0a3; padding: 4px 6px; font-size: 12px; border-radius: 2px; }

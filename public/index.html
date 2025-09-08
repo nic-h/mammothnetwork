@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mammoths Network</title>
+    <link rel="preconnect" href="/vendor/pixi.js" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="bar">
+        <div class="brand">Mammoths Network</div>
+        <div class="controls">
+          <label>Mode
+            <select id="mode">
+              <option value="holders">holders</option>
+              <option value="transfers">transfers</option>
+              <option value="traits">traits</option>
+            </select>
+          </label>
+          <label>Edges
+            <input id="edges" type="range" min="0" max="500" step="10" value="200" />
+          </label>
+          <button id="toggle-sim" class="ghost">pause</button>
+          <button id="reset" class="ghost">reset</button>
+          <input id="search" type="text" placeholder="token id or address" />
+        </div>
+        <div class="stats">
+          <span id="fps">fps: --</span>
+          <span id="node-count">nodes: --</span>
+          <span id="edge-count">edges: --</span>
+        </div>
+      </header>
+      <div id="stage"></div>
+      <div id="tooltip" class="tooltip" style="display:none;"></div>
+    </div>
+    <script type="module" src="/main.js"></script>
+  </body>
+  </html>

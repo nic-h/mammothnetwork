@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: mammoths-network
+    env: node
+    plan: standard
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    healthCheckPath: /
+    disk:
+      name: mammoths-db
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /data/mammoths.db
+      - key: NODE_VERSION
+        value: 20
+
+  - type: cron
+    name: mammoths-network-weekly
+    env: node
+    schedule: "0 6 * * 1" # Mondays 06:00 UTC
+    buildCommand: npm install
+    startCommand: node jobs/run-all.js
+    envVars:
+      - key: DATABASE_PATH
+        value: /data/mammoths.db
+    disk:
+      name: mammoths-db
+      mountPath: /data
+      sizeGB: 10

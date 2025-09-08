@@ -1,57 +1,47 @@
-Mammoths Network — Local Cache + Neon Viewer
+Mammoths Network Visualization
+=============================
 
-Quick Start
+WebGL graph viewer for the Mammoths NFT collection.
 
-- Install: `npm install`
-- Init DB + folders: `npm run init-db`
-- Migrate for status columns: `npm run migrate-db`
-- Fetch all metadata + images (10k): `npm run fetch-all`
-- Owners and frozen (via Modularium): `npm run owners-mod`
-- Dormant flags (activity scan): `npm run update-dormant`
-- Run server: `npm start` → open `http://localhost:3001`
+Key points
+- PIXI.js v7 WebGL rendering (no Canvas2D/D3)
+- 10,000 NFT nodes as colored dots (no thumbnails)
+- Worker-based force simulation for smooth 60fps rendering
+- Minimal design (monospace, black/white/green)
+- SQLite backend with cached metadata and local images (images are not used in nodes)
+- Render.com deployment with persistent disk
 
-What It Does
+Run locally
+1. Install deps: `npm install`
+2. Start server: `npm run dev` (defaults to http://localhost:3000)
+3. Optional: point to a DB: `DB_PATH=/absolute/path/to/mammoths.db npm run dev`
 
-- Local cache in `data/mammoths.db` (SQLite)
-- Optimizes art: full JPG (~800px) + thumbnail JPG (512px) via `sharp`
-- Static serving with cache headers at `/images` and `/thumbnails`
-- Progressive client load: nodes render immediately; owners/traits/status fill in batches
+Endpoints
+- `/api/network-graph?mode=holders|transfers|traits&nodes=10000&edges=0..500` (alias: `/api/graph`)
+- `/api/token/:id`
+- `/api/wallet/:address`
+- `/api/stats`
+- `/api/activity`
+- `/api/health`
 
-UI/UX (index.html)
+Render.com
+- `render.yaml` provisions a persistent disk mounted at `/data`
+- Place your SQLite file at `/data/mammoths.db` (or set `DATABASE_PATH`)
+- Add a separate Render Cron Job to run `node jobs/run-all.js` weekly (holders → activity → edges → enrichment)
 
-- Tokens view: 10k crisp neon dots on black; zoom/pan; hover tooltip; click → detail panel
-- Owners view (toggle in left pane): wallet bubbles ↔ mammoth nodes; search wallet or token
-- Status filters: All / Active / Frozen / Dormant (server-backed counts at `/api/status-counts`)
-- Trait filters: click a trait value to instantly show only matching tokens (server-backed `/api/ids-by-trait`)
-- Edges: link nodes in the active trait cluster (cap adjustable)
-- Selection: bright ring around the clicked token; detail shows owner, image source (LOCAL/REMOTE), and all attributes
+Performance notes
+- Nodes render via `PIXI.ParticleContainer(10000)` using a single generated circle texture (cheap instancing)
+- Force simulation runs in a Web Worker using a uniform grid for local repulsion + spring edges
+- Positions stream to the main thread at ~30Hz to reduce overhead; rendering remains at 60fps
+- Edge pass drawn with `PIXI.Graphics` when edges <= 500, with viewport culling
+- Server uses Brotli/gzip compression and a 5-minute memory cache + ETag
 
-Data Fill Paths
+Design system
+- Colors and typography align with dash.mammoths.tech (monospace, black/white/green)
 
-- Metadata + Images: `npm run fetch-all` (resumable, safe to rerun)
-- Owners + Frozen: `npm run owners-mod` (Modularium holders/minters + frozenBalance)
-- Dormant: `npm run update-dormant` (scans collection activity; window configurable via `DORMANT_DAYS`)
-- Optional on-chain ownerOf: `RPC_URL=... npm run fetch-owners` (strict chain truth)
+Modularium
+- Use offline jobs to fetch/cache data; runtime reads only from SQLite. See `jobs/` for placeholders.
 
-API Endpoints (served by `server.js`)
+Environment
+- Copy `.env.example` to `.env` and set `DATABASE_PATH` as needed (or export env var in Render)
 
-- `GET /api/stats` — collection stats
-- `GET /api/token-ids` — all token IDs
-- `GET /api/token/:id` — one token (owner, status, metadata, image paths)
-- `GET /api/tokens-batch?ids=...` — batch of tokens (for progressive loading)
-- `GET /api/traits` — trait counts
-- `GET /api/ids-by-trait?type=X&value=Y` — token IDs for a specific trait value
-- `GET /api/status-counts` — `{ frozen, dormant, active, total }`
-- `GET /api/owners-graph` — wallet↔mammoth bipartite graph for owners view
-
-Config
-
-- `DATA_DIR`: where DB and images live (default `./data`)
-- `CONTRACT_ADDRESS`: default Mammoths contract
-- `MOD_API`: default `https://api.modularium.art`
-- `DORMANT_DAYS`: window for dormant classification (default 45)
-
-Notes
-
-- While `fetch-all` is running, images render via an HTTP IPFS gateway; once thumbnails exist, the UI automatically switches to LOCAL paths.
-- All scripts are idempotent and safe to re-run.

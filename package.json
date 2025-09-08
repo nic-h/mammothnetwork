@@ -1,24 +1,27 @@
 {
   "name": "mammoths-network",
-  "version": "2.0.0",
-  "description": "Mammoths NFT Network Visualization with DB cache",
-  "main": "server.js",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "init-db": "node init-database.js",
-    "fetch-all": "node fetch-all-metadata.js",
-    "fetch-owners": "node fetch-owners.js",
-    "migrate-db": "node migrate-db.js",
-    "owners-mod": "node update-owners-modapi.js",
-    "update-dormant": "node update-dormant.js",
-    "backfill-images": "node backfill-images.js"
+    "start": "node server/index.js",
+    "dev": "NODE_ENV=development node server/index.js",
+    "db:init": "node scripts/db.init.js",
+    "db:migrate": "node scripts/db.migrate.js",
+    "jobs:compute-edges": "node jobs/compute-edges.js",
+    "jobs:sync-holders": "node jobs/sync-holders.js",
+    "jobs:sync-activity": "node jobs/sync-activity.js",
+    "jobs:enrich-wallets": "node jobs/enrich-wallets.js",
+    "jobs:all": "node jobs/run-all.js"
   },
   "dependencies": {
-    "better-sqlite3": "^9.2.2",
-    "express": "^4.18.2",
-    "node-fetch": "^2.6.7",
-    "p-limit": "^3.1.0",
-    "sharp": "^0.32.6",
-    "sqlite3": "^5.1.6"
+    "better-sqlite3": "^9.4.0",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "pixi.js": "^7.4.0",
+    "compression": "^1.7.4"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
