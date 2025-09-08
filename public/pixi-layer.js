@@ -1,5 +1,3 @@
-import * as PIXI from '/lib/pixi.min.mjs';
-
 export function createCircleTexture(app, diameter = 12, color = 0x00ff66) {
   const g = new PIXI.Graphics();
   const r = diameter / 2;
@@ -21,5 +19,3 @@ export function createParticleContainer(capacity) {
     alpha: true,
   });
 }
-
-export { PIXI };

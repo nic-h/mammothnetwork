@@ -1,4 +1,3 @@
-import * as PIXI from '/lib/pixi.min.mjs';
 import { createCircleTexture, createParticleContainer } from './pixi-layer.js';
 import { throttle, screenToWorld, clamp } from './utils.js';
 
