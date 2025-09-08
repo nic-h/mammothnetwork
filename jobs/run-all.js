@@ -13,6 +13,7 @@ run('node jobs/sync-metadata.js', { DOWNLOAD_IMAGES: process.env.DOWNLOAD_IMAGES
 run('node jobs/sync-holders.js');
 run('node jobs/sync-activity.js');
 run('node jobs/enrich-wallets.js');
+run('node jobs/enrich-ethos.js');
 // Precompute edges for all modes (holders, transfers, traits)
 run('node jobs/compute-edges.js', { MODE: 'holders', EDGES: process.env.EDGES || '500' });
 run('node jobs/compute-edges.js', { MODE: 'transfers', EDGES: process.env.EDGES || '500' });

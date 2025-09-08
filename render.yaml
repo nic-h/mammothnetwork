@@ -20,6 +20,8 @@ services:
         value: 0xbE25A97896b9CE164a314C70520A4df55979a0c6
       - key: MODULARIUM_API
         value: https://api.modularium.art
+      - key: ETHOS_API
+        value: https://api.ethos.network
       - key: NODE_VERSION
         value: 20
 

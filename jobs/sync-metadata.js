@@ -74,6 +74,7 @@ async function writeImage(id, url) {
     }
     return { image: `images/${id}.jpg`, thumb: `thumbnails/${id}.jpg` };
   } catch (e) {
+    console.warn('Thumbnail generation failed, using original image for', id, e.message);
     return { image: null, thumb: null };
   }
 }
@@ -140,4 +141,3 @@ async function main() {
 }
 
 try { await main(); } finally { db.close(); }
-

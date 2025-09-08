@@ -23,11 +23,15 @@ app.use(express.json({ limit: '2mb' }));
 // Static
 app.use('/vendor', express.static(path.join(ROOT, 'node_modules')));
 app.use('/lib', express.static(path.join(ROOT, 'node_modules', 'pixi.js', 'dist')));
-// Serve images if present (local data folder or mounted disk)
+// Serve images + thumbnails if present (local data folder or mounted disk)
 const localImages = path.join(ROOT, 'data', 'images');
 const diskImages = '/data/images';
 if (fs.existsSync(localImages)) app.use('/images', express.static(localImages, { maxAge: '365d', immutable: true }));
 if (fs.existsSync(diskImages)) app.use('/images', express.static(diskImages, { maxAge: '365d', immutable: true }));
+const localThumbs = path.join(ROOT, 'data', 'thumbnails');
+const diskThumbs = '/data/thumbnails';
+if (fs.existsSync(localThumbs)) app.use('/thumbnails', express.static(localThumbs, { maxAge: '365d', immutable: true }));
+if (fs.existsSync(diskThumbs)) app.use('/thumbnails', express.static(diskThumbs, { maxAge: '365d', immutable: true }));
 app.use(express.static(path.join(ROOT, 'public'), { fallthrough: true }));
 
 // DB
@@ -98,8 +102,29 @@ function generateGraphFromDb({ mode = 'holders', nodes = 10000, edges = 20000 })
     const tokenCount = tokenTable ? db.prepare(`SELECT COUNT(1) as c FROM ${tokenTable}`).get().c : 0;
     if (!tokenCount || tokenCount < 100) return generateFallbackGraph({ nodes, edges });
     const N = clamp(tokenCount, 1, nodes);
-    const nodesArr = new Array(N);
-    for (let i = 0; i < N; i++) nodesArr[i] = { id: i + 1, color: idToColor(i + 1) };
+    // Build nodes with status colors (frozen/dormant) if columns exist
+    let nodesArr = [];
+    try {
+      const cols = db.prepare(`PRAGMA table_info(${tokenTable})`).all().map(c => c.name.toLowerCase());
+      const hasFrozen = cols.includes('frozen');
+      const hasDormant = cols.includes('dormant');
+      if (hasFrozen || hasDormant) {
+        const rows = db.prepare(`SELECT id${hasFrozen ? ', frozen' : ''}${hasDormant ? ', dormant' : ''} FROM ${tokenTable} WHERE id<=? ORDER BY id`).all(N);
+        for (const r of rows) {
+          const isFrozen = hasFrozen ? !!r.frozen : false;
+          const isDormant = hasDormant ? !!r.dormant : false;
+          let color = 0x00ff66;
+          if (isFrozen) color = 0x4488ff; // blue for frozen
+          else if (isDormant) color = 0x666666; // gray for dormant
+          else color = idToColor(r.id);
+          nodesArr.push({ id: r.id, color, frozen: isFrozen, dormant: isDormant });
+        }
+      }
+    } catch {}
+    if (!nodesArr.length) {
+      nodesArr = new Array(N);
+      for (let i = 0; i < N; i++) nodesArr[i] = { id: i + 1, color: idToColor(i + 1), frozen: false, dormant: false };
+    }
 
     // Mode-specific edge derivation
     let edgesArr = [];
@@ -109,6 +134,8 @@ function generateGraphFromDb({ mode = 'holders', nodes = 10000, edges = 20000 })
       edgesArr = buildEdgesFromTransfers(tokenTable, N, edges);
     } else if (mode === 'traits') {
       edgesArr = buildEdgesFromTraits(tokenTable, N, edges);
+    } else if (mode === 'wallets') {
+      edgesArr = buildEdgesFromWallets(N, edges);
     } else {
       edgesArr = buildEdgesFromHolders(tokenTable, N, edges);
     }
@@ -129,30 +156,31 @@ function detectTokenTable() {
 }
 
 function buildEdgesFromHolders(tokenTable, N, maxEdges) {
-  // Try to find holders table with owner info
-  let ownerTable = null;
+  // Prefer tokens table owner column; fall back to a holders table if present
   const names = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name.toLowerCase());
-  for (const n of ['holders', 'ownership', 'owners']) if (names.includes(n)) { ownerTable = n; break; }
-  if (!ownerTable) return generateFallbackGraph({ nodes: N, edges: maxEdges }).edges;
-
-  // Attempt to find columns
-  const pragma = db.prepare(`PRAGMA table_info(${ownerTable})`).all();
-  const cols = pragma.map(c => c.name.toLowerCase());
-  const tokenCol = cols.find(c => ['token_id', 'token', 'id', 'nft_id'].includes(c));
-  const ownerCol = cols.find(c => ['owner', 'holder', 'address', 'wallet'].includes(c));
-  if (!tokenCol || !ownerCol) return generateFallbackGraph({ nodes: N, edges: maxEdges }).edges;
-
-  // Build sparse ring edges within each owner’s set to bound edges
-  const stmt = db.prepare(`SELECT ${tokenCol} AS token_id, ${ownerCol} AS owner FROM ${ownerTable} WHERE ${tokenCol} <= ? ORDER BY owner`);
-  const rows = stmt.all(N);
+  let rows = [];
+  if (tokenTable) {
+    rows = db.prepare(`SELECT id AS token_id, owner FROM ${tokenTable} WHERE id <= ? AND owner IS NOT NULL AND owner<>'' ORDER BY owner`).all(N);
+  } else {
+    let ownerTable = null;
+    for (const n of ['holders', 'ownership', 'owners']) if (names.includes(n)) { ownerTable = n; break; }
+    if (ownerTable) {
+      const pragma = db.prepare(`PRAGMA table_info(${ownerTable})`).all();
+      const cols = pragma.map(c => c.name.toLowerCase());
+      const tokenCol = cols.find(c => ['token_id', 'token', 'id', 'nft_id'].includes(c)) || 'token_id';
+      const ownerCol = cols.find(c => ['owner', 'holder', 'address', 'wallet'].includes(c)) || 'owner';
+      rows = db.prepare(`SELECT ${tokenCol} AS token_id, ${ownerCol} AS owner FROM ${ownerTable} WHERE ${tokenCol} <= ? ORDER BY owner`).all(N);
+    }
+  }
+  if (!rows.length) return [];
   const byOwner = new Map();
   for (const r of rows) {
-    if (!byOwner.has(r.owner)) byOwner.set(r.owner, []);
-    byOwner.get(r.owner).push(r.token_id);
+    const o = (r.owner || '').toLowerCase();
+    if (!byOwner.has(o)) byOwner.set(o, []);
+    byOwner.get(o).push(r.token_id);
   }
   const edges = [];
   for (const list of byOwner.values()) {
-    // connect as a ring with stride to avoid O(k^2)
     list.sort((a,b)=>a-b);
     const stride = Math.max(1, Math.floor(list.length / 6));
     for (let i = 0; i < list.length - stride; i += stride) {
@@ -230,6 +258,59 @@ function buildEdgesFromTraits(tokenTable, N, maxEdges) {
       if (a !== b && a <= N && b <= N) edges.push([a, b, 1]);
       if (edges.length >= maxEdges) return edges;
     }
+  }
+  return edges;
+}
+
+function getOwnerTokens(dbRef, owner, N) {
+  return dbRef.prepare('SELECT id FROM tokens WHERE LOWER(owner)=? AND id<=? ORDER BY id').all(owner, N).map(r => r.id);
+}
+
+function degreeLimitedPush(edges, a, b, degree, cap) {
+  if (a === b) return false;
+  if ((degree.get(a) || 0) >= cap) return false;
+  if ((degree.get(b) || 0) >= cap) return false;
+  edges.push([a, b, 1]);
+  degree.set(a, (degree.get(a) || 0) + 1);
+  degree.set(b, (degree.get(b) || 0) + 1);
+  return true;
+}
+
+function buildEdgesFromWallets(N, maxEdges) {
+  const degree = new Map();
+  const edges = [];
+
+  // Same-owner clusters (top owners by holdings)
+  const topOwners = db.prepare(`SELECT LOWER(owner) as o, COUNT(1) c FROM tokens WHERE owner IS NOT NULL AND owner<>'' AND id<=? GROUP BY LOWER(owner) ORDER BY c DESC LIMIT 200`).all(N);
+  for (const row of topOwners) {
+    const list = getOwnerTokens(db, row.o, N);
+    if (list.length < 2) continue;
+    const center = list[0];
+    const step = Math.max(1, Math.floor(list.length / 8));
+    for (let i = 1; i < list.length; i += step) {
+      if (degreeLimitedPush(edges, center, list[i], degree, 6) && edges.length >= maxEdges) return edges;
+    }
+    if (edges.length >= maxEdges) return edges;
+  }
+
+  if (edges.length >= maxEdges) return edges;
+
+  // Wallet-to-wallet trades
+  const pairs = db.prepare(`
+    SELECT LOWER(from_addr) AS a, LOWER(to_addr) AS b, COUNT(1) AS cnt
+    FROM transfers
+    WHERE from_addr IS NOT NULL AND from_addr<>'' AND to_addr IS NOT NULL AND to_addr<>'' AND token_id<=?
+    GROUP BY a,b
+    HAVING cnt >= 2
+    ORDER BY cnt DESC
+    LIMIT 1000
+  `).all(N);
+  for (const p of pairs) {
+    const aTokens = getOwnerTokens(db, p.a, N);
+    const bTokens = getOwnerTokens(db, p.b, N);
+    if (!aTokens.length || !bTokens.length) continue;
+    degreeLimitedPush(edges, aTokens[0], bTokens[0], degree, 6);
+    if (edges.length >= maxEdges) break;
   }
   return edges;
 }
@@ -317,13 +398,108 @@ app.get('/api/stats', (req, res) => {
 
 // API: Minimal activity stub (placeholder for Modularium)
 app.get('/api/activity', (req, res) => {
-  // Keep cheap: return simple rolling window stub; real impl would query cached tables
-  const now = Date.now();
-  const buckets = [];
-  for (let i = 0; i < 24; i++) {
-    buckets.push({ t: now - i * 3600_000, count: Math.floor((Math.sin(i/3)+1)*50) });
+  if (!haveDb || !db) return res.json({ buckets: [] });
+  const interval = (req.query.interval || 'day').toString();
+  const valid = interval === 'day' || interval === 'hour';
+  const sec = interval === 'hour' ? 3600 : 86400;
+  try {
+    const rows = db.prepare('SELECT (timestamp / ?) * ? AS bucket, COUNT(1) AS count, SUM(COALESCE(price,0)) AS volume FROM transfers GROUP BY bucket ORDER BY bucket').all(sec, sec);
+    const buckets = rows.map(r => ({ t: r.bucket * 1000, count: r.count, volume: r.volume }));
+    res.json({ buckets });
+  } catch (e) {
+    res.json({ buckets: [] });
   }
-  res.json({ buckets: buckets.reverse() });
+});
+
+app.get('/api/heatmap', (req, res) => {
+  if (!haveDb || !db) return res.json({ grid: [] });
+  // 7x24 grid: dayOfWeek (0-6), hour (0-23)
+  try {
+    const rows = db.prepare("SELECT CAST(strftime('%w', timestamp, 'unixepoch') AS INTEGER) AS dow, CAST(strftime('%H', timestamp, 'unixepoch') AS INTEGER) AS hr, COUNT(1) AS count, SUM(COALESCE(price,0)) AS volume FROM transfers GROUP BY dow, hr").all();
+    const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ count: 0, volume: 0 })));
+    for (const r of rows) {
+      const d = Number(r.dow); const h = Number(r.hr);
+      grid[d][h] = { count: r.count, volume: r.volume };
+    }
+    res.json({ grid });
+  } catch (e) {
+    res.json({ grid: [] });
+  }
+});
+
+// API: Preset data for layouts (compact arrays for performance)
+app.get('/api/preset-data', (req, res) => {
+  if (!haveDb || !db) return res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
+  const N = parseInt(req.query.nodes || '10000', 10) || 10000;
+  try {
+    const rows = db.prepare("SELECT id, LOWER(COALESCE(owner,'')) AS owner FROM tokens WHERE id<=? ORDER BY id").all(N);
+    const owners = [];
+    const ownerMap = new Map();
+    const ownerIndex = new Array(rows.length);
+    for (let i = 0; i < rows.length; i++) {
+      const o = rows[i].owner || '';
+      if (!ownerMap.has(o)) { ownerMap.set(o, owners.length); owners.push(o); }
+      ownerIndex[i] = ownerMap.get(o);
+    }
+    // ownerEthos aligned with owners array
+    const ownerEthos = new Array(owners.length).fill(null);
+    const ethosRows = db.prepare('SELECT address, ethos_score FROM wallet_metadata WHERE ethos_score IS NOT NULL').all();
+    const ethosMap = new Map(ethosRows.map(r => [r.address?.toLowerCase?.() || '', r.ethos_score]));
+    for (let i = 0; i < owners.length; i++) ownerEthos[i] = ethosMap.get(owners[i]) ?? null;
+
+    // last activity per token
+    const lastRows = db.prepare('SELECT token_id AS id, MAX(timestamp) AS t FROM transfers WHERE token_id<=? GROUP BY token_id').all(N);
+    const lastMap = new Map(lastRows.map(r => [r.id, r.t || 0]));
+    const tokenLastActivity = rows.map(r => lastMap.get(r.id) || 0);
+
+    // price per token (last known)
+    let tokenPrice = rows.map(_ => null);
+    try {
+      const priceRows = db.prepare('SELECT token_id AS id, MAX(COALESCE(price,0)) AS p FROM transfers WHERE token_id<=? GROUP BY token_id').all(N);
+      const pm = new Map(priceRows.map(r => [r.id, r.p || null]));
+      tokenPrice = rows.map(r => pm.get(r.id) ?? null);
+    } catch {}
+
+    // trait frequencies and token dominant traitKey
+    const traitCountRows = db.prepare("SELECT trait_type||':'||trait_value AS k, COUNT(1) AS c FROM attributes WHERE token_id<=? GROUP BY k").all(N);
+    const freq = new Map(traitCountRows.map(r => [r.k, r.c]));
+    const tokenAttrs = db.prepare('SELECT token_id, trait_type, trait_value FROM attributes WHERE token_id<=?').all(N);
+    const tokenTraitKey = new Array(rows.length).fill(-1);
+    const traitKeys = [];
+    const traitKeyMap = new Map();
+    // build rarest attribute per token
+    const perToken = new Map();
+    for (const a of tokenAttrs) {
+      const k = `${a.trait_type}:${a.trait_value}`;
+      const c = freq.get(k) || 1;
+      const cur = perToken.get(a.token_id);
+      if (!cur || c < cur.c) perToken.set(a.token_id, { k, c });
+    }
+    for (let i = 0; i < rows.length; i++) {
+      const rec = perToken.get(rows[i].id);
+      if (!rec) { tokenTraitKey[i] = -1; continue; }
+      if (!traitKeyMap.has(rec.k)) { traitKeyMap.set(rec.k, traitKeys.length); traitKeys.push(rec.k); }
+      tokenTraitKey[i] = traitKeyMap.get(rec.k);
+    }
+
+    // rarity score (approx): sum of -log(freq/total) across traits, normalized 0..1
+    const totalAttrs = tokenAttrs.length || 1;
+    const rarityRaw = new Array(rows.length).fill(0);
+    const sumMap = new Map();
+    for (const a of tokenAttrs) {
+      const k = `${a.trait_type}:${a.trait_value}`;
+      const c = freq.get(k) || 1;
+      const s = Math.max(0, Math.log(totalAttrs / c));
+      sumMap.set(a.token_id, (sumMap.get(a.token_id) || 0) + s);
+    }
+    let maxS = 1e-6; let minS = 1e9;
+    for (let i = 0; i < rows.length; i++) { const s = sumMap.get(rows[i].id) || 0; rarityRaw[i] = s; maxS = Math.max(maxS, s); minS = Math.min(minS, s); }
+    const rarity = rarityRaw.map(s => (s - minS) / (maxS - minS + 1e-9));
+
+    res.json({ owners, ownerIndex, ownerEthos, tokenLastActivity, tokenPrice, traitKeys, tokenTraitKey, rarity });
+  } catch (e) {
+    res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
+  }
 });
 
 // API: Token detail
@@ -331,10 +507,29 @@ app.get('/api/token/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
   try {
-    const row = db.prepare('SELECT id, owner, name, description, image_local, thumbnail_local, attributes FROM tokens WHERE id=?').get(id);
+    const row = db.prepare('SELECT id, owner, name, description, image_local, thumbnail_local, attributes, frozen, dormant, last_activity FROM tokens WHERE id=?').get(id);
     if (!row) return res.status(404).json({ error: 'not-found' });
+    // traits from attributes table (authoritative)
+    let traits = [];
+    try { traits = db.prepare('SELECT trait_type, trait_value FROM attributes WHERE token_id=?').all(id); } catch {}
+    // parse attributes JSON fallback
+    if ((!traits || traits.length === 0) && row.attributes) {
+      try { const j = JSON.parse(row.attributes); if (Array.isArray(j)) traits = j.map(a=>({ trait_type: a.trait_type||a.type||'', trait_value: a.value||'' })); } catch {}
+    }
+    const out = {
+      id: row.id,
+      owner: row.owner,
+      name: row.name,
+      description: row.description,
+      image_local: row.image_local,
+      thumbnail_local: row.thumbnail_local,
+      traits,
+      frozen: row.frozen || 0,
+      dormant: row.dormant || 0,
+      last_activity: row.last_activity || null,
+    };
     res.setHeader('Cache-Control', 'public, max-age=300');
-    return res.json(row);
+    return res.json(out);
   } catch (e) {
     return res.status(500).json({ error: 'db-error' });
   }
@@ -350,6 +545,70 @@ app.get('/api/wallet/:address', (req, res) => {
     return res.json({ address: addr, tokens: rows.map(r => r.id) });
   } catch (e) {
     return res.status(500).json({ error: 'db-error' });
+  }
+});
+
+// API: Wallet metadata
+app.get('/api/wallet/:address/meta', (req, res) => {
+  const addr = (req.params.address || '').toLowerCase();
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  try {
+    const meta = db.prepare('SELECT address, ens_name, ethos_score, ethos_credibility, social_verified, total_holdings, first_acquired, last_activity, trade_count, updated_at FROM wallet_metadata WHERE address=?').get(addr) || null;
+    const now = Math.floor(Date.now() / 1000);
+    const stale = !meta || !meta.updated_at || (Date.parse(meta.updated_at)/1000 < now - 7*24*3600);
+    if (stale) {
+      refreshEthos(addr).catch(()=>{});
+    }
+    if (meta) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.json(meta);
+    }
+    // compute lightweight fallback
+    const holdings = db.prepare('SELECT COUNT(1) c FROM tokens WHERE LOWER(owner)=?').get(addr).c;
+    const first = db.prepare('SELECT MIN(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t || null;
+    const last = db.prepare('SELECT MAX(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t || null;
+    const trades = db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).c;
+    return res.json({ address: addr, ens_name: null, ethos_score: null, ethos_credibility: null, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades });
+  } catch (e) {
+    return res.status(500).json({ error: 'db-error' });
+  }
+});
+
+async function refreshEthos(addr) {
+  const ETHOS_API = process.env.ETHOS_API || 'https://api.ethos.network';
+  const headers = { 'accept': 'application/json', 'X-Ethos-Client': 'mammoths-network/1.0' };
+  const [score, user] = await Promise.all([
+    fetch(`${ETHOS_API}/api/v2/score/address?address=${addr}`, { headers }).then(r => r.ok ? r.json() : null).catch(()=>null),
+    fetch(`${ETHOS_API}/api/v2/user/by/address/${addr}`, { headers }).then(r => r.ok ? r.json() : null).catch(()=>null),
+  ]);
+  const ens = user?.username || user?.displayName || null;
+  const sc = typeof score?.score === 'number' ? score.score : (typeof user?.score === 'number' ? user.score : null);
+  const level = (score?.level || '').toLowerCase();
+  const rank = ['untrusted','questionable','neutral','known','established','reputable','exemplary','distinguished','revered','renowned'].indexOf(level);
+  const cred = rank >= 0 ? rank : null;
+  const up = db.prepare(`
+    INSERT INTO wallet_metadata (address, ens_name, ethos_score, ethos_credibility, social_verified, total_holdings, first_acquired, last_activity, trade_count, updated_at)
+    VALUES (?, COALESCE(?, NULL), COALESCE(?, NULL), COALESCE(?, NULL), NULL,
+      (SELECT COUNT(1) FROM tokens WHERE LOWER(owner)=?),
+      (SELECT MIN(timestamp) FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?),
+      (SELECT MAX(timestamp) FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?),
+      (SELECT COUNT(1) FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?),
+      CURRENT_TIMESTAMP)
+    ON CONFLICT(address) DO UPDATE SET ens_name=COALESCE(excluded.ens_name, wallet_metadata.ens_name), ethos_score=COALESCE(excluded.ethos_score, wallet_metadata.ethos_score), ethos_credibility=COALESCE(excluded.ethos_credibility, wallet_metadata.ethos_credibility), total_holdings=excluded.total_holdings, first_acquired=excluded.first_acquired, last_activity=excluded.last_activity, trade_count=excluded.trade_count, updated_at=CURRENT_TIMESTAMP
+  `);
+  up.run(addr, ens, sc, cred, addr, addr, addr, addr, addr, addr, addr);
+}
+
+// Ethos profile proxy (v1 search + stats)
+app.get('/api/ethos/profile', async (req, res) => {
+  try {
+    const address = String(req.query.address || '').trim();
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) return res.status(400).json({ ok:false, error:'bad-address' });
+    const data = await getEthosForAddress(address);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ ok:false, error:'ethos-failed' });
   }
 });
 

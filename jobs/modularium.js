@@ -83,12 +83,32 @@ export async function fetchTransfers({ since, limit = 5000 } = {}) {
   ];
   const data = await tryJson(urls);
   const arr = Array.isArray(data) ? data : (data.items || data.events || []);
-  return arr.map(ev => ({
-    token_id: Number(ev.tokenId || ev.token_id || ev.id),
-    from: (ev.from || ev.from_address || ev.seller || null)?.toLowerCase?.() || null,
-    to: (ev.to || ev.to_address || ev.buyer || null)?.toLowerCase?.() || null,
-    timestamp: Number(ev.blockTime || ev.timestamp || ev.time || Date.parse(ev.time || 0)/1000) || null,
-  })).filter(x => x.token_id > 0);
+  return arr.map(ev => {
+    // best-effort price extraction (ETH)
+    let price = null;
+    const cand = [ev.price, ev.salePrice, ev.ethPrice, ev.amount, ev.value];
+    for (const c of cand) {
+      if (c == null) continue;
+      if (typeof c === 'number') { price = c; break; }
+      if (typeof c === 'string') {
+        const s = c.trim();
+        if (/^\d+(\.\d+)?$/.test(s)) { price = Number(s); break; }
+        // wei to ETH if big int
+        if (/^\d{15,}$/.test(s)) { price = Number(s) / 1e18; break; }
+      }
+    }
+    const tx_hash = ev.txHash || ev.transactionHash || ev.hash || null;
+    const event_type = ev.eventType || ev.type || null;
+    return {
+      token_id: Number(ev.tokenId || ev.token_id || ev.id),
+      from: (ev.from || ev.from_address || ev.seller || null)?.toLowerCase?.() || null,
+      to: (ev.to || ev.to_address || ev.buyer || null)?.toLowerCase?.() || null,
+      timestamp: Number(ev.blockTime || ev.timestamp || ev.time || Date.parse(ev.time || 0)/1000) || null,
+      price,
+      tx_hash,
+      event_type,
+    };
+  }).filter(x => x.token_id > 0);
 }
 
 // Attempt holders map via metadata fallback if no direct endpoint

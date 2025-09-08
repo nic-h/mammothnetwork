@@ -66,5 +66,43 @@ export function runMigrations(db) {
       payload TEXT,
       updated_at DATETIME
     );
+    CREATE TABLE IF NOT EXISTS wallet_metadata (
+      address TEXT PRIMARY KEY,
+      ens_name TEXT,
+      ethos_score REAL,
+      ethos_credibility REAL,
+      social_verified INTEGER,
+      links_profile TEXT,
+      links_x TEXT,
+      links_fc TEXT,
+      total_holdings INTEGER,
+      first_acquired INTEGER,
+      last_activity INTEGER,
+      trade_count INTEGER,
+      updated_at DATETIME
+    );
   `);
+
+  // Conditional column adds for transfers (price, tx_hash, event_type)
+  try {
+    const cols = db.prepare(`PRAGMA table_info(transfers)`).all().map(c => c.name);
+    const want = [
+      { name: 'price', ddl: 'ALTER TABLE transfers ADD COLUMN price REAL' },
+      { name: 'tx_hash', ddl: 'ALTER TABLE transfers ADD COLUMN tx_hash TEXT' },
+      { name: 'event_type', ddl: 'ALTER TABLE transfers ADD COLUMN event_type TEXT' },
+    ];
+    for (const c of want) if (!cols.includes(c.name)) db.exec(c.ddl);
+  } catch {}
+
+  // Conditional columns for wallet_metadata links/social
+  try {
+    const cols2 = db.prepare(`PRAGMA table_info(wallet_metadata)`).all().map(c => c.name);
+    const want2 = [
+      { name: 'links_profile', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN links_profile TEXT' },
+      { name: 'links_x', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN links_x TEXT' },
+      { name: 'links_fc', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN links_fc TEXT' },
+      { name: 'social_verified', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN social_verified INTEGER' },
+    ];
+    for (const c of want2) if (!cols2.includes(c.name)) db.exec(c.ddl);
+  } catch {}
 }

@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mammoths Network</title>
+    <!-- Remix Icon for minimal iconography -->
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet">
     <link rel="preconnect" href="/vendor/pixi.js" />
     <link rel="stylesheet" href="/style.css" />
   </head>
@@ -12,11 +14,27 @@
       <header class="bar">
         <div class="brand">Mammoths Network</div>
         <div class="controls">
+          <label>Preset
+            <select id="preset">
+              <option value="none">none</option>
+              <option value="ownership">Ownership Map</option>
+              <option value="trading">Trading Flow</option>
+              <option value="traits">Trait Clusters</option>
+              <option value="social">Social Core</option>
+              <option value="rarity">Rarity Galaxy</option>
+              <option value="activity">Activity Pulse</option>
+              <option value="hubs">Wallet Hubs</option>
+              <option value="whales">Whale Rings</option>
+              <option value="frozen">Fresh vs Frozen</option>
+              <option value="discovery">Discovery Seed</option>
+            </select>
+          </label>
           <label>Mode
             <select id="mode">
               <option value="holders">holders</option>
               <option value="transfers">transfers</option>
               <option value="traits">traits</option>
+              <option value="wallets">wallets</option>
             </select>
           </label>
           <label>Edges
@@ -25,10 +43,35 @@
           <label class="toggle">
             <input id="edges-toggle" type="checkbox" checked /> edges
           </label>
-          <button id="toggle-sim" class="ghost">pause</button>
-          <button id="reset" class="ghost">reset</button>
+          <label>Chart
+            <select id="chart">
+              <option value="none">none</option>
+              <option value="timeline">timeline</option>
+              <option value="heatmap">heatmap</option>
+            </select>
+          </label>
+          <button id="toggle-sim" class="ghost" title="Pause/Resume">
+            <i class="ri-pause-line"></i>
+          </button>
+          <button id="reset" class="ghost" title="Reset layout">
+            <i class="ri-refresh-line"></i>
+          </button>
+          <button id="zoom-out" class="ghost" title="Zoom out">
+            <i class="ri-zoom-out-line"></i>
+          </button>
+          <button id="zoom-in" class="ghost" title="Zoom in">
+            <i class="ri-zoom-in-line"></i>
+          </button>
+          <button id="fullscreen" class="ghost" title="Fullscreen">
+            <i class="ri-fullscreen-line"></i>
+          </button>
+          <button id="settings-btn" class="ghost" title="Settings">
+            <i class="ri-settings-3-line"></i>
+          </button>
           <input id="search" type="text" placeholder="token id or address" />
-          <button id="clear-search" class="ghost">clear</button>
+          <button id="clear-search" class="ghost" title="Clear search">
+            <i class="ri-close-line"></i>
+          </button>
         </div>
         <div class="stats">
           <span id="fps">fps: --</span>
@@ -37,7 +80,39 @@
         </div>
       </header>
       <div id="stage"></div>
+      <aside id="sidebar" class="sidebar" style="display:none;">
+        <div class="sb-header">
+          <div class="sb-title" id="sb-title">Details</div>
+          <button id="sb-close" class="ghost" title="Close"><i class="ri-close-line"></i></button>
+        </div>
+        <div class="sb-body">
+          <div class="row"><span class="k">ID</span><span class="v" id="sb-id">--</span></div>
+          <div class="row"><span class="k">Owner</span><span class="v" id="sb-owner">--</span></div>
+          <div class="row"><span class="k">ENS</span><span class="v" id="sb-ens">--</span></div>
+          <div class="row"><span class="k">Ethos</span><span class="v" id="sb-ethos">--</span></div>
+          <div class="row"><span class="k">Holdings</span><span class="v" id="sb-holdings">--</span></div>
+          <div class="row"><span class="k">Trades</span><span class="v" id="sb-trades">--</span></div>
+          <div class="row"><span class="k">Last Activity</span><span class="v" id="sb-last">--</span></div>
+          <div class="traits" id="sb-traits"></div>
+          <div class="thumb" id="sb-thumb"></div>
+          <section id="detail-ethos" class="card"></section>
+        </div>
+      </aside>
+      <canvas id="chart-canvas" class="chart-overlay"></canvas>
       <div id="tooltip" class="tooltip" style="display:none;"></div>
+      <div id="loading" class="loading" style="display:none;">loading…</div>
+      <div id="modal" class="modal" style="display:none;">
+        <div class="modal-inner">
+          <div class="modal-header">
+            <div>Settings</div>
+            <button id="modal-close" class="ghost"><i class="ri-close-line"></i></button>
+          </div>
+          <div class="modal-body">
+            <label class="toggle"><input id="toggle-grid" type="checkbox" checked> grid</label>
+            <label class="toggle"><input id="toggle-decimate" type="checkbox" checked> LOD decimation</label>
+          </div>
+        </div>
+      </div>
     </div>
     <script src="/lib/pixi.min.js"></script>
     <script type="module" src="/main.js"></script>

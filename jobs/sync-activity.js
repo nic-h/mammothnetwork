@@ -24,9 +24,17 @@ async function main() {
   }
   const nowSec = Math.floor(Date.now() / 1000);
   const limit = Number(process.env.MOD_LIMIT || 5000);
-  const batch = await fetchTransfers({ since, limit });
-  const ins = db.prepare('INSERT INTO transfers (token_id, from_addr, to_addr, timestamp) VALUES (?,?,?,?)');
-  const tx = db.transaction((arr) => { for (const t of arr) ins.run(t.token_id, t.from, t.to, t.timestamp || nowSec); });
+  const full = process.env.FULL === '1' || process.env.BACKFILL_ALL === '1';
+  const batch = await fetchTransfers({ since: full ? null : since, limit });
+  const ins = db.prepare('INSERT INTO transfers (token_id, from_addr, to_addr, timestamp, price, tx_hash, event_type) VALUES (?,?,?,?,?,?,?)');
+  const upd = db.prepare('UPDATE transfers SET price=COALESCE(?,price), tx_hash=COALESCE(?,tx_hash), event_type=COALESCE(?,event_type) WHERE token_id=? AND timestamp=?');
+  const tx = db.transaction((arr) => {
+    for (const t of arr) {
+      const ts = t.timestamp || nowSec;
+      const u = upd.run(t.price ?? null, t.tx_hash ?? null, t.event_type ?? null, t.token_id, ts);
+      if (u.changes === 0) ins.run(t.token_id, t.from, t.to, ts, t.price ?? null, t.tx_hash ?? null, t.event_type ?? null);
+    }
+  });
   tx(batch);
   fs.writeFileSync(path.join(ROOT, 'data', '.checkpoints', 'sync-activity.txt'), new Date().toISOString() + ` transfers+=${batch.length}\n`);
   fs.writeFileSync(sincePath, String(nowSec));

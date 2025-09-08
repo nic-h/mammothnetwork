@@ -19,12 +19,21 @@ let params = {
 let lastSend = 0;
 let timer = null;
 
+// Preset state
+let preset = 'none';
+let presetData = null; // owners, ownerIndex, ownerEthos, tokenLastActivity, tokenPrice, traitKeys, tokenTraitKey, rarity
+
+
 self.onmessage = (e) => {
   const { type, payload } = e.data;
   if (type === 'init') {
     init(payload);
   } else if (type === 'setGraph') {
     setGraph(payload);
+  } else if (type === 'setPreset') {
+    preset = payload?.preset || 'none';
+  } else if (type === 'setPresetData') {
+    presetData = payload || null;
   } else if (type === 'pause') {
     running = false;
   } else if (type === 'resume') {
@@ -137,6 +146,69 @@ function tick() {
     fx += -xi * centerK;
     fy += -yi * centerK;
 
+    // Preset forces (lightweight)
+    if (presetData) {
+      if (preset === 'ownership' || preset === 'hubs' || preset === 'whales' || preset === 'social') {
+        const ownerIdx = presetData.ownerIndex?.[i] ?? -1;
+        if (ownerIdx >= 0) {
+          const ang = (ownerIdx * 0.61803398875) % 1.0 * Math.PI * 2; // golden angle mapping
+          let rad = 600;
+          if (preset === 'whales') {
+            // map holdings via frequency of ownerIndex (not provided directly); approximate: cluster radius by index bucket
+            const band = (ownerIdx % 8);
+            rad = 300 + band * 60;
+          } else if (preset === 'social') {
+            const e = presetData.ownerEthos?.[ownerIdx] ?? 1000;
+            const eNorm = Math.max(0, Math.min(1, (e - 800) / 1200));
+            rad = 100 + (1 - eNorm) * 800; // higher ethos closer to core
+          }
+          const tx = Math.cos(ang) * rad;
+          const ty = Math.sin(ang) * rad;
+          fx += (tx - xi) * 0.0035;
+          fy += (ty - yi) * 0.0035;
+        }
+      } else if (preset === 'trading') {
+        // X = time, Y = price (or ethos fallback)
+        const t = presetData.tokenLastActivity?.[i] ?? 0;
+        const p = presetData.tokenPrice?.[i];
+        const e = presetData.ownerEthos?.[presetData.ownerIndex?.[i] ?? -1] ?? null;
+        // normalize t to [-800,800] using rough epoch bands
+        const tNorm = t ? (t % (3600*24*365)) / (3600*24*365) : 0;
+        const xTarget = -800 + tNorm * 1600;
+        const yVal = (p != null ? Math.min(1, Math.max(0, p / 10)) : (e != null ? Math.min(1, e / 2800) : 0.5));
+        const yTarget = 400 - yVal * 800;
+        fx += (xTarget - xi) * 0.004;
+        fy += (yTarget - yi) * 0.004;
+      } else if (preset === 'traits' || preset === 'rarity' || preset === 'frozen' || preset === 'activity' || preset === 'discovery') {
+        if (preset === 'traits') {
+          const key = presetData.tokenTraitKey?.[i] ?? -1;
+          if (key >= 0) {
+            const sectors = Math.max(1, presetData.traitKeys?.length || 1);
+            const ang = (key / sectors) * Math.PI * 2;
+            const tx = Math.cos(ang) * 700;
+            const ty = Math.sin(ang) * 700;
+            fx += (tx - xi) * 0.0035;
+            fy += (ty - yi) * 0.0035;
+          }
+        }
+        if (preset === 'rarity') {
+          const r = presetData.rarity?.[i] ?? 0.5;
+          const ang = (i * 0.1618) % 1.0 * Math.PI * 10; // spiral
+          const rad = 200 + r * 800;
+          const tx = Math.cos(ang) * rad;
+          const ty = Math.sin(ang) * rad;
+          fx += (tx - xi) * 0.0025;
+          fy += (ty - yi) * 0.0025;
+        }
+        if (preset === 'frozen') {
+          const t = presetData.tokenLastActivity?.[i] ?? 0;
+          const fresh = t && (Date.now()/1000 - t) < (30*24*3600);
+          const tx = fresh ? -500 : 500;
+          fx += (tx - xi) * 0.0035;
+        }
+      }
+    }
+
     // Integrate velocity (semi-implicit)
     velX[i] = (velX[i] + fx) * damp;
     velY[i] = (velY[i] + fy) * damp;
@@ -177,4 +249,3 @@ function tick() {
     self.postMessage({ type: 'tick', positions: { x: posX.slice(0), y: posY.slice(0) } }, []);
   }
 }
-

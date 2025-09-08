@@ -1,9 +1,10 @@
 export function createCircleTexture(app, diameter = 12, color = 0x00ff66) {
   const g = new PIXI.Graphics();
   const r = diameter / 2;
-  // PIXI v7 shape-first, then fill with object form
-  g.circle(r, r, r);
-  g.fill({ color });
+  // PIXI v7 Graphics API
+  g.beginFill(color);
+  g.drawCircle(r, r, r);
+  g.endFill();
   const texture = app.renderer.generateTexture(g, { resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR });
   g.destroy(true);
   return texture;
