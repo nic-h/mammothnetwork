@@ -1,0 +1,8 @@
+node_modules/
+.next/
+dist/
+out/
+*.DS_Store
+images/
+thumbnails/
+data/*.db

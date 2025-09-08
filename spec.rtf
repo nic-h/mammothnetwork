@@ -1,0 +1,550 @@
+{\rtf1\ansi\deff0\nouicompat{\fonttbl{\f0\fnil\fcharset0 Calibri;}{\f1\fnil Calibri;}{\f2\fnil\fcharset1 Cambria Math;}}
+{\*\generator Riched20 10.0.19041}{\*\mmathPr\mmathFont2\mwrapIndent1440 }\viewkind4\uc1 
+\pard\sa200\sl276\slmult1\f0\fs22\lang9 Mammoth Network \f1\emdash  README Spec\par
+\par
+A precise, Codex-proof spec for a local Mammoths viewer with fast APIs, strict UI, and extensible data viz. Keep the stack minimal. No framework swaps. No IPFS in the browser at runtime.\par
+\par
+1. Goal\par
+\par
+Cache all Mammoth metadata and images locally for speed and reliability.\par
+\par
+Serve a minimal API consumed by a single-page canvas UI.\par
+\par
+Provide multiple data-viz presets for owners, traits, rarity, and activity.\par
+\par
+Detail panel shows selected Mammoth image, owner, traits, and status.\par
+\par
+Future-ready hooks for inter-wallet connections and Ethos API reputation.\par
+\par
+2. Stack\par
+\par
+Runtime: Node 18+\par
+\par
+Server: Express single process\par
+\par
+Database: SQLite at data/mammoths.db using better-sqlite3\par
+\par
+UI: index.html + canvas rendering + vanilla JS\par
+\par
+Image pipeline: local full JPGs and 512px thumbnails\par
+\par
+External source: Modularium API for Forma chain data\par
+\par
+No Next.js. No React. No Pixi. No build steps.\par
+\par
+3. Directories\par
+\par
+data/\par
+\par
+mammoths.db\par
+\par
+images/ \f2\u8594?\f0  \{id\}.jpg full-size\par
+\par
+thumbnails/ \f2\u8594?\f0  \{id\}.jpg 512px width\par
+\par
+public/ \f2\u8594?\f0  static assets if needed\par
+\par
+Root files: server.js, fetch scripts, index.html\par
+\par
+4. Environment Variables\par
+PORT=3001\par
+DATA_DIR=./data\par
+CONTRACT_ADDRESS=0xbE25A97896b9CE164a314C70520A4df55979a0c6\par
+MOD_API=https://api.modularium.art\par
+IPFS_GATEWAY=https://cloudflare-ipfs.com/ipfs/\par
+DORMANT_DAYS=45\par
+P_LIMIT=10\par
+\par
+5. Database Schema\par
+\par
+Tables and purpose.\par
+\par
+tokens\par
+\par
+id INTEGER PRIMARY KEY\par
+\par
+name TEXT\par
+\par
+owner TEXT\par
+\par
+tokenURI TEXT (normalized HTTP to source asset, not used by UI)\par
+\par
+fullImage TEXT (/images/\{id\}.jpg)\par
+\par
+thumbImage TEXT (/thumbnails/\{id\}.jpg)\par
+\par
+frozen INTEGER 0 or 1\par
+\par
+dormant INTEGER 0 or 1\par
+\par
+lastActivity INTEGER unix ms\par
+\par
+attributes\par
+\par
+token_id INTEGER\par
+\par
+trait_type TEXT\par
+\par
+trait_value TEXT\par
+\par
+Primary Key (token_id, trait_type)\par
+\par
+collection_stats\par
+\par
+totalSupply INTEGER\par
+\par
+floorPrice REAL\par
+\par
+holders INTEGER\par
+\par
+updatedAt INTEGER\par
+\par
+Future: wallet_edges (owner to owner transfer graph)\par
+\par
+from_addr TEXT\par
+\par
+to_addr TEXT\par
+\par
+token_id INTEGER\par
+\par
+timestamp INTEGER\par
+\par
+Aggregate view later: wallet_edges_agg(from_addr, to_addr, count)\par
+\par
+6. Data Pipeline\par
+Status\par
+\par
+You are currently downloading all metadata and images locally. Good. Keep these rules in place:\par
+\par
+Normalize all ipfs:// to IPFS_GATEWAY HTTPS.\par
+\par
+Idempotent downloads. If file exists and size > 0, skip.\par
+\par
+Save images as /images/\{id\}.jpg and /thumbnails/\{id\}.jpg (512px).\par
+\par
+Store only local paths in DB for UI consumption. Never return IPFS to the browser.\par
+\par
+Frozen\par
+\par
+Set tokens.frozen from Modularium fields such as frozen, isFrozen, or status === "frozen" when available.\par
+\par
+If absent, default to 0.\par
+\par
+Dormant\par
+\par
+Compute from lastActivity.\par
+\par
+dormant = 1 when now - lastActivity > DORMANT_DAYS * 86400_000.\par
+\par
+If no activity known, leave lastActivity = null and treat as not dormant.\par
+\par
+Owners\par
+\par
+Fill tokens.owner from Modularium owner endpoint.\par
+\par
+Re-run owner fetch periodically to keep holders current.\par
+\par
+Stats\par
+\par
+Write collection_stats periodically with totalSupply, floorPrice, holders, updatedAt.\par
+\par
+7. API Contract\par
+\par
+All endpoints return JSON. Shapes must remain stable.\par
+\par
+GET /api/stats\par
+Returns \{ totalSupply, floorPrice, holders \}.\par
+\par
+GET /api/token-ids\par
+Returns [1,2,...].\par
+\par
+GET /api/token/:id\par
+Returns:\par
+\par
+\{\par
+  "id": 40,\par
+  "name": "Mammoth #40",\par
+  "owner": "0xabc...",\par
+  "fullImage": "/images/40.jpg",\par
+  "thumbImage": "/thumbnails/40.jpg",\par
+  "frozen": 0,\par
+  "dormant": 1,\par
+  "lastActivity": 1712345678000,\par
+  "attributes": [\par
+    \{"trait_type": "Hair", "trait_value": "MOP"\},\par
+    \{"trait_type": "Background", "trait_value": "Purple"\}\par
+  ]\par
+\}\par
+\par
+\par
+GET /api/tokens-batch?ids=1,2,3,...\par
+Returns compact array of token records with attributes array included.\par
+\par
+GET /api/traits\par
+Returns an array of trait aggregates:\par
+\par
+[\par
+  \{"trait_type":"Hair","trait_value":"MOP","count":123\},\par
+  \{"trait_type":"Hair","trait_value":"SPIKE","count":98\}\par
+]\par
+\par
+\par
+GET /api/ids-by-trait?type=Hair&value=MOP\par
+Returns [ids...] for fast filtering.\par
+\par
+GET /api/status-counts\par
+Returns \{ frozen, dormant, active, total \} where\par
+active = total - frozen - dormant (exclusive classification).\par
+\par
+Future: GET /api/wallet-edges?minCount=2\par
+Returns owner to owner edge list:\par
+\par
+[\par
+  \{"from":"0x111","to":"0x222","count":3\},\par
+  \{"from":"0x333","to":"0x111","count":1\}\par
+]\par
+\par
+8. UI Layout and Styling\par
+\par
+UI matches the Mammoths aesthetic. Consistency with Dash.\par
+\par
+Global tokens\par
+\par
+Use these across the UI.\par
+\par
+Colors\par
+\par
+Background: #0a0a0a\par
+\par
+Grid overlay: rgba(0,255,0,0.04)\par
+\par
+Panel background: #000\par
+\par
+Text: #0f0\par
+\par
+Text dim: rgba(0,255,0,0.6)\par
+\par
+Accent: #00ff66\par
+\par
+Outline: rgba(0,255,0,0.18)\par
+\par
+Frozen stroke: blue\par
+\par
+Dormant stroke: purple\par
+\par
+Typography\par
+\par
+Font: Fira Code, fallback Menlo, SFMono-Regular\par
+\par
+--fs-xxs: 10px list rows\par
+\par
+--fs-xs: 12px labels and counts\par
+\par
+--fs-sm: 13px buttons\par
+\par
+--fs-base: 14px body\par
+\par
+--fs-lg: 16px section titles\par
+\par
+--fs-xl: 20px token name\par
+\par
+Spacing and shape\par
+\par
+--pad-1: 6px\par
+\par
+--pad-2: 10px\par
+\par
+--radius: 3px\par
+\par
+Layout regions\par
+\par
+Top bar: right-aligned counters SUPPLY / FLOOR / HOLDERS / LOADED in small caps.\par
+\par
+Left sidebar: fixed 280px. Search, filters, trait buckets, presets, toggles.\par
+\par
+Center: full-bleed canvas with a subtle dark green vignette.\par
+\par
+Right panel: fixed 360px. Scroll. Contains detail card and attribute list.\par
+\par
+Detail panel content\par
+\par
+On node click, open or update the right panel with:\par
+\par
+Large local image using fullImage.\par
+\par
+Title name and ID.\par
+\par
+Owner address (truncate middle) with copy control.\par
+\par
+Status chips\par
+\par
+Frozen if frozen = 1\par
+\par
+Dormant if dormant = 1\par
+\par
+Key traits list\par
+\par
+Show trait_type: trait_value\par
+\par
+Order primary traits first if known (Background, Hair, Eyes, etc)\par
+\par
+Quick actions\par
+\par
+View in explorer link (open new tab).\par
+\par
+View history link (future activity timeline).\par
+\par
+9. Controls and Presets\par
+Presets dropdown\par
+\par
+Applies a set of layout, node size, coloring, and edges.\par
+\par
+Ownership Map\par
+\par
+Layout: Owner clusters\par
+\par
+Node size: by wallet holdings\par
+\par
+Edges: token \f2\u8594?\f0  owner centroid\par
+\par
+Trait Universe\par
+\par
+Layout: Force\par
+\par
+Color: by selected trait type bucket\par
+\par
+Edges: trait chain edges on\par
+\par
+Edge cap slider active\par
+\par
+Rarity Spotlight\par
+\par
+Layout: Grid\par
+\par
+Node size: by rarity score\par
+\par
+Dim common nodes\par
+\par
+Activity Timeline\par
+\par
+Layout: Force\par
+\par
+Color gradient by lastActivity\par
+\par
+Dormant outlined purple\par
+\par
+Frozen Watchlist\par
+\par
+Layout: Force\par
+\par
+Filter: only frozen\par
+\par
+Nodes outlined blue\par
+\par
+Toggles and inputs\par
+\par
+Layout: Force, Owner clusters, Grid\par
+\par
+Node size: Fixed, Owner degree, Rarity\par
+\par
+Edge mode: Off, Owner edges, Trait chain\par
+\par
+Edge cap slider: 0 to 2000 (default 500)\par
+\par
+Status filter: All, Active, Frozen, Dormant\par
+\par
+Search: by token ID or owner address\par
+\par
+Show frozen highlight: checkbox (blue stroke)\par
+\par
+Show dormant highlight: checkbox (purple stroke)\par
+\par
+Progressive load: show loaded count and \ldblquote Load more\rdblquote  button\par
+\par
+Reset view: resets pan and zoom\par
+\par
+10. Rendering rules\par
+\par
+Nodes: default fill #00ff66.\par
+\par
+Edges: stroke rgba(0,255,0,0.18).\par
+\par
+Hover: brighter stroke and label tooltip.\par
+\par
+Selected node: thicker outline and right panel update.\par
+\par
+Frozen node: add 1\f1\endash 2 px blue halo when highlight is enabled.\par
+\par
+Dormant node: add 1\endash 2 px purple halo when highlight is enabled.\par
+\par
+Draw order: edges first, then nodes, then outlines/highlights, then labels.\par
+\par
+Frame budget: cap at 60fps, only animate when simulation runs or interaction occurs.\par
+\par
+Debounce reflows on filter changes.\par
+\par
+11. Performance\par
+\par
+Progressive loading\par
+\par
+Initial fetch of 60 token IDs\par
+\par
+Batch fetch of 240 at a time via /api/tokens-batch\par
+\par
+Concurrency on fetch scripts controlled by P_LIMIT\par
+\par
+Static file serving for images with long cache headers\par
+\par
+Canvas redraw only on state changes\par
+\par
+12. Inter-wallet Connections (future)\par
+\par
+Core steps without implementing now:\par
+\par
+Add wallet_edges table and backfill from Modularium transfer events.\par
+\par
+Expose GET /api/wallet-edges?minCount=2 returning aggregated edges.\par
+\par
+Add a Wallet View preset: owners as nodes, tokens hidden, edges weighted by count.\par
+\par
+Node size in Wallet View: number of Mammoths currently held.\par
+\par
+Optional direction arrows A to B.\par
+\par
+Optional time filter to show edges in a given window.\par
+\par
+13. Ethos API Integration (future)\par
+\par
+Purpose: augment owners with basic reputation data without changing the core stack.\par
+\par
+Plan:\par
+\par
+Do not call Ethos from the browser. Integrate server-side with a daily or weekly job.\par
+\par
+Create table owner_reputation\par
+\par
+address TEXT PRIMARY KEY\par
+\par
+score REAL (0 to 1)\par
+\par
+labels TEXT (CSV or JSON of tags)\par
+\par
+updatedAt INTEGER\par
+\par
+Server job\par
+\par
+For top N owners by holdings, request Ethos summary.\par
+\par
+Rate limit and cache.\par
+\par
+Store a normalized score and tag list in owner_reputation.\par
+\par
+API extension\par
+\par
+GET /api/owner/:address \f2\u8594?\f0  owner stats including score and labels if present.\par
+\par
+Do not block core UI on Ethos data.\par
+\par
+UI hooks\par
+\par
+Owner tooltip can show a small badge with score.\par
+\par
+Optional filter by min score.\par
+\par
+Keep default off until data is present.\par
+\par
+Privacy and false positives\par
+\par
+Mark Ethos data as third-party heuristics.\par
+\par
+Provide a small disclaimer in the owner detail drawer.\par
+\par
+14. Acceptance Checklist\par
+\par
+Data\par
+\par
+All tokens have local fullImage and thumbImage paths.\par
+\par
+No ipfs:// or external gateways requested by the browser at runtime.\par
+\par
+frozen and dormant set correctly.\par
+\par
+traits counts match left panel totals.\par
+\par
+API\par
+\par
+Endpoints respond within 100 ms for small payloads.\par
+\par
+Batch endpoint returns arrays in the same order as requested.\par
+\par
+status-counts sums are consistent with filters.\par
+\par
+UI\par
+\par
+Presets switch layout, sizing, coloring, and edges as spec.\par
+\par
+Detail panel shows image, owner, status pills, trait list.\par
+\par
+Frozen outline toggle renders blue halos.\par
+\par
+Dormant outline toggle renders purple halos.\par
+\par
+Progressive load increases LOADED count correctly.\par
+\par
+Reset view returns to centered zoom 1.\par
+\par
+Performance\par
+\par
+Initial render under 1.5 s with first 60 tokens cached.\par
+\par
+Smooth panning and zooming on a mid-range GPU.\par
+\par
+No memory leaks on repeated load-more cycles.\par
+\par
+15. Troubleshooting\par
+\par
+Empty graph\par
+\par
+Run fetch scripts in order: init DB, fetch-all metadata, fetch owners, mark dormant.\par
+\par
+Confirm thumbnails exist and are non-zero size.\par
+\par
+Traits list empty\par
+\par
+Check that attributes were upserted.\par
+\par
+Verify /api/traits returns non-empty array.\par
+\par
+Images missing\par
+\par
+Ensure IPFS_GATEWAY is reachable during fetch.\par
+\par
+Re-run fetch-all for missing IDs.\par
+\par
+Frozen not showing\par
+\par
+Confirm Modularium payload exposes frozen flag for sampled IDs.\par
+\par
+If missing, leave as 0, do not infer.\par
+\par
+16. Roadmap\par
+\par
+Phase 1\par
+\par
+Lock data pipeline and UI parity with screenshots.\par
+\par
+Ship all presets and status highlights.\par
+\par
+Phase 2\par
+\par
+Inter-wallet graph with basic edge aggregation.\par
+\par
+Optional timeline filter.\par
+\par
+Phase 3\par
+\par
+Ethos reputation hydration for top owners.\par
+\par
+Optional filters and badges in owner views.\lang9\par
+}
+ 
