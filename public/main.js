@@ -131,6 +131,9 @@ const walletMetaCache = new Map();
 let presetData = null;
 let preset = 'none';
 let chartMode = 'none';
+let selectedIndex = -1;
+const selectedLayer = new PIXI.Graphics();
+world.addChild(selectedLayer);
 
 function setupWorker(count, edges) {
   if (worker) worker.terminate();
@@ -156,6 +159,14 @@ function applyPositions(px, py) {
   // redraw edges if edge count is small
   if (edgesData.length && edgesData.length <= 500) {
     drawEdges(px, py);
+  }
+  // draw selection ring
+  selectedLayer.clear();
+  if (selectedIndex >= 0 && selectedIndex < sprites.length) {
+    const sx = px[selectedIndex];
+    const sy = py[selectedIndex];
+    selectedLayer.lineStyle(2, 0x00ff66, 0.9);
+    selectedLayer.drawCircle(sx, sy, 12);
   }
   frames++;
 }
@@ -292,6 +303,7 @@ app.view.addEventListener('click', async (e) => {
     if (d2 < bestD2) { bestD2 = d2; best = i; }
   }
   if (best >= 0) {
+    selectedIndex = best;
     showDetails(best + 1);
   }
 });
