@@ -735,5 +735,36 @@ function applyFocus(){
   }
 }
 
-// Boot
-window.addEventListener('load', init);
+// Robust PIXI bootstrap
+function loadScript(src){
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script'); s.src = src; s.onload = resolve; s.onerror = ()=>reject(new Error('failed '+src)); document.head.appendChild(s);
+  });
+}
+
+async function ensurePixi(){
+  if (typeof window !== 'undefined' && typeof window.PIXI !== 'undefined') return;
+  const tries = [
+    '/lib/pixi.min.js',
+    '/lib/pixi.js',
+    '/lib/browser/pixi.js',
+    'https://cdn.jsdelivr.net/npm/pixi.js@7.4.0/dist/pixi.min.js'
+  ];
+  for (const u of tries){
+    try { await loadScript(u); if (typeof window.PIXI !== 'undefined') return; } catch {}
+  }
+  throw new Error('PIXI failed to load from all sources');
+}
+
+function showFatal(err){
+  console.error('Init failed:', err);
+  const el = document.createElement('div');
+  el.style.cssText = 'color:#f55;padding:16px;font:12px monospace;background:#111;border-bottom:1px solid #300';
+  el.innerHTML = `<b>Failed to initialize</b><br>${(err&&err.message)||err}`;
+  document.body.prepend(el);
+}
+
+window.addEventListener('load', async ()=>{
+  try { await ensurePixi(); await init(); }
+  catch(e){ showFatal(e); }
+});
