@@ -29,6 +29,7 @@ let highlightSet = null; // Set of ids currently highlighted by filter
 // Utils
 const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
 function lerp(a,b,t){ return a + (b-a)*t; }
+function throttle(fn, ms){ let last=0; let t=null; return function(...args){ const now=Date.now(); const run=()=>{ last=now; t=null; fn.apply(this,args); }; if (now-last>=ms){ if (t){ clearTimeout(t); t=null; } run(); } else if (!t){ t=setTimeout(run, ms-(now-last)); } }; }
 function makeCircleTexture(renderer, r=4, color=0x00ff66){
   const g = new PIXI.Graphics();
   g.lineStyle(1, color, 1.0).beginFill(color, 0.85).drawCircle(r, r, r).endFill();
@@ -88,6 +89,23 @@ async function init() {
     }
   });
 
+  // Hover feedback
+  stageEl.style.cursor = 'move';
+  stageEl.addEventListener('mousemove', throttle((e)=>{
+    if (!sprites.length) return;
+    const rect = stageEl.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const scale = world.scale.x || 1;
+    const wx = (sx - world.position.x) / scale;
+    const wy = (sy - world.position.y) / scale;
+    let best=-1, bestD2=Infinity;
+    for(let i=0;i<sprites.length;i++){
+      const s=sprites[i]; const dx=s.x-wx, dy=s.y-wy; const d2=dx*dx+dy*dy; if (d2<bestD2){bestD2=d2; best=i;}
+    }
+    for(let i=0;i<sprites.length;i++){ if (i!==selectedIndex) sprites[i].scale.set(1,1); }
+    if (best>=0 && bestD2 < (10/scale)*(10/scale)) { sprites[best].scale.set(1.2,1.2); stageEl.style.cursor='pointer'; } else { stageEl.style.cursor='move'; }
+  }, 60));
+
   // Presets
   setupPresets();
   // Default view: OWNERSHIP
@@ -103,8 +121,6 @@ async function init() {
 async function load(mode, edges){
   const data = await fetchGraph(mode, edges).catch(()=> lastGraph || {nodes:[],edges:[]});
   nodes = data.nodes||[]; edgesData = data.edges||[];
-  if (nodeCountEl) nodeCountEl.textContent = String(nodes.length);
-  if (edgeCountEl) edgeCountEl.textContent = String(edgesData.length||0);
   buildSprites(nodes.map(n=>n.color||0x00ff66));
   // No physics: static grid layout
   layoutGrid();
@@ -152,7 +168,8 @@ function buildSprites(colors){
 function layoutGrid(){
   const n = sprites.length; if (!n) return;
   const cols = Math.ceil(Math.sqrt(n));
-  const gap = 12; // px
+  const maxDim = Math.max(200, Math.min(app.renderer.width, app.renderer.height) - 160);
+  const gap = Math.max(8, Math.min(20, maxDim/cols));
   const rows = Math.ceil(n / cols);
   // compute total size to center
   const w = (cols-1)*gap;
