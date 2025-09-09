@@ -7,6 +7,7 @@
     <!-- Remix Icon for minimal iconography -->
     <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet">
     <link rel="preconnect" href="/vendor/pixi.js" />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
@@ -121,7 +122,7 @@
         </div>
       </aside>
       <div id="stage"></div>
-      <aside id="sidebar" class="sidebar" style="display:none;">
+      <aside id="sidebar" class="sidebar">
         <div class="sb-header">
           <div class="sb-title" id="sb-title">Details</div>
           <button id="sb-close" class="ghost" title="Close"><i class="ri-close-line"></i></button>
@@ -147,6 +148,10 @@
       <div id="tooltip" class="tooltip" style="display:none;"></div>
       <div id="toast" class="toast" style="display:none;"></div>
       <div id="loading" class="loading" style="display:none;">loading…</div>
+      <div id="loading-bar" class="loading-bar">
+        <div class="loading-fill"></div>
+        <span class="loading-text">Loading…</span>
+      </div>
       <div id="modal" class="modal" style="display:none;">
         <div class="modal-inner">
           <div class="modal-header">

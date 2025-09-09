@@ -160,16 +160,37 @@ let dormantActive = false;
 
 function setupWorker(count, edges) {
   if (worker) worker.terminate();
-  worker = new Worker('/sim.worker.js', { type: 'module' });
-  worker.onmessage = (e) => {
-    const { type, positions } = e.data;
-    if (type === 'tick' && positions) {
-      applyPositions(positions.x, positions.y);
+  workerTicked = false;
+  try {
+    worker = new Worker('/sim.worker.js', { type: 'module' });
+  } catch {
+    try { worker = new Worker('/sim.worker.js'); } catch { worker = null; }
+  }
+  if (worker) {
+    worker.onmessage = (e) => {
+      const { type, positions } = e.data;
+      if (type === 'tick' && positions) {
+        workerTicked = true;
+        applyPositions(positions.x, positions.y);
+      }
+    };
+    worker.postMessage({ type: 'init', payload: { nodes: count, edges } });
+    if (presetData) worker.postMessage({ type: 'setPresetData', payload: presetData });
+    if (preset) worker.postMessage({ type: 'setPreset', payload: { preset } });
+  }
+  // First-frame fallback if worker hasn’t ticked
+  setTimeout(() => {
+    if (!workerTicked) {
+      const px = new Float32Array(count);
+      const py = new Float32Array(count);
+      for (let i=0;i<count;i++){
+        const a = i * 0.005, r = 50 + (i%200) * 2;
+        px[i] = Math.cos(a)*r; py[i] = Math.sin(a)*r;
+      }
+      applyPositions(px, py);
+      showToast('Worker slow — showing first frame');
     }
-  };
-  worker.postMessage({ type: 'init', payload: { nodes: count, edges } });
-  if (presetData) worker.postMessage({ type: 'setPresetData', payload: presetData });
-  if (preset) worker.postMessage({ type: 'setPreset', payload: { preset } });
+  }, 800);
 }
 
 function applyPositions(px, py) {
@@ -221,16 +242,18 @@ function createGraph(n, colors) {
 async function fetchGraph(mode, edges) {
   const q = new URLSearchParams({ mode, edges: String(edges), nodes: '10000' });
   const t0 = performance.now();
-  const res = await fetch(`/api/graph?${q.toString()}`, { cache: 'no-store' });
-  const data = await res.json();
+  const res = await fetch(`/api/graph?${q.toString()}`, { cache: 'no-store' }).catch(()=>null);
+  if (!res || !res.ok) { showToast('Graph fetch failed'); throw new Error('graph fetch failed'); }
+  const data = await res.json().catch(()=>({ nodes:[], edges:[], meta:{} }));
   const t1 = performance.now();
   console.log(`Graph fetched in ${Math.round(t1 - t0)}ms`, data.meta);
   return data;
 }
 
 async function load(mode, edges) {
+  showLoadingBar('Loading graph…');
   loadingEl.style.display = 'block';
-  const data = await fetchGraph(mode, edges);
+  const data = await fetchGraph(mode, edges).catch((e)=>{ console.warn(e); return { nodes:[], edges:[], meta:{} }; });
   nodes = data.nodes;
   nodeCountEl.textContent = `nodes: ${nodes.length}`;
   edgeCountEl.textContent = `edges: ${data.edges.length}`;
@@ -241,15 +264,20 @@ async function load(mode, edges) {
   edgesLayer.visible = edgesVisible;
   setupWorker(nodes.length, data.edges);
   loadingEl.style.display = 'none';
+  hideLoadingBar();
   // lazy-load traits list for left panel
   if (!allTraits) {
     try {
-      const t = await fetch('/api/traits').then(r=>r.json());
+      const r = await fetch('/api/traits').catch(()=>null);
+      if (!r || !r.ok) throw new Error('traits fetch failed');
+      const t = await r.json();
       allTraits = t.traits || [];
       traitTypeEl.innerHTML = '<option value="">(select)</option>' + allTraits.map(x=>`<option value="${x.type}">${x.type}</option>`).join('');
       traitValueEl.innerHTML = '<option value="">(value)</option>';
       renderTraitList();
-    } catch {}
+    } catch { showToast('Traits unavailable');
+      traitTypeEl.innerHTML = '<option value="">(none)</option>';
+      traitValueEl.innerHTML = '<option value="">(none)</option>'; }
   }
 }
 
