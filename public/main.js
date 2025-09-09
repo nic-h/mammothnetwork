@@ -30,7 +30,7 @@ let highlightSet = null; // Set of ids currently highlighted by filter
 const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
 function lerp(a,b,t){ return a + (b-a)*t; }
 function throttle(fn, ms){ let last=0; let t=null; return function(...args){ const now=Date.now(); const run=()=>{ last=now; t=null; fn.apply(this,args); }; if (now-last>=ms){ if (t){ clearTimeout(t); t=null; } run(); } else if (!t){ t=setTimeout(run, ms-(now-last)); } }; }
-function makeCircleTexture(renderer, r=4, color=0x00ff66){
+function makeCircleTexture(renderer, r=5, color=0x00ff66){
   const g = new PIXI.Graphics();
   g.lineStyle(1, color, 1.0).beginFill(color, 0.85).drawCircle(r, r, r).endFill();
   const t = renderer.generateTexture(g);
@@ -694,7 +694,13 @@ let selectedIndex = -1;
 let selectedWalletSet = null;
 
 function resetAlpha(){ for (let i=0;i<sprites.length;i++) sprites[i].alpha = 0.95; }
-function resetView(){ world.scale.set(1,1); world.position.set(0,0); }
+function resetView(){
+  const s = 1.2; // slightly zoomed-in default for visibility
+  world.scale.set(s);
+  // keep the world center anchored to screen center when scaling
+  const cx = app.renderer.width/2, cy = app.renderer.height/2;
+  world.position.set((1-s)*cx, (1-s)*cy);
+}
 
 function fitToVisible(){
   const pad = 40;
