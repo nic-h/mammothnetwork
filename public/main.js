@@ -1,5 +1,5 @@
 import { createCircleTexture, createParticleContainer } from './pixi-layer.js';
-import { throttle, screenToWorld, clamp } from './utils.js';
+import { throttle, clamp } from './utils.js';
 
 const stageEl = document.getElementById('stage');
 const modeEl = document.getElementById('mode');
@@ -11,6 +11,21 @@ const edgeCountEl = document.getElementById('edge-count');
 const presetEl = document.getElementById('preset');
 const chartEl = document.getElementById('chart');
 const chartCanvas = document.getElementById('chart-canvas');
+const toastEl = document.getElementById('toast');
+const legendEl = document.getElementById('legend');
+const filterTraitsBtn = document.getElementById('filter-traits');
+// Left sidebar filter elements
+const traitTypeEl = document.getElementById('trait-type');
+const traitValueEl = document.getElementById('trait-value');
+const applyTraitBtn = document.getElementById('apply-trait');
+const clearTraitBtn = document.getElementById('clear-trait');
+const filterHighEthosEl = document.getElementById('filter-high-ethos');
+const filterFrozenEl = document.getElementById('filter-frozen');
+const filterDormantEl = document.getElementById('filter-dormant');
+const presetsQuickEl = document.getElementById('presets-quick');
+const traitSearchEl = document.getElementById('trait-search');
+const traitListEl = document.getElementById('trait-list');
+const matchCountEl = document.getElementById('match-count');
 const toggleSimBtn = document.getElementById('toggle-sim');
 const resetBtn = document.getElementById('reset');
 const zoomInBtn = document.getElementById('zoom-in');
@@ -38,6 +53,9 @@ const sbTrades = document.getElementById('sb-trades');
 const sbLast = document.getElementById('sb-last');
 const sbTraits = document.getElementById('sb-traits');
 const sbThumb = document.getElementById('sb-thumb');
+const sbConn = document.getElementById('sb-connections');
+const sbHist = document.getElementById('sb-history');
+const sbSim = document.getElementById('sb-similar');
 
 // PIXI v7: construct with options, append app.view. Also provide mobile fallback.
 const appRoot = document.getElementById('app');
@@ -134,6 +152,11 @@ let chartMode = 'none';
 let selectedIndex = -1;
 const selectedLayer = new PIXI.Graphics();
 world.addChild(selectedLayer);
+let allTraits = null;
+let traitFilterIds = null; // Set of ids matching selected trait
+let highEthosActive = false;
+let frozenActive = false;
+let dormantActive = false;
 
 function setupWorker(count, edges) {
   if (worker) worker.terminate();
@@ -218,6 +241,16 @@ async function load(mode, edges) {
   edgesLayer.visible = edgesVisible;
   setupWorker(nodes.length, data.edges);
   loadingEl.style.display = 'none';
+  // lazy-load traits list for left panel
+  if (!allTraits) {
+    try {
+      const t = await fetch('/api/traits').then(r=>r.json());
+      allTraits = t.traits || [];
+      traitTypeEl.innerHTML = '<option value="">(select)</option>' + allTraits.map(x=>`<option value="${x.type}">${x.type}</option>`).join('');
+      traitValueEl.innerHTML = '<option value="">(value)</option>';
+      renderTraitList();
+    } catch {}
+  }
 }
 
 // Pan/zoom interactions
@@ -308,6 +341,21 @@ app.view.addEventListener('click', async (e) => {
   }
 });
 
+// Double click to isolate network
+app.view.addEventListener('dblclick', (e) => {
+  if (selectedIndex >= 0) {
+    const id = selectedIndex + 1;
+    isolateNodeNetwork(id);
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (selectedIndex < 0) return;
+  if (e.key === 'f') centerOnNode(selectedIndex);
+  else if (e.key === 'c') toggleConnectionView();
+  else if (e.key === 'Escape') clearSelection();
+});
+
 sbClose?.addEventListener('click', () => { sidebar.style.display = 'none'; });
 
 async function showDetails(id) {
@@ -370,6 +418,35 @@ async function showDetails(id) {
           }
         }
       } catch {}
+
+      // connections (neighbors) and stats
+      const connected = getConnections(id);
+      sbConn.innerHTML = `<div class="row"><b>Connected To</b></div>` +
+        `<div>${connected.list.slice(0,20).map(n=>`<a href="#" data-id="${n}">#${n}</a>`).join(' ')}</div>` +
+        `<div class="row">${connected.count} connections</div>`;
+      sbConn.querySelectorAll('a[data-id]')?.forEach(a => a.addEventListener('click', (ev)=>{ ev.preventDefault(); const nid = Number(a.dataset.id); selectedIndex = nid-1; showDetails(nid); centerOnNode(nid-1); }));
+
+      // history (transfers with price)
+      try {
+        const h = await fetch(`/api/token/${id}/transfers`).then(r=>r.json());
+        const rows = (h.transfers||[]).slice(0,20);
+        sbHist.innerHTML = `<div class="row"><b>Trading History</b></div>` + rows.map(r=>{
+          const d = r.timestamp ? new Date(r.timestamp*1000).toLocaleDateString() : '';
+          const p = (r.price!=null) ? `${Number(r.price).toFixed(2)}Ξ` : '';
+          const f = r.from_addr ? r.from_addr.slice(0,6)+'…'+r.from_addr.slice(-4) : '';
+          const tto = r.to_addr ? r.to_addr.slice(0,6)+'…'+r.to_addr.slice(-4) : '';
+          return `<div class="row"><span>${d}</span><span>${p}</span><span>${f} → ${tto}</span></div>`;
+        }).join('');
+      } catch {}
+
+      // similar tokens (by rare trait)
+      try {
+        const s = await fetch(`/api/token/${id}/similar`).then(r=>r.json());
+        const sims = (s.similar||[]).slice(0,20);
+        sbSim.innerHTML = `<div class="row"><b>Similar Tokens</b></div>` +
+          `<div>${sims.map(n=>`<a href="#" data-id="${n}">#${n}</a>`).join(' ')}</div>`;
+        sbSim.querySelectorAll('a[data-id]')?.forEach(a => a.addEventListener('click', (ev)=>{ ev.preventDefault(); const nid = Number(a.dataset.id); selectedIndex = nid-1; showDetails(nid); centerOnNode(nid-1); }));
+      } catch {}
     }
     sbEns.textContent = ens || '--';
     sbEthos.textContent = ethos != null ? String(ethos) : '--';
@@ -381,6 +458,59 @@ async function showDetails(id) {
     console.warn('detail load failed', e);
   }
 }
+
+function getNodeAt(clientX, clientY) {
+  const pt = world.toLocal({ x: clientX, y: clientY });
+  const r2 = (14 / zoom) * (14 / zoom);
+  let best=-1,bestD2=r2;
+  for (let i=0;i<sprites.length;i++){
+    const s=sprites[i]; const dx=s.x-pt.x, dy=s.y-pt.y; const d2=dx*dx+dy*dy;
+    if (d2<bestD2){bestD2=d2; best=i;}
+  }
+  return best;
+}
+
+function getConnections(nodeId) {
+  const connected = new Set();
+  let count = 0;
+  for (let k=0;k<edgesData.length;k++){
+    const [a,b] = edgesData[k];
+    if (a===nodeId) { connected.add(b); count++; }
+    else if (b===nodeId) { connected.add(a); count++; }
+  }
+  return { list: Array.from(connected), count };
+}
+
+function drawConnectedEdges(nodeId, connected) {
+  edgesLayer.clear();
+  edgesLayer.alpha = 0.9;
+  edgesLayer.stroke({ width: 2, color: 0x00ffaa, alpha: 0.9 });
+  for (let k=0;k<edgesData.length;k++){
+    const [a,b,w] = edgesData[k];
+    if (a!==nodeId && b!==nodeId) continue;
+    const i=a-1, j=b-1;
+    if (i<0||j<0||i>=sprites.length||j>=sprites.length) continue;
+    const x1=sprites[i].x, y1=sprites[i].y, x2=sprites[j].x, y2=sprites[j].y;
+    edgesLayer.moveTo(x1,y1).lineTo(x2,y2);
+  }
+}
+
+function showConnections(nodeId) {
+  const conn = getConnections(nodeId);
+  for (let i=0;i<sprites.length;i++){
+    const id=i+1;
+    if (id===nodeId) { sprites[i].alpha=1.0; sprites[i].scale.set(0.8); }
+    else if (conn.list.includes(id)) { sprites[i].alpha=0.9; sprites[i].tint=0x00ffaa; }
+    else { sprites[i].alpha=0.1; }
+  }
+  drawConnectedEdges(nodeId, new Set(conn.list));
+  centerOnNode(nodeId-1);
+}
+
+let connectionView=false;
+function isolateNodeNetwork(nodeId){ connectionView=true; showConnections(nodeId); }
+function toggleConnectionView(){ connectionView=!connectionView; if (!connectionView){ applyPresetColors(); updateFilterVisuals(); } else if (selectedIndex>=0) showConnections(selectedIndex+1); }
+function clearSelection(){ selectedIndex=-1; connectionView=false; applyPresetColors(); updateFilterVisuals(); }
 
 // Pointer (touch) support
 let activePointers = new Map();
@@ -457,6 +587,232 @@ edgesToggleEl.addEventListener('change', () => {
   edgesLayer.visible = edgesVisible;
 });
 
+// Left panel: trait filters
+traitTypeEl?.addEventListener('change', () => {
+  const t = traitTypeEl.value;
+  const entry = (allTraits || []).find(x=>x.type===t);
+  traitValueEl.innerHTML = '<option value="">(value)</option>' + (entry ? entry.values.map(v=>`<option value="${v.value}">${v.value} (${v.count})</option>`).join('') : '');
+});
+applyTraitBtn?.addEventListener('click', async () => {
+  const type = traitTypeEl.value; const value = traitValueEl.value;
+  if (!type || !value) return;
+  try {
+    const r = await fetch(`/api/trait-tokens?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`).then(r=>r.json());
+    const ids = new Set((r.tokens || []).map(Number));
+    traitFilterIds = ids;
+    applyCombinedFilters();
+  } catch {}
+});
+clearTraitBtn?.addEventListener('click', () => {
+  traitFilterIds = null; highEthosActive = false; filterHighEthosEl.checked = false; clearFilter();
+});
+filterHighEthosEl?.addEventListener('change', () => {
+  highEthosActive = !!filterHighEthosEl.checked;
+  applyCombinedFilters();
+});
+filterFrozenEl?.addEventListener('change', () => { frozenActive = !!filterFrozenEl.checked; applyCombinedFilters(); });
+filterDormantEl?.addEventListener('change', () => { dormantActive = !!filterDormantEl.checked; applyCombinedFilters(); });
+presetsQuickEl?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.chip');
+  if (!btn) return;
+  preset = btn.dataset.preset;
+  presetEl.value = preset;
+  worker?.postMessage({ type: 'setPreset', payload: { preset } });
+});
+traitSearchEl?.addEventListener('input', () => renderTraitList());
+
+function renderTraitList() {
+  const q = (traitSearchEl.value || '').toLowerCase();
+  const list = (allTraits || []).filter(t => t.type.toLowerCase().includes(q) || (t.values||[]).some(v => String(v.value).toLowerCase().includes(q)));
+  traitListEl.innerHTML = list.map(t => `
+    <div class="t">
+      <div class="h">${t.type}</div>
+      <div class="vals">${(t.values||[]).slice(0,50).map(v=>`<span class="v" data-type="${t.type}" data-value="${v.value}">${v.value} (${v.count})</span>`).join('')}</div>
+    </div>
+  `).join('');
+}
+
+traitListEl?.addEventListener('click', async (e) => {
+  const el = e.target.closest('.v');
+  if (!el) return;
+  const type = el.dataset.type; const value = el.dataset.value;
+  try {
+    const r = await fetch(`/api/trait-tokens?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`).then(r=>r.json());
+    const ids = new Set((r.tokens || []).map(Number));
+    traitFilterIds = ids;
+    applyCombinedFilters();
+  } catch {}
+});
+
+function applyCombinedFilters() {
+  // base set = all indices
+  let selected = null;
+  if (traitFilterIds) {
+    selected = traitFilterIds;
+  }
+  if (highEthosActive) {
+    // require presetData.ownerEthos
+    if (!presetData) return; // wait until preset data loaded
+    const ownerIdx = presetData.ownerIndex || [];
+    const ownerEth = presetData.ownerEthos || [];
+    const passing = new Set();
+    for (let i = 0; i < nodes.length; i++) {
+      const oi = ownerIdx[i] ?? -1;
+      const sc = oi >= 0 ? (ownerEth[oi] ?? null) : null;
+      const ok = sc != null && sc >= 1400;
+      if (ok) passing.add(i+1);
+    }
+    if (selected) {
+      // intersection by token id
+      const inter = new Set();
+      for (const id of selected) if (passing.has(id)) inter.add(id);
+      selected = inter;
+    } else {
+      selected = passing;
+    }
+  }
+  if (frozenActive || dormantActive) {
+    const status = new Set();
+    for (let i = 0; i < nodes.length; i++) {
+      const frozen = !!nodes[i]?.frozen;
+      const dormant = !!nodes[i]?.dormant;
+      if ((frozenActive && frozen) || (dormantActive && dormant)) status.add(i+1);
+    }
+    if (selected) {
+      const inter = new Set();
+      for (const id of selected) if (status.has(id)) inter.add(id);
+      selected = inter;
+    } else {
+      selected = status;
+    }
+  }
+  if (selected && selected.size) {
+    filter = { type: 'ids', ids: selected, address: null };
+    updateFilterVisuals();
+    updateMatchCount(selected);
+  } else {
+    clearFilter();
+    matchCountEl.textContent = '--';
+  }
+}
+
+function updateMatchCount(selectedIds) {
+  const total = selectedIds.size;
+  if (!presetData || !presetData.ownerIndex) { matchCountEl.textContent = String(total); return; }
+  const ownerIdx = presetData.ownerIndex;
+  const owners = new Set();
+  for (const id of selectedIds) {
+    const i = id-1; const oi = ownerIdx[i] ?? -1;
+    if (oi >= 0) owners.add(oi);
+  }
+  matchCountEl.textContent = `${total} tokens · ${owners.size} wallets`;
+}
+
+// Toast + legend + color helpers
+function showToast(msg) {
+  if (!toastEl) return;
+  toastEl.textContent = msg;
+  toastEl.style.display = 'block';
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=>{ toastEl.style.display='none'; }, 1600);
+}
+
+function updateLegend(p) {
+  if (!legendEl) return;
+  const lines = {
+    ownership: 'Owner clusters; color by node tint',
+    trading: 'X=time, Y=price; edges off for clarity',
+    traits: 'Sectors by trait; rarest attribute pulls position',
+    social: 'Higher Ethos near core',
+    rarity: 'Gray→Gold by rarity; discovery highlights top',
+    activity: 'Inactive tokens faded',
+    hubs: 'Major wallet connections emphasized',
+    whales: 'Concentric rings by holding bands',
+    frozen: 'Blue=frozen, Green=active',
+    discovery: 'Highlights rare + high‑Ethos combos'
+  };
+  legendEl.textContent = lines[p] || '';
+}
+
+function hex(n) { return [(n>>16)&0xff, (n>>8)&0xff, n&0xff]; }
+function rgb(r,g,b){ return (r<<16)|(g<<8)|b; }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function lerpColor(c1, c2, t) {
+  const [r1,g1,b1] = hex(c1), [r2,g2,b2] = hex(c2);
+  return rgb(Math.round(lerp(r1,r2,t)), Math.round(lerp(g1,g2,t)), Math.round(lerp(b1,b2,t)));
+}
+
+async function applyPresetColors() {
+  if (!presetData) {
+    const res = await fetch('/api/preset-data?nodes=10000', { cache: 'no-store' });
+    presetData = await res.json();
+  }
+  const ownerIdx = presetData.ownerIndex || [];
+  const ownerEth = presetData.ownerEthos || [];
+  const rar = presetData.rarity || [];
+  if (preset === 'rarity') {
+    for (let i = 0; i < sprites.length; i++) {
+      const t = Math.max(0, Math.min(1, rar[i] || 0));
+      sprites[i].tint = lerpColor(0x444444, 0xFFD700, t);
+    }
+  } else if (preset === 'activity') {
+    const now = Date.now()/1000;
+    const last = presetData.tokenLastActivity || [];
+    for (let i=0;i<sprites.length;i++){
+      const ageDays = last[i] ? (now - last[i]) / 86400 : 999;
+      const fresh = ageDays < 14;
+      sprites[i].tint = fresh ? 0x00FF66 : 0xFF3333;
+    }
+  } else if (preset === 'social') {
+    for (let i=0;i<sprites.length;i++){
+      const oi = ownerIdx[i] ?? -1;
+      const sc = oi>=0 ? (ownerEth[oi] ?? 0) : 0;
+      const t = Math.max(0, Math.min(1, sc / 2000));
+      sprites[i].tint = lerpColor(0x0066FF, 0x00FF66, t);
+    }
+  } else if (preset === 'frozen') {
+    for (let i=0;i<sprites.length;i++){
+      sprites[i].tint = nodes[i]?.frozen ? 0x0099FF : 0x00FF66;
+    }
+  } else if (preset === 'discovery') {
+    for (let i=0;i<sprites.length;i++){
+      const oi = ownerIdx[i] ?? -1;
+      const sc = oi>=0 ? (ownerEth[oi] ?? 0) : 0;
+      const score = (rar[i]||0)*0.7 + (sc/2800)*0.3;
+      if (score > 0.85) { sprites[i].tint = 0x66FF99; sprites[i].scale.set(0.7); }
+      else { sprites[i].tint = nodes[i]?.color || 0x00ff66; sprites[i].scale.set(0.5); }
+    }
+  } else {
+    for (let i=0;i<sprites.length;i++){
+      sprites[i].tint = nodes[i]?.color || 0x00ff66;
+      sprites[i].scale.set(0.5);
+    }
+  }
+}
+
+// Toggle left panel via control button
+document.getElementById('filter-traits')?.addEventListener('click', () => {
+  const left = document.getElementById('leftbar');
+  if (!left) return;
+  const visible = left.style.display !== 'none';
+  left.style.display = visible ? 'none' : 'block';
+  stageEl.style.left = visible ? '0' : '260px';
+});
+
+// Loading bar helpers
+function showLoadingBar(text) {
+  const el = document.getElementById('loading-bar');
+  if (!el) return;
+  const txt = el.querySelector('.loading-text');
+  if (txt) txt.textContent = text || 'Loading…';
+  el.classList.add('show');
+}
+function hideLoadingBar() {
+  const el = document.getElementById('loading-bar');
+  if (!el) return;
+  el.classList.remove('show');
+}
+
 // Zoom buttons
 zoomInBtn?.addEventListener('click', () => {
   zoomAt(1.2, app.renderer.width/2, app.renderer.height/2);
@@ -519,6 +875,24 @@ presetEl.addEventListener('change', async () => {
       sprites[i].scale.set(0.5);
     }
   }
+  const descriptions = {
+    'ownership': '🏠 Groups tokens by wallet owner',
+    'trading': '💱 Shows trading flow patterns',
+    'traits': '🧬 Clusters by rare trait combinations',
+    'social': '👥 High Ethos wallets at center',
+    'rarity': '💎 Rarest NFTs highlighted',
+    'activity': '🔥 Fades inactive tokens',
+    'hubs': '🌐 Major wallet connections',
+    'whales': '🐋 Largest holders as rings',
+    'frozen': '❄️ Fresh vs frozen separation',
+    'discovery': '✨ Hidden gems highlighted'
+  };
+  loadingEl.textContent = `Applying ${preset} preset...`;
+  loadingEl.style.display = 'block';
+  showToast(descriptions[preset] || 'Applying preset...');
+  applyPresetColors();
+  updateLegend(preset);
+  setTimeout(()=>{ loadingEl.style.display='none'; }, 500);
 });
 
 async function applyFilter(q) {

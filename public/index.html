@@ -79,6 +79,47 @@
           <span id="edge-count">edges: --</span>
         </div>
       </header>
+      <aside id="leftbar" class="sidebar-left">
+        <div class="sb-header">
+          <div class="sb-title">Filters</div>
+        </div>
+        <div class="sb-body">
+          <label>Trait Type
+            <select id="trait-type"></select>
+          </label>
+          <label>Trait Value
+            <select id="trait-value"></select>
+          </label>
+          <div class="row">
+            <button id="apply-trait" class="ghost" title="Apply trait filter"><i class="ri-filter-2-line"></i></button>
+            <button id="clear-trait" class="ghost" title="Clear filters"><i class="ri-close-line"></i></button>
+          </div>
+          <label class="toggle"><input id="filter-high-ethos" type="checkbox"> high‑ethos only</label>
+          <label class="toggle"><input id="filter-frozen" type="checkbox"> frozen</label>
+          <label class="toggle"><input id="filter-dormant" type="checkbox"> dormant</label>
+          <div class="section">
+            <div class="sb-subtitle">Presets</div>
+            <div id="presets-quick" class="presets">
+              <button class="chip" data-preset="ownership">Ownership</button>
+              <button class="chip" data-preset="trading">Trading</button>
+              <button class="chip" data-preset="traits">Traits</button>
+              <button class="chip" data-preset="social">Social</button>
+              <button class="chip" data-preset="rarity">Rarity</button>
+              <button class="chip" data-preset="activity">Activity</button>
+              <button class="chip" data-preset="hubs">Hubs</button>
+              <button class="chip" data-preset="whales">Whales</button>
+              <button class="chip" data-preset="frozen">Frozen</button>
+              <button class="chip" data-preset="discovery">Discovery</button>
+            </div>
+          </div>
+          <div class="section">
+            <div class="sb-subtitle">Trait Browser</div>
+            <input id="trait-search" type="text" placeholder="search traits" />
+            <div id="trait-list" class="trait-list"></div>
+          </div>
+          <div class="section small">Matches: <span id="match-count">--</span></div>
+        </div>
+      </aside>
       <div id="stage"></div>
       <aside id="sidebar" class="sidebar" style="display:none;">
         <div class="sb-header">
@@ -96,10 +137,15 @@
           <div class="traits" id="sb-traits"></div>
           <div class="thumb" id="sb-thumb"></div>
           <section id="detail-ethos" class="card"></section>
+          <section id="sb-connections" class="card"></section>
+          <section id="sb-history" class="card"></section>
+          <section id="sb-similar" class="card"></section>
         </div>
       </aside>
       <canvas id="chart-canvas" class="chart-overlay"></canvas>
+      <div id="legend" class="legend"></div>
       <div id="tooltip" class="tooltip" style="display:none;"></div>
+      <div id="toast" class="toast" style="display:none;"></div>
       <div id="loading" class="loading" style="display:none;">loading…</div>
       <div id="modal" class="modal" style="display:none;">
         <div class="modal-inner">
@@ -113,6 +159,10 @@
           </div>
         </div>
       </div>
+    </div>
+    <div id="loading-bar" class="loading-bar">
+      <div class="loading-fill"></div>
+      <span class="loading-text">Loading…</span>
     </div>
     <script src="/lib/pixi.min.js"></script>
     <script type="module" src="/main.js"></script>

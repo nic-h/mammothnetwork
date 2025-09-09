@@ -17,10 +17,6 @@ export function throttle(fn, interval) {
   };
 }
 
-export function lerp(a, b, t) { return a + (b - a) * t; }
-
-export function screenToWorld(container, x, y) {
-  return container.toLocal({ x, y });
-}
+// (lerp, screenToWorld) are provided inline where needed to avoid duplication
 
 export function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }

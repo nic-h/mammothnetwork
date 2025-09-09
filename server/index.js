@@ -7,6 +7,7 @@ import zlibCompression from 'compression';
 import { openDatabase, runMigrations } from './db.js';
 import { TTLCache } from './cache.js';
 import { makeEtag } from './etag.js';
+import { getEthosForAddress } from './ethos.js';
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const ROOT = path.resolve(__dirname, '..');
@@ -317,6 +318,8 @@ function buildEdgesFromWallets(N, maxEdges) {
 
 // API: Graph
 const memCache = new TTLCache(5 * 60 * 1000);
+// Periodically purge expired cache entries
+setInterval(() => memCache.purge && memCache.purge(), 60 * 1000).unref?.();
 
 function cacheKey({ mode, nodes, edges }) {
   return `graph:${mode}:${nodes}:${edges}`;
@@ -502,6 +505,36 @@ app.get('/api/preset-data', (req, res) => {
   }
 });
 
+// API: traits list and tokens by trait
+app.get('/api/traits', (req, res) => {
+  if (!haveDb || !db) return res.json({ traits: [] });
+  try {
+    const rows = db.prepare('SELECT trait_type AS type, trait_value AS value, COUNT(1) AS count FROM attributes GROUP BY trait_type, trait_value ORDER BY type, value').all();
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.type)) map.set(r.type, []);
+      map.get(r.type).push({ value: r.value, count: r.count });
+    }
+    const traits = Array.from(map.entries()).map(([type, values]) => ({ type, values }));
+    res.json({ traits });
+  } catch (e) {
+    res.json({ traits: [] });
+  }
+});
+
+app.get('/api/trait-tokens', (req, res) => {
+  if (!haveDb || !db) return res.json({ tokens: [] });
+  const type = String(req.query.type || '').trim();
+  const value = String(req.query.value || '').trim();
+  if (!type || !value) return res.status(400).json({ tokens: [] });
+  try {
+    const rows = db.prepare('SELECT token_id AS id FROM attributes WHERE trait_type=? AND trait_value=?').all(type, value);
+    res.json({ tokens: rows.map(r => r.id) });
+  } catch (e) {
+    res.json({ tokens: [] });
+  }
+});
+
 // API: Token detail
 app.get('/api/token/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -530,6 +563,41 @@ app.get('/api/token/:id', (req, res) => {
     };
     res.setHeader('Cache-Control', 'public, max-age=300');
     return res.json(out);
+  } catch (e) {
+    return res.status(500).json({ error: 'db-error' });
+  }
+});
+
+// Token transfers (history)
+app.get('/api/token/:id/transfers', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  try {
+    const rows = db.prepare('SELECT from_addr, to_addr, timestamp, price FROM transfers WHERE token_id=? ORDER BY timestamp DESC LIMIT 100').all(id);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    return res.json({ transfers: rows });
+  } catch (e) {
+    return res.status(500).json({ error: 'db-error' });
+  }
+});
+
+// Similar tokens by rarest trait
+app.get('/api/token/:id/similar', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  try {
+    const attrs = db.prepare('SELECT trait_type, trait_value FROM attributes WHERE token_id=?').all(id);
+    if (!attrs || !attrs.length) return res.json({ similar: [] });
+    const freq = new Map(db.prepare('SELECT trait_type||":"||trait_value AS k, COUNT(1) AS c FROM attributes GROUP BY k').all().map(r=>[r.k, r.c]));
+    let rare = null;
+    for (const a of attrs) {
+      const k = `${a.trait_type}:${a.trait_value}`;
+      const c = freq.get(k) || 1e9;
+      if (!rare || c < rare.c) rare = { k, c, trait_type: a.trait_type, trait_value: a.trait_value };
+    }
+    if (!rare) return res.json({ similar: [] });
+    const rows = db.prepare('SELECT token_id AS id FROM attributes WHERE trait_type=? AND trait_value=? AND token_id<>? LIMIT 30').all(rare.trait_type, rare.trait_value, id);
+    return res.json({ trait: { type: rare.trait_type, value: rare.trait_value, count: rare.c }, similar: rows.map(r=>r.id) });
   } catch (e) {
     return res.status(500).json({ error: 'db-error' });
   }
