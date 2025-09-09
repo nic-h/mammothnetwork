@@ -37,6 +37,77 @@ export async function fetchTokenIds() {
   return Array.isArray(data) ? data : (data.ids || []);
 }
 
+// Wallet freezes for a specific contract (defensive query param names)
+export async function fetchWalletFreezes(address) {
+  if (!CONTRACT) throw new Error('CONTRACT_ADDRESS not set');
+  const addr = (address || '').toLowerCase();
+  const params = [
+    `contract=${CONTRACT}`,
+    `collection=${CONTRACT}`,
+    `contractAddress=${CONTRACT}`,
+  ];
+  const urls = [
+    ...params.map(q => urlJoin(BASE, 'wallet', addr, 'freezes') + '?' + q),
+  ];
+  const data = await tryJson(urls).catch(()=>([]));
+  // Normalize to array of token ids
+  const out = [];
+  if (Array.isArray(data)) {
+    for (const row of data) {
+      if (typeof row === 'number' || typeof row === 'string') out.push(Number(row));
+      else if (row && typeof row === 'object') {
+        const id = row.tokenId ?? row.token_id ?? row.id ?? null;
+        const fro = row.frozen ?? row.isFrozen ?? true; // endpoint implies frozen rows
+        if (id != null && fro) out.push(Number(id));
+      }
+    }
+  } else if (data && typeof data === 'object') {
+    if (Array.isArray(data.items)) {
+      for (const r of data.items) {
+        const id = r.tokenId ?? r.token_id ?? r.id ?? null;
+        if (id != null) out.push(Number(id));
+      }
+    }
+  }
+  return out.filter(n => Number.isFinite(n) && n > 0);
+}
+
+// Fetch frozen tokens for a collection. Tries multiple endpoints and shapes.
+export async function fetchFrozenTokens() {
+  if (!CONTRACT) throw new Error('CONTRACT_ADDRESS not set');
+  const urls = [
+    urlJoin(BASE, 'collection', CONTRACT, 'frozen'),
+    urlJoin(BASE, 'v1', 'collection', CONTRACT, 'frozen'),
+    urlJoin(BASE, 'v1', 'collections', 'forma', CONTRACT, 'frozen'),
+    urlJoin(BASE, 'collection', CONTRACT, 'token-status'),
+    urlJoin(BASE, 'collection', CONTRACT, 'token-flags'),
+    urlJoin(BASE, 'v1', 'collection', CONTRACT, 'token-status'),
+    urlJoin(BASE, 'v1', 'collection', CONTRACT, 'tokens'),
+  ];
+  let data = [];
+  try { data = await tryJson(urls); } catch { data = []; }
+  const out = new Set();
+  const push = (v) => { const n = Number(v); if (Number.isFinite(n) && n>0) out.add(n); };
+  const scanObj = (o) => {
+    const id = o?.tokenId ?? o?.id ?? o?.token_id ?? null;
+    const fro = o?.frozen ?? o?.isFrozen ?? (o?.flag==='frozen') ?? (o?.status==='frozen');
+    if (fro && id!=null) push(id);
+  };
+  if (Array.isArray(data)) {
+    for (const it of data) {
+      if (typeof it === 'number' || typeof it === 'string') push(it);
+      else if (it && typeof it === 'object') scanObj(it);
+    }
+  } else if (data && typeof data === 'object') {
+    if (Array.isArray(data.items)) {
+      for (const it of data.items) scanObj(it);
+    } else {
+      for (const [k, v] of Object.entries(data)) if (v===true || (v&&v.frozen)) push(k);
+    }
+  }
+  return Array.from(out.values()).sort((a,b)=>a-b);
+}
+
 // Try a direct holders endpoint to avoid N calls
 export async function fetchHolders() {
   if (!CONTRACT) throw new Error('CONTRACT_ADDRESS not set');

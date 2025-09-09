@@ -3,12 +3,44 @@ html, body { height: 100%; }
 body { margin: 0; background:#000; color:#00ff66; display:grid; grid-template-rows: 32px 1fr; }
 .header { display:flex; align-items:center; gap:20px; padding:0 20px; border-bottom:1px solid rgba(0,255,102,.1); }
 .logo { font-weight:700; }
-.controls-min label { margin-right: 16px; color:#00ff66; }
-.controls-min select, .controls-min input[type="range"], .left-panel select, .left-panel input[type="search"] { background:#000; color:#00ff66; border:1px solid rgba(0,255,102,.1); padding:4px 6px; outline:none; }
-.shell { display:grid; grid-template-columns: 240px 1fr 0; height:100%; overflow:hidden; }
-.left-panel { border-right:1px solid rgba(0,255,102,.1); padding:16px; overflow:auto; }
+.controls-min label { margin-right: 12px; color:#00ff66; }
+.controls-min select, .controls-min input[type="search"], .left-panel select, .left-panel input[type="search"] { background:#000; color:#00ff66; border:1px solid rgba(0,255,102,.3); padding:4px 6px; outline:none; }
+.presets { display:flex; gap:8px; }
+.preset-btn { background:#000; color:#00ff66; border:1px solid rgba(0,255,102,.3); padding:4px 8px; cursor:pointer; font-size:10px; }
+.preset-btn i { font-size:12px; vertical-align:middle; }
+.preset-btn:hover { background:rgba(0,255,102,.1); }
+.preset-btn.active { background:#00ff66; color:#000; }
+.shell { display:grid; grid-template-columns: 240px 1fr 420px; height:100%; overflow:hidden; }
+.left-panel { border-right:1px solid rgba(0,255,102,.2); padding:16px; overflow:auto; }
 .panel-title { color:rgba(0,255,102,.6); margin:12px 0 6px; }
-.trait-list { margin-top:10px; display:flex; flex-direction:column; gap:6px; }
-.trait-list button { background:#000; color:#00ff66; border:1px solid rgba(0,255,102,.1); padding:4px 6px; text-align:left; cursor:pointer; }
+#traits-container { display:block; }
+.trait-group { margin-bottom: 6px; border-bottom:1px solid rgba(0,255,102,.05); }
+.trait-header { color:#00ff66; font-weight:700; padding:2px 0; font-size:10px; cursor:pointer; display:flex; align-items:center; gap:6px; }
+.trait-header .twist { display:inline-block; width:8px; text-align:center; opacity:.6; }
+.trait-values { display:none; margin:4px 0 8px; }
+.trait-value { padding:2px 4px; cursor:pointer; font-size:10px; display:flex; justify-content:space-between; }
+.trait-value:hover { background:rgba(0,255,102,.1); }
+.trait-value.active { background:rgba(0,255,102,.2); color:#00ff66; }
+.trait-count { opacity:.5; }
 #stage { width:100%; height:100%; display:block; background:#000; }
-.right-panel { width:320px; border-left:1px solid rgba(0,255,102,.1); padding:16px; overflow:auto; }
+.right-panel { width:420px; border-left:1px solid rgba(0,255,102,.2); padding:16px; overflow:auto; }
+.right-panel #details { word-break: break-all; overflow-wrap: anywhere; }
+.right-panel img#thumb { width:256px; max-width:100%; display:block; margin:0 auto 12px; border:1px solid rgba(0,255,102,.2); }
+.right-panel .grid { display:grid; grid-template-columns: 100px 1fr; gap:4px 8px; }
+.right-panel .label { opacity:.75; font-size:10px; color:rgba(0,255,102,.7); text-transform:uppercase; }
+.panel-title { font-weight:700; font-size:14px; color:#00ff66; }
+.section-label { font-size:10px; color:#68d694; text-transform:uppercase; opacity:.8; margin:8px 0 4px; }
+.big-number { font-weight:700; font-size:18px; color:#fff; }
+.data-value { font-size:12px; color:#d7ffd7; }
+.small-meta { font-size:9px; color:#7dd9a3; }
+.card2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin:10px 0; }
+.card { border:1px solid rgba(0,255,102,.15); padding:8px; background:#0a0a0a; }
+.token-title { font-weight:700; font-size:14px; color:#00ff66; text-transform:uppercase; display:flex; justify-content:space-between; align-items:center; }
+.token-close { cursor:pointer; border:1px solid rgba(0,255,102,.3); padding:0 6px; height:18px; line-height:18px; }
+.ens-name { font-weight:500; font-size:14px; color:#fff; }
+.address { font-family:monospace; font-size:11px; color:#9eecb9; }
+.traits-table { display:grid; grid-template-columns: 1fr 1fr; gap:4px 8px; border:1px solid rgba(0,255,102,.1); padding:8px; }
+.chip-row { display:flex; flex-wrap:wrap; gap:6px; }
+.chip { border:1px solid rgba(0,255,102,.3); padding:2px 6px; font-size:10px; cursor:pointer; }
+.legend, .status { display:none; }
+.right-panel #details { word-break: break-all; overflow-wrap: anywhere; }

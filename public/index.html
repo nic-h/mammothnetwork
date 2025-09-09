@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MAMMOTHS NETWORK</title>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
   <link rel="preconnect" href="/vendor/pixi.js" />
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -14,27 +15,31 @@
     <div class="controls-min">
       <label>MODE <select id="mode">
         <option value="holders">HOLDERS</option>
-        <option value="traits">TRAITS</option>
         <option value="transfers">TRANSFERS</option>
+        <option value="traits">TRAITS</option>
         <option value="wallets">WALLETS</option>
       </select></label>
-      <label>EDGES <input id="edges" type="range" min="0" max="500" value="200"></label>
-      <span class="stat">NODES: <span id="node-count">0</span></span>
-      <span class="stat">FPS: <span id="fps">0</span></span>
+      <div class="presets">
+        <button class="preset-btn" data-preset="ownership"><i class="ri-group-line"></i>&nbsp;OWNERSHIP</button>
+        <button class="preset-btn" data-preset="trading"><i class="ri-exchange-line"></i>&nbsp;TRADING</button>
+        <button class="preset-btn" data-preset="rarity"><i class="ri-star-line"></i>&nbsp;RARITY</button>
+        <button class="preset-btn" data-preset="social"><i class="ri-shield-check-line"></i>&nbsp;SOCIAL</button>
+        <button class="preset-btn" data-preset="whales"><i class="ri-whale-line"></i>&nbsp;WHALES</button>
+        <button class="preset-btn" data-preset="frozen"><i class="ri-ice-cream-2-line"></i>&nbsp;FROZEN</button>
+      </div>
+      <input id="search" type="search" placeholder="TOKEN ID OR ADDRESS" style="width:200px">
     </div>
   </header>
   <main class="shell">
     <aside class="left-panel">
-      <input id="search" type="search" placeholder="TOKEN ID">
       <div class="panel-title">TRAITS</div>
-      <select id="trait-type"></select>
-      <select id="trait-value"></select>
-      <div id="traits" class="trait-list"></div>
+      <button id="clear-filters" class="preset-btn" style="margin-bottom:8px;">CLEAR FILTERS</button>
+      <div id="traits-container"></div>
     </aside>
     <canvas id="stage"></canvas>
-    <aside class="right-panel" id="sidebar" style="display:none">
-      <img id="thumb" style="width:100%;height:auto;border:1px solid rgba(0,255,102,0.1)">
-      <div id="details"></div>
+    <aside class="right-panel" id="sidebar">
+      <img id="thumb" alt="thumb" style="width:100%;height:auto;border:1px solid rgba(0,255,102,0.1);display:none">
+      <div id="details">Select a node…</div>
     </aside>
   </main>
   <script src="/lib/pixi.js"></script>
