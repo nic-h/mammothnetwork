@@ -509,13 +509,48 @@ app.get('/api/preset-data', (req, res) => {
 app.get('/api/traits', (req, res) => {
   if (!haveDb || !db) return res.json({ traits: [] });
   try {
-    const rows = db.prepare('SELECT trait_type AS type, trait_value AS value, COUNT(1) AS count FROM attributes GROUP BY trait_type, trait_value ORDER BY type, value').all();
-    const map = new Map();
-    for (const r of rows) {
-      if (!map.has(r.type)) map.set(r.type, []);
-      map.get(r.type).push({ value: r.value, count: r.count });
+    // Try attributes table first
+    let rows = [];
+    try {
+      rows = db.prepare('SELECT trait_type AS type, trait_value AS value, COUNT(1) AS count FROM attributes GROUP BY trait_type, trait_value ORDER BY type, value').all();
+    } catch {}
+    let traits = [];
+    if (rows && rows.length) {
+      const map = new Map();
+      for (const r of rows) {
+        if (!map.has(r.type)) map.set(r.type, []);
+        map.get(r.type).push({ value: r.value, count: r.count });
+      }
+      traits = Array.from(map.entries()).map(([type, values]) => ({ type, values }));
+    } else {
+      // Fallback: parse tokens.attributes JSON
+      const tokenTable = detectTokenTable() || 'tokens';
+      const trows = db.prepare(`SELECT attributes FROM ${tokenTable} WHERE attributes IS NOT NULL AND LENGTH(attributes)>2 LIMIT 5000`).all();
+      const freq = new Map(); // key: type:value => count
+      for (const tr of trows) {
+        try {
+          const arr = JSON.parse(tr.attributes);
+          if (Array.isArray(arr)) {
+            for (const a of arr) {
+              const type = String(a.trait_type || a.type || '').trim();
+              const value = String(a.value || '').trim();
+              if (!type || !value) continue;
+              const k = `${type}:${value}`;
+              freq.set(k, (freq.get(k) || 0) + 1);
+            }
+          }
+        } catch {}
+      }
+      const byType = new Map();
+      for (const [k, c] of freq.entries()) {
+        const i = k.indexOf(':');
+        const type = k.slice(0, i);
+        const value = k.slice(i + 1);
+        if (!byType.has(type)) byType.set(type, []);
+        byType.get(type).push({ value, count: c });
+      }
+      traits = Array.from(byType.entries()).map(([type, values]) => ({ type, values }));
     }
-    const traits = Array.from(map.entries()).map(([type, values]) => ({ type, values }));
     res.json({ traits });
   } catch (e) {
     res.json({ traits: [] });

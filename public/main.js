@@ -88,6 +88,16 @@ const app = new PIXI.Application({
   resizeTo: stageEl,
 });
 stageEl.appendChild(app.view);
+// Ensure renderer sizes after layout
+setTimeout(() => {
+  try { app.renderer.resize(stageEl.clientWidth, stageEl.clientHeight); } catch {}
+}, 0);
+try {
+  const ro = new ResizeObserver(() => {
+    try { app.renderer.resize(stageEl.clientWidth, stageEl.clientHeight); } catch {}
+  });
+  ro.observe(stageEl);
+} catch {}
 
 // World container for pan/zoom
 const world = new PIXI.Container();
@@ -142,6 +152,7 @@ let lastTickAt = performance.now();
 let frames = 0;
 let paused = false;
 let worker = null;
+let workerTicked = false;
 let filter = { type: 'none', ids: null, address: null };
 let lastHoverIndex = -1;
 let edgesVisible = true;
