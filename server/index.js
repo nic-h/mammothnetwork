@@ -127,6 +127,12 @@ function generateGraphFromDb({ mode = 'holders', nodes = 10000, edges = 20000 })
       for (let i = 0; i < N; i++) nodesArr[i] = { id: i + 1, color: idToColor(i + 1), frozen: false, dormant: false };
     }
 
+    // If DB returns too few nodes (miscount or sparse), fallback to demo nodes for UI usefulness
+    if (!nodesArr || nodesArr.length < 100) {
+      const demo = generateFallbackGraph({ nodes, edges });
+      return { nodes: demo.nodes, edges: demo.edges, meta: { mode, source: 'fallback' } };
+    }
+
     // Mode-specific edge derivation
     let edgesArr = [];
     if (mode === 'holders') {
