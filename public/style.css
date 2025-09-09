@@ -13,8 +13,8 @@ body { margin: 0; background:#000; color:#00ff66; display:grid; grid-template-ro
 .preset-btn i { font-size:12px; vertical-align:middle; }
 .preset-btn:hover { background:rgba(0,255,102,.1); }
 .preset-btn.active { background:#00ff66; color:#000; }
-.shell { display:grid; grid-template-columns: 240px 1fr 420px; height:100%; overflow:hidden; }
-.left-panel { border-right:1px solid rgba(0,255,102,.2); padding:16px; overflow:auto; }
+.shell { display:grid; grid-template-columns: 280px 1fr 420px; height:100%; overflow:hidden; }
+.left-panel { border-right:1px solid rgba(0,255,102,.2); padding:16px; overflow:auto; width:280px; }
 .panel-title { color:rgba(0,255,102,.6); margin:12px 0 6px; }
 #traits-container { display:block; }
 .trait-group { margin-bottom: 6px; border-bottom:1px solid rgba(0,255,102,.05); }
@@ -45,5 +45,5 @@ body { margin: 0; background:#000; color:#00ff66; display:grid; grid-template-ro
 .traits-table { display:grid; grid-template-columns: 1fr 1fr; gap:4px 8px; border:1px solid rgba(0,255,102,.1); padding:8px; }
 .chip-row { display:flex; flex-wrap:wrap; gap:6px; }
 .chip { border:1px solid rgba(0,255,102,.3); padding:2px 6px; font-size:10px; cursor:pointer; }
-.legend, .status { display:none; }
+.legend { font-size:10px; opacity:.8; color:#7bf0a8; margin-left:4px; }
 .right-panel #details { word-break: break-all; overflow-wrap: anywhere; }

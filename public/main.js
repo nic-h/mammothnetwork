@@ -3,8 +3,8 @@
 const stageEl = document.getElementById('stage');
 const modeEl = document.getElementById('mode');
 const edgesEl = null;
-let focusMode = false; // keyboard 'f' toggles focus-dim
-const legendEl = null;
+let focusMode = false; // keyboard 'f' or header toggle
+const legendEl = document.getElementById('legend');
 const statusEl = null;
 const traitsContainer = document.getElementById('traits-container');
 const searchEl = document.getElementById('search');
@@ -63,7 +63,10 @@ async function init() {
   setupPanZoom();
   stageEl.addEventListener('click', onStageClick);
   modeEl.addEventListener('change', ()=> load(modeEl.value, 200));
-  window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='f'){ focusMode=!focusMode; if (selectedIndex>=0) applyFocus(); else resetAlpha(); }});
+  // Focus toggle UI + keyboard shortcut
+  const focusEl = document.getElementById('focus');
+  if (focusEl) focusEl.addEventListener('change', ()=>{ focusMode = !!focusEl.checked; if (selectedIndex>=0) applyFocus(); else resetAlpha(); });
+  window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='f'){ focusMode=!focusMode; if (focusEl) focusEl.checked = focusMode; if (selectedIndex>=0) applyFocus(); else resetAlpha(); }});
   stageEl.addEventListener('dblclick', ()=> resetView());
   // Search: token id or wallet address
   searchEl.addEventListener('keydown', async e=>{
@@ -116,6 +119,7 @@ async function init() {
   layoutPreset(preset);
   resetAlpha();
   resetView();
+  setLegend(preset);
 }
 
 async function load(mode, edges){
@@ -204,6 +208,18 @@ function drawEdges(){
 }
 
 function clearSelectionOverlay(){ selectGfx?.clear?.(); }
+function setLegend(p){
+  if (!legendEl) return;
+  const text = {
+    ownership: 'Color by owner; same-owner links.',
+    trading: 'X = last activity, Y = price/ethos; transfer links.',
+    rarity: 'Spiral by rarity; grayscale by rarity score.',
+    social: 'Cyan brightness/center = higher Ethos.',
+    whales: 'Large holders emphasized; wallet relation links.',
+    frozen: 'Blue = frozen, Gray = dormant, Green = active.'
+  }[p] || '';
+  legendEl.textContent = text;
+}
 
 // Pan/zoom
 function setupPanZoom(){
@@ -280,6 +296,7 @@ async function selectNode(index){
     try { if (t.owner) { const w = await fetch(`/api/wallet/${t.owner}?v=${Date.now()}`, { cache:'no-store' }).then(r=>r.json()); holdings = w?.tokens || null; } } catch {}
     selectedWalletSet = holdings ? new Set(holdings.map(Number)) : null;
     updateSelectionOverlay();
+    if (focusMode) applyFocus();
     centerOnSprite(sprites[selectedIndex]);
     // rarity score from preset data
     await ensurePresetData();
