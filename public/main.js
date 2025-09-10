@@ -112,7 +112,17 @@ async function init() {
     const ids = ['layer-ownership','layer-trades','layer-traits','layer-value','layer-sales','layer-transfers','layer-mints'];
     ids.forEach(id=>{
       const el = document.getElementById(id);
-      if (el && !el.dataset.bound){ el.dataset.bound='1'; el.addEventListener('change', ()=>{ drawEdges(); updateSelectionOverlay(); }); }
+      if (el){
+        const row = el.closest('.layer-toggle');
+        if (row) row.classList.toggle('active', !!el.checked);
+        if (!el.dataset.bound){
+          el.dataset.bound='1';
+          el.addEventListener('change', ()=>{
+            const r = el.closest('.layer-toggle'); if (r) r.classList.toggle('active', !!el.checked);
+            drawEdges(); updateSelectionOverlay();
+          });
+        }
+      }
     });
   } catch {}
   if (edgesEl){
@@ -170,6 +180,20 @@ async function init() {
 
   // Presets
   setupPresets();
+  // Mode chips -> sync with select and trigger loads
+  try {
+    const chips = document.querySelectorAll('.chip-btn[data-mode]');
+    chips.forEach(btn=>{
+      const m = btn.getAttribute('data-mode');
+      if (m === modeEl.value) btn.classList.add('active');
+      btn.addEventListener('click', async ()=>{
+        chips.forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        if (modeEl) modeEl.value = m;
+        await load(m, Number(edgesEl?.value||200));
+      });
+    });
+  } catch {}
   // Default view: OWNERSHIP
   try { document.querySelector('.preset-btn[data-preset="ownership"]').classList.add('active'); } catch {}
   preset = 'ownership';
@@ -190,6 +214,24 @@ async function load(mode, edges){
       const det = await fetch(`/api/transfer-edges?limit=${encodeURIComponent(edges||200)}&nodes=10000`, { cache:'no-store' }).then(r=>r.json());
       if (Array.isArray(det) && det.length) edgesData = det;
     } catch {}
+  }
+  // If no nodes loaded, attempt a recovery fetch and surface status
+  if (!nodes || !nodes.length) {
+    try {
+      const r = await fetch(`/api/network-graph?mode=holders&nodes=10000&edges=0&v=${Date.now()}`, { cache:'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        nodes = j.nodes||[]; edgesData = j.edges||[]; lastGraph = j;
+        buildSprites(nodes.map(n=>n.color||BRAND.GREEN));
+      }
+    } catch {}
+    // Optional health overlay
+    if (!nodes || !nodes.length) {
+      try {
+        const h = await fetch('/api/health', { cache:'no-store' }).then(r=>r.json());
+        showToast(`No nodes loaded. DB=${h?.haveDb?'ok':'missing'} path=${h?.dbPath||'--'}`);
+      } catch {}
+    }
   }
   // No physics: static grid layout
   layoutGrid();

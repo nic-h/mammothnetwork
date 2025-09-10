@@ -14,13 +14,19 @@
   <header class="header">
     <div class="logo">MAMMOTH.NETWORK</div>
     <div class="header-controls">
-      <div class="presets">
-        <button class="preset-btn" data-preset="ownership">OWNERSHIP</button>
-        <button class="preset-btn" data-preset="trading">TRADING</button>
-        <button class="preset-btn" data-preset="rarity">RARITY</button>
-        <button class="preset-btn" data-preset="social">SOCIAL</button>
-        <button class="preset-btn" data-preset="whales">WHALES</button>
-        <button class="preset-btn" data-preset="frozen">FROZEN</button>
+      <div class="mode-chips" aria-label="Modes">
+        <button class="chip-btn" data-mode="holders" title="Holders"><i class="ri-node-tree"></i><span class="chip-label"> HOLDERS</span></button>
+        <button class="chip-btn" data-mode="transfers" title="Transfers"><i class="ri-exchange-line"></i><span class="chip-label"> TRANSFERS</span></button>
+        <button class="chip-btn" data-mode="traits" title="Traits"><i class="ri-shape-2-line"></i><span class="chip-label"> TRAITS</span></button>
+        <button class="chip-btn" data-mode="wallets" title="Wallets"><i class="ri-wallet-3-line"></i><span class="chip-label"> WALLETS</span></button>
+      </div>
+      <div class="presets preset-bar" aria-label="Presets">
+        <button class="preset-btn" data-preset="ownership" title="Ownership"><i class="ri-links-line"></i><span class="preset-label"> OWNERSHIP</span></button>
+        <button class="preset-btn" data-preset="trading" title="Trading"><i class="ri-line-chart-line"></i><span class="preset-label"> TRADING</span></button>
+        <button class="preset-btn" data-preset="rarity" title="Rarity"><i class="ri-star-line"></i><span class="preset-label"> RARITY</span></button>
+        <button class="preset-btn" data-preset="social" title="Social"><i class="ri-user-3-line"></i><span class="preset-label"> SOCIAL</span></button>
+        <button class="preset-btn" data-preset="whales" title="Whales"><i class="ri-team-line"></i><span class="preset-label"> WHALES</span></button>
+        <button class="preset-btn" data-preset="frozen" title="Frozen"><i class="ri-snowflake-line"></i><span class="preset-label"> FROZEN</span></button>
       </div>
       <div class="search-wrapper">
         <input id="search" type="search" placeholder="TOKEN ID OR ADDRESS" class="header-search">
@@ -32,13 +38,14 @@
     <aside class="left-panel">
       <div class="controls-section">
         <div class="mode-selector">
-          <label>MODE</label>
+          <label for="mode">MODE</label>
           <select id="mode">
             <option value="holders">HOLDERS</option>
             <option value="transfers">TRANSFERS</option>
             <option value="traits">TRAITS</option>
             <option value="wallets">WALLETS</option>
           </select>
+          <i class="ri-arrow-down-s-line select-caret" aria-hidden="true"></i>
         </div>
         <div class="edge-controls">
           <label>EDGES</label>
