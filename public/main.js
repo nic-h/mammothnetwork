@@ -2,7 +2,7 @@
 
 const stageEl = document.getElementById('stage');
 const modeEl = document.getElementById('mode');
-const edgesEl = null;
+const edgesEl = document.getElementById('edges-slider');
 let focusMode = false; // keyboard 'f' or header toggle
 const legendEl = document.getElementById('legend');
 const statusEl = null;
@@ -76,7 +76,10 @@ async function init() {
     }catch{}
   };
   try { new ResizeObserver(()=>{ app.renderer.resize(stageEl.clientWidth, stageEl.clientHeight); drawGrid(); }).observe(stageEl); } catch {}
-  try { new ResizeObserver(()=>layoutGrid()).observe(document.querySelector('.shell')); } catch {}
+  try {
+    const obsEl = document.querySelector('.center-panel') || document.querySelector('.shell') || document.body;
+    new ResizeObserver(()=>layoutGrid()).observe(obsEl);
+  } catch {}
   drawGrid();
 
   // Load data and start
@@ -85,7 +88,14 @@ async function init() {
   // Interactions
   setupPanZoom();
   stageEl.addEventListener('click', onStageClick);
-  modeEl.addEventListener('change', ()=> load(modeEl.value, 200));
+  modeEl.addEventListener('change', ()=> load(modeEl.value, Number(edgesEl?.value||200)));
+  if (edgesEl){
+    const ec = document.getElementById('edge-count');
+    edgesEl.addEventListener('input', ()=>{ if (ec) ec.textContent = String(edgesEl.value); load(modeEl.value, Number(edgesEl.value||200)); });
+  }
+  const clearBtn = document.getElementById('clear-search');
+  if (clearBtn){ clearBtn.addEventListener('click', ()=>{ searchEl.value=''; searchEl.focus(); }); }
+  window.addEventListener('keydown', (e)=>{ if (e.key==='Escape'){ searchEl.value=''; }});
   // Focus toggle UI + keyboard shortcut
   const focusEl = document.getElementById('focus');
   if (focusEl) focusEl.addEventListener('change', ()=>{ focusMode = !!focusEl.checked; if (selectedIndex>=0) applyFocus(); else resetAlpha(); });
@@ -488,15 +498,17 @@ function updateSelectionOverlay(){
   // neighbor edges from the active edges set
   const tid = s.__tokenId;
   if (edgesData && edgesData.length){
-    selectGfx.lineStyle({ width: 2, color: 0x00aa66, alpha: 0.9, cap: 'round' });
     for (let e=0;e<edgesData.length;e++){
-      const [a,b] = edgesData[e];
+      const item = edgesData[e];
+      const a = Array.isArray(item)? item[0] : (item.a ?? item.source ?? item.from ?? 0);
+      const b = Array.isArray(item)? item[1] : (item.b ?? item.target ?? item.to   ?? 0);
       if (a==tid || b==tid){
         const ia = idToIndex.get(Number(a));
         const ib = idToIndex.get(Number(b));
         if (ia==null || ib==null) continue;
-        selectGfx.moveTo(sprites[ia].x, sprites[ia].y);
-        selectGfx.lineTo(sprites[ib].x, sprites[ib].y);
+        const style = pickEdgeStyle(modeEl?.value||'holders', ia, ib, item);
+        if (!layerEnabled(style)) continue;
+        strokeEdge(selectGfx, sprites[ia].x, sprites[ia].y, sprites[ib].x, sprites[ib].y, style);
       }
     }
   }
