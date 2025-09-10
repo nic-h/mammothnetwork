@@ -98,6 +98,14 @@ async function init() {
   setupPanZoom();
   stageEl.addEventListener('click', onStageClick);
   modeEl.addEventListener('change', ()=> load(modeEl.value, Number(edgesEl?.value||200)));
+  // Layer toggles -> redraw edges and overlay
+  try {
+    const ids = ['layer-ownership','layer-trades','layer-traits','layer-value','layer-sales','layer-transfers','layer-mints'];
+    ids.forEach(id=>{
+      const el = document.getElementById(id);
+      if (el && !el.dataset.bound){ el.dataset.bound='1'; el.addEventListener('change', ()=>{ drawEdges(); updateSelectionOverlay(); }); }
+    });
+  } catch {}
   if (edgesEl){
     const ec = document.getElementById('edge-count');
     edgesEl.addEventListener('input', ()=>{ if (ec) ec.textContent = String(edgesEl.value); load(modeEl.value, Number(edgesEl.value||200)); });
@@ -253,6 +261,7 @@ function drawEdges(){
         const x1 = sprites[i].x, y1 = sprites[i].y;
         const x2 = sprites[j].x, y2 = sprites[j].y;
         const style = pickEdgeStyle(mode, i, j, item);
+        if (!layerEnabled(style, item)) continue;
         strokeEdge(edgesGfx, x1, y1, x2, y2, style);
       }
     }
@@ -333,6 +342,33 @@ function lineArrow(g, x1, y1, x2, y2, s){
 }
 
 function clearSelectionOverlay(){ selectGfx?.clear?.(); }
+// Map style or transaction type to layer toggles
+function layerEnabled(style, item){
+  try {
+    const q = id => document.getElementById(id);
+    const sales = q('layer-sales');
+    const transfers = q('layer-transfers');
+    const mints = q('layer-mints');
+    const own = q('layer-ownership');
+    const trd = q('layer-trades');
+    const rar = q('layer-traits');
+    const val = q('layer-value');
+    const t = (item && item.type) ? String(item.type).toLowerCase() : null;
+    if (t){
+      if (t==='sale' || t==='purchase') return sales ? !!sales.checked : true;
+      if (t==='transfer') return transfers ? !!transfers.checked : true;
+      if (t==='mint') return mints ? !!mints.checked : true;
+      if (t==='mixed') return ((sales?!!sales.checked:false) || (transfers?!!transfers.checked:false));
+    }
+    // Fallback by style mapping
+    if (!style) return true;
+    if (style === EDGE_STYLES.OWNERSHIP) return own ? !!own.checked : true;
+    if (style === EDGE_STYLES.RARE_TRAIT) return rar ? !!rar.checked : true;
+    if (style === EDGE_STYLES.HIGH_VALUE) return val ? !!val.checked : true;
+    if (style === EDGE_STYLES.RECENT_TRADE || style === EDGE_STYLES.OLD_TRADE) return trd ? !!trd.checked : true;
+  } catch {}
+  return true;
+}
 function setLegend(p){
   if (!legendEl) return;
   const text = {
@@ -542,7 +578,7 @@ function updateSelectionOverlay(){
         const ib = idToIndex.get(Number(b));
         if (ia==null || ib==null) continue;
         const style = pickEdgeStyle(modeEl?.value||'holders', ia, ib, item);
-        if (!layerEnabled(style)) continue;
+        if (!layerEnabled(style, item)) continue;
         strokeEdge(selectGfx, sprites[ia].x, sprites[ia].y, sprites[ib].x, sprites[ib].y, style);
       }
     }
