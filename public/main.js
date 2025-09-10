@@ -1,6 +1,7 @@
 // Minimal front-end per spec: PIXI v7 + three-panel shell
 
 const stageEl = document.getElementById('stage');
+const wrapEl = document.querySelector('.center-panel') || stageEl?.parentElement || document.body;
 const modeEl = document.getElementById('mode');
 const edgesEl = document.getElementById('edges-slider');
 let focusMode = false; // keyboard 'f' or header toggle
@@ -12,7 +13,7 @@ const sidebar = document.getElementById('sidebar');
 const thumbEl = document.getElementById('thumb');
 const detailsEl = document.getElementById('details');
 
-let app, world, nodeContainer, circleTexture, edgesGfx, selectGfx, heatGfx;
+let app, world, nodeContainer, circleTexture, edgesGfx, selectGfx;
 let sprites = []; // PIXI.Sprite
 let nodes = [];   // server nodes
 let edgesData = [];
@@ -25,46 +26,6 @@ const PRESET_MODE = { ownership: 'holders', trading: 'transfers', whales: 'walle
 let ethosMin = 0, ethosMax = 1;
 let ownerCounts = null;
 let highlightSet = null; // Set of ids currently highlighted by filter
-// Camera state
-let camMin = 0.15, camMax = 4;
-let camAnimating = false, camManual = false;
-let camManualTimer = null;
-let pointerDown = false;
-let dragging = false;
-let down = { x:0, y:0 };
-let startPos = { x:0, y:0 };
-
-// Convert screen to world (using current transform)
-function camToWorld(x, y){
-  const rect = stageEl.getBoundingClientRect();
-  const sx = x - rect.left, sy = y - rect.top;
-  const s = world?.scale?.x || 1;
-  return new PIXI.Point((sx - world.position.x)/s, (sy - world.position.y)/s);
-}
-
-// Set scale with pivot compensation
-function camSetScale(next, pivot){
-  const s = Math.min(camMax, Math.max(camMin, next));
-  if (pivot){
-    const rect = stageEl.getBoundingClientRect();
-    const sx = pivot.x - rect.left;
-    const sy = pivot.y - rect.top;
-    const old = world.scale.x || 1;
-    const wx = (sx - world.position.x)/old;
-    const wy = (sy - world.position.y)/old;
-    world.scale.set(s);
-    world.position.x = sx - wx * s;
-    world.position.y = sy - wy * s;
-  } else {
-    world.scale.set(s);
-  }
-}
-
-// Set position
-function camSetPos(x, y){ world.position.set(x, y); }
-
-// Allow auto-fit again after user stops interacting
-function camAllowAutoSoon(){ clearTimeout(camManualTimer); camManualTimer = setTimeout(()=>{ camManual=false; }, 600); }
 // Edge style mapping (lightweight, perf-friendly)
 const EDGE_STYLES = {
   OWNERSHIP:      { kind:'solid',  width:2,   color:0x00ff66, opacity:1.0 },
@@ -75,35 +36,9 @@ const EDGE_STYLES = {
   SAME_WHALE:     { kind:'double', width:2,   color:0x00ccff, opacity:0.7 },
 };
 
-// Respect left-panel layer toggles
-function layerEnabled(style){
-  try {
-    const own = document.getElementById('layer-ownership');
-    const trd = document.getElementById('layer-trades');
-    const rar = document.getElementById('layer-traits');
-    const val = document.getElementById('layer-value');
-    if (!own && !trd && !rar && !val) return true;
-    if (!style) return true;
-    if (style === EDGE_STYLES.OWNERSHIP || style === EDGE_STYLES.SAME_WHALE || style.kind === 'double') return own ? !!own.checked : true;
-    if (style === EDGE_STYLES.RECENT_TRADE || style === EDGE_STYLES.OLD_TRADE) return trd ? !!trd.checked : true;
-    if (style === EDGE_STYLES.RARE_TRAIT || style.kind === 'dotted') return rar ? !!rar.checked : true;
-    if (style === EDGE_STYLES.HIGH_VALUE) return val ? !!val.checked : true;
-  } catch {}
-  return true;
-}
-
 // Utils
 const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
 function lerp(a,b,t){ return a + (b-a)*t; }
-function lerpColor(c1, c2, t){
-  t = Math.max(0, Math.min(1, t));
-  const r1=(c1>>16)&255, g1=(c1>>8)&255, b1=c1&255;
-  const r2=(c2>>16)&255, g2=(c2>>8)&255, b2=c2&255;
-  const r=Math.round(lerp(r1,r2,t));
-  const g=Math.round(lerp(g1,g2,t));
-  const b=Math.round(lerp(b1,b2,t));
-  return (r<<16)|(g<<8)|b;
-}
 function throttle(fn, ms){ let last=0; let t=null; return function(...args){ const now=Date.now(); const run=()=>{ last=now; t=null; fn.apply(this,args); }; if (now-last>=ms){ if (t){ clearTimeout(t); t=null; } run(); } else if (!t){ t=setTimeout(run, ms-(now-last)); } }; }
 function makeCircleTexture(renderer, r=5, color=0x00ff66){
   const g = new PIXI.Graphics();
@@ -114,16 +49,11 @@ function makeCircleTexture(renderer, r=5, color=0x00ff66){
 }
 
 async function init() {
-  const wrapEl = document.querySelector('.canvas');
-  const inset = 6;
-  const w0 = Math.max(1, (wrapEl?.clientWidth||stageEl.clientWidth) - inset*2);
-  const h0 = Math.max(1, (wrapEl?.clientHeight||stageEl.clientHeight) - inset*2);
-  app = new PIXI.Application({ view: stageEl, backgroundAlpha:0, antialias:true, resolution:Math.min(devicePixelRatio||1,2), width: w0, height: h0 });
+  const w0 = Math.max(1, (wrapEl?.clientWidth||stageEl.clientWidth||800));
+  const h0 = Math.max(1, (wrapEl?.clientHeight||stageEl.clientHeight||600));
+  app = new PIXI.Application({ view: stageEl, backgroundColor:0x000000, antialias:true, resolution:Math.min(devicePixelRatio||1,2), width: w0, height: h0 });
   world = new PIXI.Container();
   app.stage.addChild(world);
-  // Heatmap background at z-index 0 inside world
-  heatGfx = new PIXI.Graphics();
-  try { world.addChildAt(heatGfx, 0); } catch { world.addChild(heatGfx); }
   nodeContainer = new PIXI.ParticleContainer(10000, { position:true, scale:true, tint:true, alpha:true });
   world.addChild(nodeContainer);
   edgesGfx = new PIXI.Graphics();
@@ -137,8 +67,6 @@ async function init() {
   circleTexture = makeCircleTexture(app.renderer, 4, 0x00ff66);
 
   // Resize to grid cell
-  // Ensure global access for counts used in details panel
-  window.ownerCounts = null;
   const drawGrid = ()=>{
     try{
       gridGfx.clear();
@@ -150,13 +78,10 @@ async function init() {
       for (let y=0;y<=h;y+=step){ gridGfx.moveTo(0,y); gridGfx.lineTo(w,y); }
     }catch{}
   };
-  try { new ResizeObserver(()=>{ const w=Math.max(1,(wrapEl?.clientWidth||stageEl.clientWidth)-inset*2); const h=Math.max(1,(wrapEl?.clientHeight||stageEl.clientHeight)-inset*2); app.renderer.resize(w, h); drawGrid(); }).observe(wrapEl||stageEl); } catch {}
+  try { new ResizeObserver(()=>{ const w=Math.max(1,(wrapEl?.clientWidth||stageEl.clientWidth||800)); const h=Math.max(1,(wrapEl?.clientHeight||stageEl.clientHeight||600)); app.renderer.resize(w, h); drawGrid(); }).observe(wrapEl||stageEl); } catch {}
   try {
-    const obsEl = document.querySelector('.canvas') || document.querySelector('.shell') || document.body;
-    new ResizeObserver(()=>{
-      if (!sprites.length) return;
-      if (preset) layoutPreset(preset); else layoutGrid();
-    }).observe(obsEl);
+    const obsEl = document.querySelector('.center-panel') || document.querySelector('.shell') || document.body;
+    new ResizeObserver(()=>layoutGrid()).observe(obsEl);
   } catch {}
   drawGrid();
 
@@ -165,37 +90,8 @@ async function init() {
 
   // Interactions
   setupPanZoom();
-  // Wire layer toggles to redraw edges/overlay
-  ;(function setupLayerToggles(){
-    const ids = ['layer-ownership','layer-trades','layer-traits','layer-value'];
-    ids.forEach(id=>{
-      const el = document.getElementById(id);
-      if (el && !el.dataset.bound){
-        el.dataset.bound = '1';
-        el.addEventListener('change', ()=>{ drawEdges(); updateSelectionOverlay(); });
-      }
-    });
-  })();
   stageEl.addEventListener('click', onStageClick);
-  modeEl.addEventListener('change', async ()=>{
-    const val = modeEl.value;
-    const count = Number(edgesEl?.value||200);
-    const presets = ['ownership','trading','rarity','social','whales','frozen'];
-    if (presets.includes(val)){
-      const target = PRESET_MODE[val] || 'holders';
-      await load(target, count);
-      await ensurePresetData();
-      preset = val;
-      applyPreset(preset);
-      layoutPreset(preset);
-      resetAlpha();
-      setLegend(preset);
-    } else {
-      await load(val, count);
-      // keep preset as-is if compatible; otherwise clear legend
-      setLegend(preset);
-    }
-  });
+  modeEl.addEventListener('change', ()=> load(modeEl.value, Number(edgesEl?.value||200)));
   if (edgesEl){
     const ec = document.getElementById('edge-count');
     edgesEl.addEventListener('input', ()=>{ if (ec) ec.textContent = String(edgesEl.value); load(modeEl.value, Number(edgesEl.value||200)); });
@@ -204,9 +100,10 @@ async function init() {
   if (clearBtn){ clearBtn.addEventListener('click', ()=>{ searchEl.value=''; searchEl.focus(); }); }
   window.addEventListener('keydown', (e)=>{ if (e.key==='Escape'){ searchEl.value=''; }});
   // Focus toggle UI + keyboard shortcut
-  // Focus disabled
-  const focusEl = null;
-  stageEl.addEventListener('dblclick', ()=> { camManual=false; resetView(); });
+  const focusEl = document.getElementById('focus');
+  if (focusEl) focusEl.addEventListener('change', ()=>{ focusMode = !!focusEl.checked; if (selectedIndex>=0) applyFocus(); else resetAlpha(); });
+  window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='f'){ focusMode=!focusMode; if (focusEl) focusEl.checked = focusMode; if (selectedIndex>=0) applyFocus(); else resetAlpha(); }});
+  stageEl.addEventListener('dblclick', ()=> resetView());
   // Search: token id or wallet address
   searchEl.addEventListener('keydown', async e=>{
     if(e.key!=='Enter') return;
@@ -265,17 +162,16 @@ async function load(mode, edges){
   const data = await fetchGraph(mode, edges).catch(()=> lastGraph || {nodes:[],edges:[]});
   nodes = data.nodes||[]; edgesData = data.edges||[];
   buildSprites(nodes.map(n=>n.color||0x00ff66));
+  // No physics: static grid layout
+  layoutGrid();
+  resetView();
   // Traits list (build groups)
   await loadTraits();
-  // Apply current preset layout if active; otherwise default grid
+  // Re-apply preset coloring/forces after reload
   if (preset) {
     await ensurePresetData();
     applyPreset(preset);
-    layoutPreset(preset);
-  } else {
-    layoutGrid();
   }
-  resetView();
 }
 
 async function fetchGraph(mode, edges){
@@ -333,7 +229,6 @@ function drawEdges(){
   try {
     const maxDraw = 500;
     edgesGfx.clear();
-    // no gridlines drawn here; only actual edges per layer toggles
     if ((edgesData?.length||0) && edgesData.length <= maxDraw) {
       const mode = modeEl?.value || 'holders';
       for (let e=0;e<edgesData.length;e++){
@@ -347,41 +242,6 @@ function drawEdges(){
         const x2 = sprites[j].x, y2 = sprites[j].y;
         const style = pickEdgeStyle(mode, i, j, item);
         strokeEdge(edgesGfx, x1, y1, x2, y2, style);
-      }
-    }
-  } catch {}
-}
-
-// Heat map background (20x20) based on sprite density in world coords
-function drawHeatBackground(mode){
-  if (!heatGfx || !sprites || !sprites.length){ try{ heatGfx?.clear?.(); }catch{} return; }
-  // Only show for trading mode for now; otherwise clear
-  if (mode !== 'trading'){ try { heatGfx.clear(); } catch {} return; }
-  try {
-    heatGfx.clear();
-    const cols = 20, rows = 20;
-    const b = computeContentBounds(); if (!b) return;
-    const w = Math.max(1, b.maxx - b.minx), h = Math.max(1, b.maxy - b.miny);
-    const cw = w / cols, ch = h / rows;
-    const counts = new Array(cols*rows).fill(0);
-    // Count sprites per cell
-    for (let i=0;i<sprites.length;i++){
-      const sp = sprites[i];
-      const xi = Math.max(0, Math.min(cols-1, Math.floor((sp.x - b.minx) / cw)));
-      const yi = Math.max(0, Math.min(rows-1, Math.floor((sp.y - b.miny) / ch)));
-      counts[yi*cols + xi]++;
-    }
-    let maxC = 1; for (let k=0;k<counts.length;k++){ if (counts[k]>maxC) maxC=counts[k]; }
-    // Draw semi-transparent rectangles; blue->red ramp for trading
-    for (let yi=0; yi<rows; yi++){
-      for (let xi=0; xi<cols; xi++){
-        const c = counts[yi*cols + xi]; if (!c) continue;
-        const t = Math.max(0, Math.min(1, c / maxC));
-        const col = lerpColor(0x1133aa, 0xff3333, t);
-        const x = b.minx + xi*cw, y = b.miny + yi*ch;
-        heatGfx.beginFill(col, 0.12 + 0.28*t);
-        heatGfx.drawRect(x, y, cw, ch);
-        heatGfx.endFill();
       }
     }
   } catch {}
@@ -456,37 +316,33 @@ function setLegend(p){
 
 // Pan/zoom
 function setupPanZoom(){
-  stageEl.style.cursor = 'move';
-  stageEl.addEventListener('mousedown', e=>{
-    camManual = true; pointerDown = true; dragging = false;
-    down.x = e.clientX; down.y = e.clientY;
-    startPos = { x: world.position.x, y: world.position.y };
-  });
-  window.addEventListener('mousemove', e=>{
-    if (!pointerDown) return;
-    const dx = e.clientX - down.x, dy = e.clientY - down.y;
-    if (!dragging && (Math.abs(dx)>4 || Math.abs(dy)>4)) dragging = true;
-    camSetPos(startPos.x + dx, startPos.y + dy);
-  });
-  window.addEventListener('mouseup', ()=>{
-    if (!pointerDown) return;
-    pointerDown = false;
-    if (dragging) clampCameraToGraphBounds();
-    camAllowAutoSoon();
-    dragging = false;
-  });
-  // Normalize wheel zoom and mark manual control
-  window.addEventListener('wheel', (e)=>{
-    e.preventDefault(); camManual = true;
-    const step = Math.exp(-e.deltaY * 0.0015);
-    camSetScale((world.scale.x||1) * step, new PIXI.Point(e.clientX, e.clientY));
-    camAllowAutoSoon();
-  }, { passive:false });
+  let isDragging=false, start={x:0,y:0}, startPos={x:0,y:0};
+  stageEl.addEventListener('mousedown', e=>{ isDragging=true; start={x:e.clientX,y:e.clientY}; startPos={x:world.position.x,y:world.position.y}; });
+  window.addEventListener('mouseup', ()=> isDragging=false);
+  window.addEventListener('mousemove', e=>{ if(!isDragging) return; const dx=e.clientX-start.x, dy=e.clientY-start.y; world.position.set(startPos.x+dx, startPos.y+dy); });
+  stageEl.addEventListener('wheel', e=>{
+    e.preventDefault();
+    const rect = stageEl.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const k = e.ctrlKey ? 0.0012 : 0.0007; // gentler trackpad zoom
+    const f = Math.exp(-e.deltaY * k);
+    const old = world.scale.x;
+    const nx = clamp(old*f, 0.1, 5);
+    // world coords of pointer before zoom
+    const wx = (sx - world.position.x) / old;
+    const wy = (sy - world.position.y) / old;
+    // apply scale
+    world.scale.set(nx);
+    // keep pointer anchored
+    world.position.x = sx - wx * nx;
+    world.position.y = sy - wy * nx;
+    clampWorldToContent(40);
+  }, {passive:false});
 }
 
 // Selection
 function onStageClick(e){
-  if (dragging) return; // treat as drag, not click
   const rect = stageEl.getBoundingClientRect();
   const sx = e.clientX - rect.left;
   const sy = e.clientY - rect.top;
@@ -536,18 +392,18 @@ async function selectNode(index){
     selectedWalletSet = holdings ? new Set(holdings.map(Number)) : null;
     updateSelectionOverlay();
     if (focusMode) applyFocus();
-    const sp = sprites[selectedIndex];
-    if (sp) focusNode(sp.x, sp.y, 1.2);
+    centerOnSprite(sprites[selectedIndex]);
     // rarity score from preset data
     await ensurePresetData();
     const idx2 = idToIndex.get(id);
     const rScore = (idx2!=null && presetData?.rarity) ? presetData.rarity[idx2] : null;
     const addrShort = (t.owner||'--').slice(0,6)+'...'+(t.owner||'').slice(-4);
-    const ethosValid = (typeof ethos==='number' && isFinite(ethos) && ethos>0);
+    const ethosValid = (typeof ethos==='number' && ethos>0);
     const ethosBar = ethosValid ? '█'.repeat(Math.min(10, Math.round((ethos-ethosMin)/(ethosMax-ethosMin)*10))) + '░'.repeat(10 - Math.min(10, Math.round((ethos-ethosMin)/(ethosMax-ethosMin)*10))) : '';
     const trades = meta?.trade_count ?? null;
     const lastSeen = meta?.last_activity ? timeAgo(meta.last_activity*1000) : '--';
     const actLabel = trades!=null ? (trades>40?'Very Active':trades>10?'Active':'Low') : '';
+    const lastSeen = meta?.last_activity ? timeAgo(meta.last_activity*1000) : 'Never traded';
     const status = t.frozen ? 'FROZEN' : (t.dormant ? 'DORMANT' : 'ACTIVE');
     // Similar tokens by rarest trait
     let similar = { similar: [], trait: null };
@@ -555,18 +411,16 @@ async function selectNode(index){
     const sameOwnerChips = (holdings||[]).slice(0,12).filter(x=>x!==id).map(n=>`<span class='chip' data-token='${n}'>#${String(n).padStart(4,'0')}</span>`).join('');
     const similarChips = (similar.similar||[]).slice(0,12).map(n=>`<span class='chip' data-token='${n}'>#${String(n).padStart(4,'0')}</span>`).join('');
     const traitsRows = (t.traits||[]).slice(0,24).map(a=>`<div class='label'>${a.trait_type}</div><div class='value'>${a.trait_value}</div>`).join('');
-    const ethosCard = ethosValid ? `
-        <div class='card ethos-card'>
-          <div class='label'>ETHOS</div>
-          <div class='big-number'>${Math.round(ethos)}</div>
-          <div class='small-meta'>${ethosBar}</div>
-        </div>` : '';
     detailsEl.innerHTML = `
-      <div class='token-title'>MAMMOTH #${id.toString().padStart(4,'0')} <span class='token-close' id='close-detail'><i class=\"ri-close-line\"></i></span></div>
+      <div class='token-title'>MAMMOTH #${id.toString().padStart(4,'0')} <span class='token-close' id='close-detail'><i class="ri-close-line"></i></span></div>
       <div class='section-label'>OWNER</div>
       ${ens? `<div class='ens-name'>${ens} ✓</div>`:`<div class='address'>${addrShort}</div>`}
       <div class='card2'>
-        ${ethosCard}
+        <div class='card'>
+          <div class='label'>ETHOS</div>
+          <div class='big-number'>${ethosValid?Math.round(ethos):'--'}</div>
+          <div class='small-meta'>${ethosValid? ethosBar: ''}</div>
+        </div>
         <div class='card'>
           <div class='label'>HOLDINGS</div>
           <div class='big-number'>${holdings? holdings.length : '--'}</div>
@@ -601,27 +455,20 @@ async function selectNode(index){
     // chip events
     detailsEl.querySelectorAll('.chip').forEach(el=> el.addEventListener('click', ()=>{ const tok = Number(el.dataset.token); const idx = idToIndex.get(tok); if (idx!=null) selectNode(idx); }));
     const closeBtn = document.getElementById('close-detail'); if (closeBtn) closeBtn.onclick = ()=>{ selectedIndex=-1; clearSelectionOverlay(); detailsEl.innerHTML='Select a node…'; thumbEl.style.display='none'; };
-    if (!ethosValid && t.owner) {
+    if (ethos==null && t.owner) {
       setTimeout(async ()=>{
         try {
           const meta2 = await fetch(`/api/wallet/${t.owner}/meta`).then(r=>r.json());
           const e2 = meta2?.ethos_score;
-          if (typeof e2 === 'number' && isFinite(e2)) {
-            const cont = detailsEl.querySelector('.card2');
-            if (cont && !detailsEl.querySelector('.ethos-card')){
-              const min = Math.min(ethosMin, 0), max = Math.max(ethosMax, min+1);
-              const barN = Math.min(10, Math.max(0, Math.round(((e2-min)/(max-min))*10)));
-              const bar = '█'.repeat(barN) + '░'.repeat(10-barN);
-              cont.insertAdjacentHTML('afterbegin', `
-                <div class='card ethos-card'>
-                  <div class='label'>ETHOS</div>
-                  <div class='big-number'>${Math.round(e2)}</div>
-                  <div class='small-meta'>${bar}</div>
-                </div>`);
+          if (e2!=null) {
+            // append ethos line if absent
+            if (!detailsEl.innerHTML.includes('ETHOS')) {
+              const ins = `<div class=\"label\">ETHOS</div><div>${Math.round(e2)}</div>`;
+              detailsEl.innerHTML = detailsEl.innerHTML.replace('</div>\n      <div style', `${ins}</div>\n      <div style`);
             }
           }
         } catch {}
-      }, 1200);
+      }, 2000);
     }
   } catch { detailsEl.innerHTML = '<div>NO DATA</div>'; }
 }
@@ -692,28 +539,12 @@ function dashedCircle(g, cx, cy, r, color, alpha, segLen=8, gap=6, width=2){
 
 function centerOnSprite(sp){
   if (!sp) return;
-  focusNode(sp.x, sp.y, 1.2);
-}
-
-function focusNode(xWorld, yWorld, targetScale=1.2){
-  if (camAnimating) return;
-  camAnimating = true; camManual = true;
-  const dur = 300, t0 = performance.now();
-  const s0 = world.scale.x || 1;
-  const p0 = { x: world.position.x, y: world.position.y };
-  const screenCenter = new PIXI.Point(app.renderer.width/2, app.renderer.height/2);
-  const s1 = Math.min(camMax, Math.max(camMin, targetScale));
-  function frame(now){
-    const t = Math.min(1, (now - t0) / dur);
-    const s = s0 + (s1 - s0) * t;
-    camSetScale(s);
-    const sx = xWorld * (world.scale.x||1) + world.position.x;
-    const sy = yWorld * (world.scale.y||1) + world.position.y;
-    camSetPos(p0.x + (screenCenter.x - sx) * t, p0.y + (screenCenter.y - sy) * t);
-    if (t < 1) requestAnimationFrame(frame);
-    else { camAnimating = false; camAllowAutoSoon(); }
-  }
-  requestAnimationFrame(frame);
+  const scale = world.scale.x || 1;
+  const cx = app.renderer.width/2;
+  const cy = app.renderer.height/2;
+  world.position.x = cx - sp.x*scale;
+  world.position.y = cy - sp.y*scale;
+  ensureSpriteOnScreen(sp, 60);
 }
 
 function timeAgo(ms){
@@ -873,22 +704,9 @@ function applyPreset(p){
         break;
       }
       case 'trading': {
-        // Color intensity from blue (dormant) to red (high activity)
-        const now = Math.floor(Date.now()/1000);
-        const last = presetData?.tokenLastActivity?.[i] || 0;
-        const days = last ? (now - last) / 86400 : 365;
-        // Normalize by observed max
-        let maxDays = 1;
-        if (presetData?.tokenLastActivity && presetData.tokenLastActivity.length){
-          let tmin=Infinity, tmax=-Infinity; const arr=presetData.tokenLastActivity;
-          for (let k=0;k<Math.min(arr.length, sprites.length);k++){ const tt=arr[k]||0; if(tt){ if(tt<tmin) tmin=tt; if(tt>tmax) tmax=tt; } }
-          if (isFinite(tmin) && isFinite(tmax) && tmax>tmin) maxDays = Math.max(1, (now - tmin)/86400);
-          else maxDays = 365;
-        }
-        const dn = Math.max(0, Math.min(1, days / maxDays));
-        const activity = 1 - dn; // recent => high activity
-        const col = lerpColor(0x3366ff, 0xff3333, activity);
-        sprites[i].tint = col;
+        const t = presetData?.tokenLastActivity?.[i] ?? 0;
+        const fresh = t ? ((Date.now()/1000 - t) < 30*24*3600) : false;
+        sprites[i].tint = fresh ? 0x00ff66 : 0x444444;
         break;
       }
       case 'ownership': {
@@ -921,8 +739,6 @@ function layoutPreset(p){
   const cw = app.renderer.width, ch = app.renderer.height;
   const cx = cw/2, cy = ch/2;
   const n = sprites.length;
-  // Disable heat background for stability until UX finalizes
-  try { heatGfx?.clear?.(); } catch {}
   const ownerIndex = presetData?.ownerIndex || [];
   const ownerEthos = presetData?.ownerEthos || [];
   const tokenLast = presetData?.tokenLastActivity || [];
@@ -931,133 +747,38 @@ function layoutPreset(p){
   const traitKeys = presetData?.traitKeys || [];
   const rarity = presetData?.rarity || [];
 
-  // precompute owner frequencies for whales layout (update module/global)
-  ownerCounts = null;
+  // precompute owner frequencies for whales layout
+  let ownerCounts = null;
   if (ownerIndex && ownerIndex.length) {
     ownerCounts = new Array(Math.max(...ownerIndex)+1).fill(0);
     for (let i=0;i<ownerIndex.length;i++){ const oi=ownerIndex[i]; if (oi>=0) ownerCounts[oi] = (ownerCounts[oi]||0)+1; }
   }
-  try { window.ownerCounts = ownerCounts; } catch {}
 
   const place = (i, x, y)=>{ const s = sprites[i]; s.x = x; s.y = y; };
 
   switch(p){
     case 'ownership': {
-      // Dense packed bubble clusters by wallet with no overlap between clusters
-      const owners = ownerCounts?.length || 0;
-      if (!owners) break; // data expected present
-
-      // Build token indices per owner
-      const groups = new Array(owners); for (let k=0;k<owners;k++) groups[k] = [];
-      for (let i=0;i<n;i++){ const oi = ownerIndex[i] ?? -1; if (oi>=0 && oi<owners) groups[oi].push(i); }
-
-      // Order owners by holdings (desc)
-      const order = Array.from({length: owners}, (_, oi)=>oi).sort((a,b)=> (groups[b].length||0) - (groups[a].length||0));
-
-      // Precompute cluster radii per owner (approx packed disc radius)
-      const clusterRadius = new Array(owners).fill(0);
-      const spacing = 11; // target inter-point spacing (px)
-      for (let k=0;k<owners;k++){
-        const m = Math.max(1, groups[k].length);
-        clusterRadius[k] = Math.sqrt(m/Math.PI) * spacing * 1.15;
-      }
-
-      // Greedy circle placement for cluster centers without overlap
-      const centers = new Array(owners);
-      const placed = [];
-      const margin = 8;
-      function fits(x,y,r){
-        for (let c=0;c<placed.length;c++){
-          const j = placed[c];
-          const dx=x-centers[j].x, dy=y-centers[j].y; if ((dx*dx+dy*dy) < Math.pow(r + clusterRadius[j] + margin,2)) return false;
-        }
-        return true;
-      }
-      if (order.length){ const oi0 = order[0]; centers[oi0] = { x: cx, y: cy }; placed.push(oi0); }
-      for (let idx=1; idx<order.length; idx++){
-        const oi = order[idx];
-        const r = clusterRadius[oi];
-        let R = (idx===1 ? (clusterRadius[order[0]] + r + margin) : 60 + Math.sqrt(idx+1)*30);
-        let found=false;
-        // try increasing rings until fits
-        for (let ring=0; ring<200 && !found; ring++){
-          const rad = R + ring*10;
-          const step = Math.max(0.15, Math.min(0.9, (r + margin) / Math.max(60, rad)));
-          for (let a=0; a<Math.PI*2 && !found; a+=step){
-            const x = cx + Math.cos(a + ring*0.17) * rad;
-            const y = cy + Math.sin(a + ring*0.17) * rad;
-            if (fits(x,y,r)) { centers[oi] = { x, y }; placed.push(oi); found=true; }
-          }
-        }
-        if (!found) { // very unlikely: push far out
-          centers[oi] = { x: cx + (idx* (r+margin)), y: cy };
-          placed.push(oi);
-        }
-      }
-
-      // Within each owner cluster, pack tokens on Fermat spiral using local spacing
-      const ga = Math.PI * (3 - Math.sqrt(5)); // golden angle
-      for (let oi=0; oi<owners; oi++){
-        const list = groups[oi]; if (!list || !list.length) continue;
-        const center = centers[oi] || { x: cx, y: cy };
-        const m = list.length;
-        const cr = clusterRadius[oi] || 40;
-        const local = Math.max(8, (cr * 0.95) / Math.sqrt(Math.max(1, m))); // local spacing so last point ~boundary
-        for (let t=0; t<m; t++){
-          const a = t * ga;
-          const r = local * Math.sqrt(t);
-          place(list[t], center.x + Math.cos(a) * r, center.y + Math.sin(a) * r);
-        }
+      const owners = Math.max(1, (ownerCounts?.length||12));
+      for (let i=0;i<n;i++){
+        const oi = ownerIndex[i] ?? -1;
+        const ang = ((oi>=0?oi: (i%owners)) / owners) * Math.PI*2;
+        const ring = 180 + (oi>=0? (oi%6)*40 : 200);
+        const jitter = (prng(i)-0.5)*20;
+        place(i, cx + Math.cos(ang)*(ring+jitter), cy + Math.sin(ang)*(ring+jitter));
       }
       break;
     }
     case 'trading': {
-      // Activity heat grid (30x30): x = days ago, y = activity level (recent = high)
-      const COLS = 30, ROWS = 30;
-      const padL=80, padR=80, padT=80, padB=80;
-      const gw = Math.max(60, cw - padL - padR);
-      const gh = Math.max(60, ch - padT - padB);
-      const cellW = gw / COLS;
-      const cellH = gh / ROWS;
-      const now = Math.floor(Date.now()/1000);
-
-      // Determine max days span present
+      // x: last activity time normalized; y: price or ethos
       let tmin=Infinity, tmax=-Infinity; for (let i=0;i<n;i++){ const t=tokenLast[i]||0; if(t){ if(t<tmin) tmin=t; if(t>tmax) tmax=t; } }
-      let maxDays = 365; if (isFinite(tmin) && isFinite(tmax) && tmax>tmin) maxDays = Math.max(1, Math.ceil((now - tmin)/86400));
-
-      // First pass: bucket tokens into grid cells
-      const cellMap = new Map(); // key "x,y" => indices[]
-      function key(x,y){ return x+','+y; }
+      if (!isFinite(tmin) || !isFinite(tmax) || tmin===tmax){ tmin=0; tmax=3600*24*365; }
       for (let i=0;i<n;i++){
-        const last = tokenLast[i]||0;
-        const days = last? (now - last)/86400 : maxDays;
-        const dn = Math.max(0, Math.min(1, days / maxDays));
-        const xCol = Math.max(0, Math.min(COLS-1, Math.floor(dn * (COLS-1))));
-        const activity = 1 - dn; // recent => high
-        const yRow = Math.max(0, Math.min(ROWS-1, ROWS-1 - Math.floor(activity * (ROWS-1))));
-        const k = key(xCol, yRow);
-        if (!cellMap.has(k)) cellMap.set(k, []);
-        cellMap.get(k).push(i);
-      }
-
-      // Second pass: place tokens within each cell using local spiral
-      const cx0 = padL + cellW/2, cy0 = padT + cellH/2;
-      const ga = Math.PI * (3 - Math.sqrt(5));
-      const padIn = 2; // inner padding within cell
-      for (const [k, list] of cellMap.entries()){
-        const comma = k.indexOf(',');
-        const xi = parseInt(k.slice(0, comma), 10);
-        const yi = parseInt(k.slice(comma+1), 10);
-        const baseX = cx0 + xi*cellW;
-        const baseY = cy0 + yi*cellH;
-        const maxR = Math.max(1, Math.min(cellW, cellH)/2 - padIn);
-        const m = list.length;
-        const step = Math.max(2.2, maxR / Math.sqrt(Math.max(1, m)));
-        for (let t=0; t<m; t++){
-          const a = t * ga;
-          const r = Math.min(maxR, step * Math.sqrt(t));
-          place(list[t], baseX + Math.cos(a)*r, baseY + Math.sin(a)*r);
-        }
+        const t = tokenLast[i]||0; const tn = (t-tmin)/(tmax-tmin);
+        const x = 80 + tn * (cw-160);
+        let v = tokenPrice[i]; if (v==null){ const oi=ownerIndex[i]??-1; const e = (oi>=0? ownerEthos[oi]: null); v = e!=null ? e/2800 : 0.5; }
+        const jitter = (prng(i)-0.5)*20;
+        const y = ch-80 - Math.max(0, Math.min(1, v))* (ch-160) + jitter;
+        place(i, x, y);
       }
       break;
     }
@@ -1071,113 +792,30 @@ function layoutPreset(p){
       break;
     }
     case 'social': {
-      // Gravity wells around high-ethos wallets
-      const owners = ownerCounts?.length || 0;
-      if (!owners) break;
-      const ga = Math.PI * (3 - Math.sqrt(5));
-
-      // Rank owners by ethos (desc)
-      const ethosPairs = [];
-      for (let oi=0; oi<owners; oi++){
-        const e = ownerEthos?.[oi];
-        if (e!=null && isFinite(e)) ethosPairs.push([oi, e]);
-      }
-      ethosPairs.sort((a,b)=> b[1]-a[1]);
-      const K = Math.min(10, Math.max(5, Math.floor(ethosPairs.length*0.05) || 5));
-      const top = ethosPairs.slice(0, K).map(p=>p[0]);
-      const centerSet = new Set(top);
-
-      // Center positions for gravity wells (no need for perfect packing here)
-      const centers = new Map();
-      const baseR = 140;
-      for (let k=0; k<top.length; k++){
-        const theta = k * ga;
-        const ring = baseR + Math.sqrt(k+1)*20;
-        centers.set(top[k], { x: cx + Math.cos(theta)*ring, y: cy + Math.sin(theta)*ring });
-      }
-
-      // Cluster tokens by owner
-      const byOwner = new Array(owners); for (let oi=0; oi<owners; oi++) byOwner[oi] = [];
-      for (let i=0;i<n;i++){ const oi = ownerIndex[i] ?? -1; if (oi>=0 && oi<owners) byOwner[oi].push(i); }
-
-      // Place top-ethos owner tokens tightly around their center
-      for (const oi of top){
-        const list = byOwner[oi] || []; if (!list.length) continue;
-        const center = centers.get(oi) || { x: cx, y: cy };
-        // radius scales with holdings (sqrt law)
-        const s = 12; const cr = Math.sqrt(list.length/Math.PI) * s * 1.1;
-        const step = Math.max(2.0, (cr*0.95) / Math.sqrt(Math.max(1, list.length)));
-        for (let t=0;t<list.length;t++){
-          const a = t * ga;
-          const r = Math.min(cr, step * Math.sqrt(t));
-          place(list[t], center.x + Math.cos(a)*r, center.y + Math.sin(a)*r);
-        }
-      }
-
-      // Place remaining tokens by ethos to outer radii
-      const Rmax = Math.min(cx, cy) * 0.95;
-      const Rmin = baseR + 80;
-      for (let oi=0; oi<owners; oi++){
-        if (centerSet.has(oi)) continue;
-        const list = byOwner[oi]; if (!list || !list.length) continue;
-        const e = ownerEthos?.[oi];
-        const en = (e==null) ? 0.0 : (e - ethosMin) / (ethosMax - ethosMin);
-        const R = Rmin + (1 - Math.max(0, Math.min(1, en))) * (Rmax - Rmin);
-        // Spread around ring angle based on owner index
-        const baseTheta = (oi / Math.max(1, owners)) * Math.PI*2;
-        const local = Math.max(6, (Math.min(32, Math.sqrt(list.length))) );
-        for (let t=0;t<list.length;t++){
-          const a = baseTheta + (t * (ga*0.7));
-          const r = R + (prng(list[t]) - 0.5) * local;
-          place(list[t], cx + Math.cos(a)*r, cy + Math.sin(a)*r);
-        }
+      const owners = Math.max(1, (ownerCounts?.length||12));
+      for (let i=0;i<n;i++){
+        const oi = ownerIndex[i] ?? -1;
+        const ang = ((oi>=0?oi:(i%owners))/owners)*Math.PI*2;
+        const e = oi>=0 ? (ownerEthos[oi] ?? null) : null;
+        const en = (e==null) ? 0.2 : (e - ethosMin) / (ethosMax - ethosMin);
+        const rad = 100 + (1-en) * Math.min(cx,cy)*0.85;
+        const jitter = (prng(i)-0.5)*18;
+        place(i, cx + Math.cos(ang)*(rad+jitter), cy + Math.sin(ang)*(rad+jitter));
       }
       break;
     }
     case 'whales': {
-      // Territory map with sized regions; quadratic node scaling by holdings
-      const owners = Math.max(1, (ownerCounts?.length||1));
-      const totalHold = ownerCounts ? ownerCounts.reduce((a,b)=>a+(b||0),0) : 1;
-      const maxHold = ownerCounts ? Math.max(1, ...ownerCounts) : 1;
-
-      // Build groups per owner
-      const groups = new Array(owners); for (let k=0;k<owners;k++) groups[k] = [];
-      for (let i=0;i<n;i++){ const oi = ownerIndex[i] ?? -1; if (oi>=0 && oi<owners) groups[oi].push(i); }
-
-      // Compute wedge sizes proportional to holdings
-      const wedges = new Array(owners);
-      for (let oi=0; oi<owners; oi++){
-        const hold = ownerCounts?.[oi] || 0;
-        const frac = Math.max(0, hold) / Math.max(1, totalHold);
-        wedges[oi] = { oi, hold, frac, angle: frac * Math.PI*2 };
-      }
-      // Keep deterministic order by oi
-      wedges.sort((a,b)=> a.oi - b.oi);
-
-      const innerR = 110;
-      const outerR = 120 + Math.min(cx,cy)*0.85;
-      
-      // Place tokens within wedges; biggest whales closer to center, quadratic node scaling
-      const ga = Math.PI * (3 - Math.sqrt(5));
-      let acc = 0;
-      for (let w=0; w<wedges.length; w++){
-        const { oi, hold, angle } = wedges[w];
-        const a0 = acc; const a1 = acc + angle; acc = a1; const aw = Math.max(1e-4, a1 - a0);
-        const list = groups[oi]; if (!list || !list.length) continue;
-        const strength = Math.max(0, Math.min(1, (hold||0) / maxHold));
-        const centerR = innerR + (1 - strength) * (outerR - innerR);
-        const localR = Math.max(10, Math.min(80, Math.sqrt(list.length) * 6));
-
-        for (let t=0; t<list.length; t++){
-          const idx = list[t];
-          const a = a0 + ((t * 0.61803398875) % 1) * aw; // spread inside wedge
-          const r = centerR + (Math.min(localR, 6 * Math.sqrt(t)) * (prng(idx) - 0.5));
-          place(idx, cx + Math.cos(a)*r, cy + Math.sin(a)*r);
-          // Quadratic scale by holdings
-          const s0 = 0.7, s1 = 2.4;
-          const sc = s0 + (s1 - s0) * (strength*strength);
-          sprites[idx].scale.set(sc, sc);
-        }
+      const maxHold = ownerCounts? Math.max(...ownerCounts): 1;
+      const owners = Math.max(1, (ownerCounts?.length||12));
+      for (let i=0;i<n;i++){
+        const oi = ownerIndex[i] ?? -1;
+        const ang = ((oi>=0?oi:(i%owners))/owners)*Math.PI*2;
+        const hold = (oi>=0 && ownerCounts) ? ownerCounts[oi] : 1;
+        const strength = Math.max(0, Math.min(1, hold / (maxHold||1)));
+        const rad = 120 + (1-strength) * Math.min(cx,cy)*0.85;
+        const scale = 0.8 + strength*1.8; // node size varies by holdings
+        sprites[i].scale.set(scale, scale);
+        place(i, cx + Math.cos(ang)*rad, cy + Math.sin(ang)*rad);
       }
       break;
     }
@@ -1194,7 +832,7 @@ function layoutPreset(p){
       }
       break;
     }
-    default: return;
+    default: layoutGrid(); return;
   }
   drawEdges();
 }
@@ -1204,33 +842,11 @@ function showToast(msg){ console.log('[toast]', msg); }
 let selectedIndex = -1;
 let selectedWalletSet = null;
 
-function resetAlpha(){
-  for (let i=0;i<sprites.length;i++) sprites[i].alpha = 0.95;
-  // Glow effect for verified holders in SOCIAL preset
-  try {
-    if (preset === 'social' && presetData){
-      const owners = presetData?.ownerIndex?.length ? Math.max(...presetData.ownerIndex)+1 : 0;
-      for (let i=0;i<sprites.length;i++){
-        const oi = presetData?.ownerIndex?.[i] ?? -1;
-        if (oi<0 || oi>=owners) continue;
-        let verified = false;
-        if (Array.isArray(presetData.ownerVerified)) verified = !!presetData.ownerVerified[oi];
-        else {
-          const e = presetData?.ownerEthos?.[oi];
-          if (e!=null && isFinite(e)){
-            const en = (e - ethosMin) / (ethosMax - ethosMin);
-            verified = en >= 0.85; // heuristic when explicit flag absent
-          }
-        }
-        if (verified) sprites[i].alpha = 0.995;
-      }
-    }
-  } catch {}
-}
+function resetAlpha(){ for (let i=0;i<sprites.length;i++) sprites[i].alpha = 0.95; }
 function resetView(){
-  if (camManual || camAnimating) return;
   const s = 1.2; // slightly zoomed-in default for visibility
   world.scale.set(s);
+  // keep the world center anchored to screen center when scaling
   const cx = app.renderer.width/2, cy = app.renderer.height/2;
   world.position.set((1-s)*cx, (1-s)*cy);
 }
@@ -1255,10 +871,6 @@ function clampWorldToContent(pad=40){
   world.position.x += dx; world.position.y += dy;
 }
 
-function clampCameraToGraphBounds(){
-  clampWorldToContent(40);
-}
-
 function ensureSpriteOnScreen(sp, pad=60){
   const s = world.scale.x||1; const w=app.renderer.width, h=app.renderer.height;
   const sx = world.position.x + sp.x*s; const sy = world.position.y + sp.y*s;
@@ -1269,7 +881,6 @@ function ensureSpriteOnScreen(sp, pad=60){
 }
 
 function fitToVisible(){
-  if (camManual || camAnimating) return;
   const pad = 40;
   let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity, n=0;
   for (let i=0;i<sprites.length;i++){
