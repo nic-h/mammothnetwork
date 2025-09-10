@@ -1,14 +1,20 @@
 :root{
-  /* Colors */
+  /* Colors (aligned to mammoths.tech/dash/maker) */
   --bg: #000000;
-  --fg: #00ff66;
-  --fg-muted: #7bf0a8;
-  --blue: #4488ff; /* frozen */
-  --gray: #666666; /* dormant */
-  --green-rgb: 0,255,102; /* for rgba() */
+  --fg: #00ff00;              /* primary green */
+  --fg-dim: #00cc00;          /* dimmer green */
+  --fg-bright: #33ff66;       /* bright accent */
+  --text: #e6ffe6;            /* light text (used in maker) */
+  --panel: rgba(0,255,0,.02); /* dash panel bg */
+  --grid: rgba(0,255,0,.10);  /* grid lines */
+  --dotted: rgba(0,255,0,.30);/* dotted separators */
+  --border: 1px solid rgba(0,255,0,0.25);
+  --green-rgb: 0,255,0;       /* for rgba(...) uses */
+  --blue: #4488ff;            /* frozen */
+  --gray: #666666;            /* dormant */
 
   /* Typography */
-  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, 'Fira Code', SFMono-Regular, monospace;
+  --font-mono: Menlo, 'Fira Code', 'SFMono-Regular', ui-monospace, monospace;
   --fs-10: 10px; --fs-11: 11px; --fs-12: 12px; --fs-14: 14px; --fs-18: 18px;
   --fw-regular: 400; --fw-bold: 700;
 
@@ -18,4 +24,4 @@
 }
 
 /* baseline application */
-html, body { background: var(--bg); color: var(--fg); font-family: var(--font-mono); }
+html, body { background: var(--bg); color: var(--fg); font-family: var(--font-mono); font-size: var(--fs-12); }
