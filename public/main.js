@@ -105,7 +105,8 @@ async function init() {
   await load(modeEl.value, Number(edgesEl?.value||200));
 
   // Interactions
-  setupPanZoom();
+  // Install viewport controls (pan/zoom, zoom-at-cursor)
+  const viewport = installViewport({ app, world, minScale:0.2, maxScale:5, onZoom: ()=>drawEdges() });
   stageEl.addEventListener('click', onStageClick);
   modeEl.addEventListener('change', ()=> load(modeEl.value, Number(edgesEl?.value||200)));
   // Layer toggles -> redraw edges and overlay
@@ -132,7 +133,12 @@ async function init() {
   }
   const clearBtn = document.getElementById('clear-search');
   if (clearBtn){ clearBtn.addEventListener('click', ()=>{ searchEl.value=''; searchEl.focus(); }); }
-  window.addEventListener('keydown', (e)=>{ if (e.key==='Escape'){ searchEl.value=''; }});
+  window.addEventListener('keydown', (e)=>{
+    if (e.key==='Escape'){
+      selectedIndex = -1; clearSelectionOverlay(); resetAlpha();
+      viewport.resetView();
+    }
+  });
   // Double-click resets selection and view
   stageEl.addEventListener('dblclick', ()=> { selectedIndex=-1; clearSelectionOverlay(); resetAlpha(); resetView(); });
   // Search: token id or wallet address
@@ -295,13 +301,13 @@ function drawEdges(){
     const maxDraw = 500;
     edgesGfx.clear();
     const s = world?.scale?.x || 1;
-    // LOD: do not render edges when zoomed out too far
-    if (s < 0.45) return;
+    // LOD: keep edges visible more often; only skip when very far out
+    if (s < 0.35) return;
     if ((edgesData?.length||0) && edgesData.length <= maxDraw) {
       const mode = modeEl?.value || 'holders';
-      // scale factors for width/alpha based on zoom
-      const aF = Math.max(0, Math.min(1, (s - 0.45) / 0.8));
-      const wF = 0.9 + aF * 0.8;
+      // scale factors for width/alpha based on zoom (gentler falloff)
+      const aF = Math.max(0, Math.min(1, (s - 0.35) / 0.9));
+      const wF = 0.8 + aF * 0.9;
       for (let e=0;e<edgesData.length;e++){
         const item = edgesData[e];
         const a = Array.isArray(item)? item[0] : (item.a ?? item.source ?? item.from ?? 0);
@@ -316,7 +322,7 @@ function drawEdges(){
         // Weight-aware adjustment
         const weight = Number(item?.count || item?.weight || (Array.isArray(item)? item[2] : 1)) || 1;
         const t = Math.min(1, Math.log2(weight + 1) / 4);
-        style = { ...style, width: Math.min(2.2, (style.width || 0.6) * wF * (1 + t)), opacity: (style.opacity ?? 0.8) * (0.3 + 0.7 * aF) };
+        style = { ...style, width: Math.min(2.4, Math.max(0.4, (style.width || 0.6) * wF * (1 + t))), opacity: Math.max(0.18, (style.opacity ?? 0.8) * (0.28 + 0.72 * aF)) };
         strokeEdge(edgesGfx, x1, y1, x2, y2, style);
       }
     }
@@ -437,33 +443,7 @@ function setLegend(p){
   legendEl.textContent = text;
 }
 
-// Pan/zoom
-function setupPanZoom(){
-  let isDragging=false, start={x:0,y:0}, startPos={x:0,y:0};
-  stageEl.addEventListener('mousedown', e=>{ isDragging=true; start={x:e.clientX,y:e.clientY}; startPos={x:world.position.x,y:world.position.y}; });
-  window.addEventListener('mouseup', ()=> isDragging=false);
-  window.addEventListener('mousemove', e=>{ if(!isDragging) return; const dx=e.clientX-start.x, dy=e.clientY-start.y; world.position.set(startPos.x+dx, startPos.y+dy); });
-  stageEl.addEventListener('wheel', e=>{
-    e.preventDefault();
-    const rect = stageEl.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-    const k = e.ctrlKey ? 0.0012 : 0.0007; // gentler trackpad zoom
-    const f = Math.exp(-e.deltaY * k);
-    const old = world.scale.x;
-    const nx = clamp(old*f, 0.1, 5);
-    // world coords of pointer before zoom
-    const wx = (sx - world.position.x) / old;
-    const wy = (sy - world.position.y) / old;
-    // apply scale
-    world.scale.set(nx);
-    // keep pointer anchored
-    world.position.x = sx - wx * nx;
-    world.position.y = sy - wy * nx;
-    clampWorldToContent(40);
-    drawEdges(); // update LOD stroke thickness/visibility
-  }, {passive:false});
-}
+// Pan/zoom now handled by installViewport() in viewport.js
 
 // Selection
 function onStageClick(e){
@@ -516,7 +496,7 @@ async function selectNode(index){
     selectedWalletSet = holdings ? new Set(holdings.map(Number)) : null;
     updateSelectionOverlay();
     if (focusMode) applyFocus();
-    centerOnSprite(sprites[selectedIndex]);
+    viewport.centerOn(sprites[selectedIndex].x, sprites[selectedIndex].y, 1.2);
     // rarity score from preset data
     await ensurePresetData();
     const idx2 = idToIndex.get(id);
@@ -655,15 +635,7 @@ function dashedCircle(g, cx, cy, r, color, alpha, segLen=8, gap=6, width=2){
   }
 }
 
-function centerOnSprite(sp){
-  if (!sp) return;
-  const scale = world.scale.x || 1;
-  const cx = app.renderer.width/2;
-  const cy = app.renderer.height/2;
-  world.position.x = cx - sp.x*scale;
-  world.position.y = cy - sp.y*scale;
-  ensureSpriteOnScreen(sp, 60);
-}
+// centerOnSprite handled via viewport.centerOn
 
 function timeAgo(ms){
   const s = Math.max(1, Math.floor((Date.now()-ms)/1000));
