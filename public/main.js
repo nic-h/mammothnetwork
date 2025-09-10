@@ -204,9 +204,8 @@ async function init() {
   if (clearBtn){ clearBtn.addEventListener('click', ()=>{ searchEl.value=''; searchEl.focus(); }); }
   window.addEventListener('keydown', (e)=>{ if (e.key==='Escape'){ searchEl.value=''; }});
   // Focus toggle UI + keyboard shortcut
-  const focusEl = document.getElementById('focus-toggle');
-  if (focusEl) focusEl.addEventListener('change', ()=>{ focusMode = !!focusEl.checked; if (selectedIndex>=0) applyFocus(); else resetAlpha(); });
-  window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='f'){ focusMode=!focusMode; if (focusEl) focusEl.checked = focusMode; if (selectedIndex>=0) applyFocus(); else resetAlpha(); }});
+  // Focus disabled
+  const focusEl = null;
   stageEl.addEventListener('dblclick', ()=> { camManual=false; resetView(); });
   // Search: token id or wallet address
   searchEl.addEventListener('keydown', async e=>{
@@ -334,30 +333,7 @@ function drawEdges(){
   try {
     const maxDraw = 500;
     edgesGfx.clear();
-    // Draw trading preset gridlines in world space
-    try {
-      if (preset === 'trading'){
-        const COLS = 30, ROWS = 30;
-        const cw = app.renderer.width, ch = app.renderer.height;
-        const padL=80, padR=80, padT=80, padB=80;
-        const gw = Math.max(60, cw - padL - padR);
-        const gh = Math.max(60, ch - padT - padB);
-        const cellW = gw / COLS;
-        const cellH = gh / ROWS;
-        const x0 = padL, y0 = padT;
-        edgesGfx.lineStyle({ width:1, color:0x2a2a2a, alpha:0.6 });
-        for (let c=0;c<=COLS;c++){
-          const x = x0 + c*cellW;
-          edgesGfx.moveTo(x, y0);
-          edgesGfx.lineTo(x, y0 + gh);
-        }
-        for (let r=0;r<=ROWS;r++){
-          const y = y0 + r*cellH;
-          edgesGfx.moveTo(x0, y);
-          edgesGfx.lineTo(x0 + gw, y);
-        }
-      }
-    } catch {}
+    // no gridlines drawn here; only actual edges per layer toggles
     if ((edgesData?.length||0) && edgesData.length <= maxDraw) {
       const mode = modeEl?.value || 'holders';
       for (let e=0;e<edgesData.length;e++){
@@ -945,8 +921,8 @@ function layoutPreset(p){
   const cw = app.renderer.width, ch = app.renderer.height;
   const cx = cw/2, cy = ch/2;
   const n = sprites.length;
-  // Update heat background per preset (clears when not needed)
-  drawHeatBackground(p);
+  // Disable heat background for stability until UX finalizes
+  try { heatGfx?.clear?.(); } catch {}
   const ownerIndex = presetData?.ownerIndex || [];
   const ownerEthos = presetData?.ownerEthos || [];
   const tokenLast = presetData?.tokenLastActivity || [];
@@ -1159,7 +1135,7 @@ function layoutPreset(p){
       break;
     }
     case 'whales': {
-      // Territory map with sized regions; quadratic node scaling by holdings; draw boundaries
+      // Territory map with sized regions; quadratic node scaling by holdings
       const owners = Math.max(1, (ownerCounts?.length||1));
       const totalHold = ownerCounts ? ownerCounts.reduce((a,b)=>a+(b||0),0) : 1;
       const maxHold = ownerCounts ? Math.max(1, ...ownerCounts) : 1;
@@ -1178,30 +1154,12 @@ function layoutPreset(p){
       // Keep deterministic order by oi
       wedges.sort((a,b)=> a.oi - b.oi);
 
-      // Draw boundaries
-      clearSelectionOverlay();
-      selectGfx.lineStyle({ width: 1, color: 0x116644, alpha: 0.8 });
       const innerR = 110;
       const outerR = 120 + Math.min(cx,cy)*0.85;
-      let acc = 0;
-      for (let k=0;k<wedges.length;k++){
-        const a0 = acc; const a1 = acc + wedges[k].angle; acc = a1;
-        const x0 = cx + Math.cos(a0) * innerR, y0 = cy + Math.sin(a0) * innerR;
-        const x1 = cx + Math.cos(a0) * outerR, y1 = cy + Math.sin(a0) * outerR;
-        selectGfx.moveTo(x0, y0); selectGfx.lineTo(x1, y1);
-      }
-      // Outer ring boundary
-      selectGfx.lineStyle({ width: 1, color: 0x0d5533, alpha: 0.6 });
-      for (let t=0;t<=100;t++){
-        const a = (t/100)*Math.PI*2;
-        const x = cx + Math.cos(a) * outerR;
-        const y = cy + Math.sin(a) * outerR;
-        if (t===0) selectGfx.moveTo(x,y); else selectGfx.lineTo(x,y);
-      }
-
+      
       // Place tokens within wedges; biggest whales closer to center, quadratic node scaling
       const ga = Math.PI * (3 - Math.sqrt(5));
-      acc = 0;
+      let acc = 0;
       for (let w=0; w<wedges.length; w++){
         const { oi, hold, angle } = wedges[w];
         const a0 = acc; const a1 = acc + angle; acc = a1; const aw = Math.max(1e-4, a1 - a0);
