@@ -312,7 +312,8 @@ function setupPanZoom(){
     const rect = stageEl.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
-    const f = Math.exp(-e.deltaY*0.001);
+    const k = e.ctrlKey ? 0.0012 : 0.0007; // gentler trackpad zoom
+    const f = Math.exp(-e.deltaY * k);
     const old = world.scale.x;
     const nx = clamp(old*f, 0.1, 5);
     // world coords of pointer before zoom
@@ -323,6 +324,7 @@ function setupPanZoom(){
     // keep pointer anchored
     world.position.x = sx - wx * nx;
     world.position.y = sy - wy * nx;
+    clampWorldToContent(40);
   }, {passive:false});
 }
 
@@ -527,6 +529,7 @@ function centerOnSprite(sp){
   const cy = app.renderer.height/2;
   world.position.x = cx - sp.x*scale;
   world.position.y = cy - sp.y*scale;
+  ensureSpriteOnScreen(sp, 60);
 }
 
 function timeAgo(ms){
@@ -831,6 +834,35 @@ function resetView(){
   // keep the world center anchored to screen center when scaling
   const cx = app.renderer.width/2, cy = app.renderer.height/2;
   world.position.set((1-s)*cx, (1-s)*cy);
+}
+
+function computeContentBounds(){
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9; const n=sprites.length;
+  for(let i=0;i<n;i++){ const sp=sprites[i]; if (sp.x<minx) minx=sp.x; if (sp.x>maxx) maxx=sp.x; if (sp.y<miny) miny=sp.y; if (sp.y>maxy) maxy=sp.y; }
+  if (minx===1e9) return null; return {minx,miny,maxx,maxy};
+}
+
+function clampWorldToContent(pad=40){
+  const b = computeContentBounds(); if (!b) return;
+  const s = world.scale.x||1; const w=app.renderer.width, h=app.renderer.height;
+  // Compute content bbox in screen coords
+  const sx1 = world.position.x + b.minx*s - pad;
+  const sy1 = world.position.y + b.miny*s - pad;
+  const sx2 = world.position.x + b.maxx*s + pad;
+  const sy2 = world.position.y + b.maxy*s + pad;
+  let dx=0, dy=0;
+  if (sx1>0) dx = -sx1; if (sx2<w && dx===0) dx = w-sx2;
+  if (sy1>0) dy = -sy1; if (sy2<h && dy===0) dy = h-sy2;
+  world.position.x += dx; world.position.y += dy;
+}
+
+function ensureSpriteOnScreen(sp, pad=60){
+  const s = world.scale.x||1; const w=app.renderer.width, h=app.renderer.height;
+  const sx = world.position.x + sp.x*s; const sy = world.position.y + sp.y*s;
+  let dx=0, dy=0;
+  if (sx < pad) dx = pad - sx; else if (sx > w-pad) dx = (w-pad) - sx;
+  if (sy < pad) dy = pad - sy; else if (sy > h-pad) dy = (h-pad) - sy;
+  world.position.x += dx; world.position.y += dy;
 }
 
 function fitToVisible(){
