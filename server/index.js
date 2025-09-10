@@ -427,6 +427,50 @@ app.get(['/api/graph', '/api/network-graph'], (req, res) => {
   return sendWithCaching(req, res, key, result);
 });
 
+// Aggregated, directed transfer edges between wallets mapped to representative tokens
+// Query params: limit (max edges, default 500), nodes (cap token id space, default 10000)
+app.get('/api/transfer-edges', (req, res) => {
+  if (!haveDb || !db) return res.json([]);
+  const limit = clamp(parseInt(req.query.limit || '500', 10), 1, 2000);
+  const N = clamp(parseInt(req.query.nodes || '10000', 10), 100, 10000);
+  try {
+    const rows = db.prepare(`
+      SELECT LOWER(from_addr) AS a,
+             LOWER(to_addr)   AS b,
+             COUNT(1)         AS cnt,
+             SUM(CASE WHEN price IS NOT NULL AND price>0 THEN 1 ELSE 0 END) AS sales,
+             SUM(CASE WHEN (price IS NULL OR price<=0) AND (event_type IS NULL OR event_type<>'mint') THEN 1 ELSE 0 END) AS transfers,
+             SUM(CASE WHEN (event_type='mint' OR from_addr IS NULL OR from_addr='') THEN 1 ELSE 0 END) AS mints
+      FROM transfers
+      WHERE to_addr IS NOT NULL AND to_addr<>''
+      GROUP BY a,b
+      ORDER BY cnt DESC
+      LIMIT ?
+    `).all(limit);
+
+    const out = [];
+    for (const r of rows) {
+      const a = (r.a || '').toLowerCase();
+      const b = (r.b || '').toLowerCase();
+      if (!a || !b) continue;
+      const aTokens = getOwnerTokens(db, a, N);
+      const bTokens = getOwnerTokens(db, b, N);
+      const aTok = aTokens[0] || null;
+      const bTok = bTokens[0] || null;
+      if (!aTok || !bTok) continue;
+      let type = 'transfer';
+      if (r.mints > 0 && r.sales === 0) type = 'mint';
+      else if (r.sales > 0 && r.transfers === 0) type = 'sale';
+      else if (r.sales > 0 && r.transfers > 0) type = 'mixed';
+      out.push({ a: aTok, b: bTok, type, count: r.cnt, sales: r.sales, transfers: r.transfers, mints: r.mints });
+    }
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    return res.json(out);
+  } catch (e) {
+    return res.json([]);
+  }
+});
+
 // API: Stats (lightweight)
 app.get('/api/stats', (req, res) => {
   if (haveDb && db) {

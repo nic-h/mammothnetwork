@@ -28,12 +28,18 @@ let ownerCounts = null;
 let highlightSet = null; // Set of ids currently highlighted by filter
 // Edge style mapping (lightweight, perf-friendly)
 const EDGE_STYLES = {
-  OWNERSHIP:      { kind:'solid',  width:2,   color:0x00ff00, opacity:1.0 },
-  RECENT_TRADE:   { kind:'solid',  width:1.5, color:0x00ffaa, opacity:0.8 },
-  OLD_TRADE:      { kind:'dashed', width:1,   color:0x666666, opacity:0.4 },
-  RARE_TRAIT:     { kind:'dotted', width:1,   color:0xffaa00, opacity:0.6 },
-  HIGH_VALUE:     { kind:'solid',  width:3,   color:0xffd700, opacity:1.0 },
-  SAME_WHALE:     { kind:'double', width:2,   color:0x00ccff, opacity:0.7 },
+  OWNERSHIP:      { kind:'solid',  width:1.0, color:0x00ff00, opacity:0.9 },
+  RECENT_TRADE:   { kind:'solid',  width:0.8, color:0x00ffaa, opacity:0.8 },
+  OLD_TRADE:      { kind:'dashed', width:0.6, color:0x666666, opacity:0.4 },
+  RARE_TRAIT:     { kind:'dotted', width:0.6, color:0xffaa00, opacity:0.7 },
+  HIGH_VALUE:     { kind:'solid',  width:1.0, color:0xffd700, opacity:1.0 },
+  SAME_WHALE:     { kind:'double', width:0.8, color:0x00ccff, opacity:0.7 },
+  // Transaction styles
+  SALE:           { kind:'arrow',  width:0.8, color:0xff3b3b, opacity:0.95 },
+  PURCHASE:       { kind:'arrow',  width:0.8, color:0x00ff00, opacity:0.95 },
+  TRANSFER:       { kind:'dashed', width:0.6, color:0x00aaff, opacity:0.9 },
+  MINT:           { kind:'dotted', width:0.6, color:0xffffff, opacity:0.95 },
+  MULTI:          { kind:'solid',  width:1.0, color:0xffd700, opacity:0.95 },
 };
 
 // Utils
@@ -162,6 +168,12 @@ async function load(mode, edges){
   const data = await fetchGraph(mode, edges).catch(()=> lastGraph || {nodes:[],edges:[]});
   nodes = data.nodes||[]; edgesData = data.edges||[];
   buildSprites(nodes.map(n=>n.color||0x00ff00));
+  if (mode === 'transfers') {
+    try {
+      const det = await fetch(`/api/transfer-edges?limit=${encodeURIComponent(edges||200)}&nodes=10000`, { cache:'no-store' }).then(r=>r.json());
+      if (Array.isArray(det) && det.length) edgesData = det;
+    } catch {}
+  }
   // No physics: static grid layout
   layoutGrid();
   resetView();
@@ -250,7 +262,11 @@ function drawEdges(){
 function pickEdgeStyle(mode, i, j, item){
   // Prefer explicit type if provided
   const type = (item && typeof item==='object' && item.type) ? String(item.type).toUpperCase() : null;
-  if (type && EDGE_STYLES[type]) return EDGE_STYLES[type];
+  if (type && EDGE_STYLES[type]) {
+    const count = Number(item.count||item.weight||0);
+    if (count>=3) return { ...EDGE_STYLES.MULTI, width: Math.min(1.2, 0.6 + Math.log2(count+1)*0.2) };
+    return EDGE_STYLES[type];
+  }
   // Infer from mode + recency/price when possible
   if (mode === 'holders') return EDGE_STYLES.OWNERSHIP;
   if (mode === 'wallets') return EDGE_STYLES.SAME_WHALE;
@@ -269,6 +285,7 @@ function pickEdgeStyle(mode, i, j, item){
 
 function strokeEdge(g, x1, y1, x2, y2, st){
   const s = st || EDGE_STYLES.OWNERSHIP;
+  const baseW = Math.max(0.3, Math.min(1.2, s.width||0.6));
   if (s.kind === 'double'){
     const nx = y2 - y1, ny = -(x2 - x1);
     const len = Math.max(1, Math.hypot(nx, ny));
@@ -278,26 +295,41 @@ function strokeEdge(g, x1, y1, x2, y2, st){
     lineSolid(g, x1+ox, y1+oy, x2+ox, y2+oy, s);
     return;
   }
-  if (s.kind === 'dashed') return lineDashed(g, x1, y1, x2, y2, s, 8, 6);
-  if (s.kind === 'dotted') return lineDashed(g, x1, y1, x2, y2, s, 2, 4);
-  return lineSolid(g, x1, y1, x2, y2, s);
+  if (s.kind === 'dashed') return lineDashed(g, x1, y1, x2, y2, { ...s, width: baseW }, 8, 6);
+  if (s.kind === 'dotted') return lineDashed(g, x1, y1, x2, y2, { ...s, width: baseW }, 2, 4);
+  if (s.kind === 'arrow')  return lineArrow(g, x1, y1, x2, y2, { ...s, width: baseW });
+  return lineSolid(g, x1, y1, x2, y2, { ...s, width: baseW });
 }
 
 function lineSolid(g, x1, y1, x2, y2, s){
-  g.lineStyle({ width:s.width||1, color:s.color||0x00ff00, alpha:s.opacity??0.6, cap:'round' });
+  g.lineStyle({ width:s.width||0.6, color:s.color||0x00ff00, alpha:s.opacity??0.8, cap:'round' });
   g.moveTo(x1, y1); g.lineTo(x2, y2);
 }
 
 function lineDashed(g, x1, y1, x2, y2, s, dash=6, gap=4){
   const dx = x2-x1, dy = y2-y1; const len = Math.hypot(dx,dy);
   const ux = dx/len, uy = dy/len;
-  g.lineStyle({ width:s.width||1, color:s.color||0x666666, alpha:s.opacity??0.5, cap:'butt' });
+  g.lineStyle({ width:s.width||0.5, color:s.color||0x666666, alpha:s.opacity??0.6, cap:'butt' });
   let dist = 0; let on=true; let cx=x1, cy=y1;
   while (dist < len){
     const step = on? dash : gap; const nx = cx + ux*step; const ny = cy + uy*step;
     if (on){ g.moveTo(cx, cy); g.lineTo(Math.min(nx, x2), Math.min(ny, y2)); }
     cx = nx; cy = ny; dist += step; on = !on;
   }
+}
+
+function lineArrow(g, x1, y1, x2, y2, s){
+  const w = s.width || 0.6;
+  g.lineStyle({ width:w, color:s.color||0xff3b3b, alpha:s.opacity??0.9, cap:'round' });
+  g.moveTo(x1, y1); g.lineTo(x2, y2);
+  const dx = x2 - x1, dy = y2 - y1; const len = Math.hypot(dx, dy) || 1;
+  const ux = dx/len, uy = dy/len;
+  const size = Math.max(6, Math.min(10, 10*w+4));
+  const bx = x2 - ux*size, by = y2 - uy*size;
+  const nx = -uy, ny = ux;
+  g.lineStyle({ width:w, color:s.color||0xff3b3b, alpha:s.opacity??0.9, join:'miter' });
+  g.moveTo(x2, y2); g.lineTo(bx + nx*(size*0.4), by + ny*(size*0.4));
+  g.moveTo(x2, y2); g.lineTo(bx - nx*(size*0.4), by - ny*(size*0.4));
 }
 
 function clearSelectionOverlay(){ selectGfx?.clear?.(); }
