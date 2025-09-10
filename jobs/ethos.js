@@ -28,10 +28,9 @@ function rankFromLevel(level) {
 }
 
 async function main() {
-  // gather top holders and recent traders (bounded)
-  const TOP_HOLDERS = Math.min(Math.max(Number(process.env.ETHOS_TOP_HOLDERS || 1000), 1), 5000);
-  const RECENT_TRADERS = Math.min(Math.max(Number(process.env.ETHOS_RECENT_TRADERS || 2000), 1), 10000);
-  const top = db.prepare(`SELECT LOWER(owner) a FROM tokens WHERE owner IS NOT NULL AND owner<>'' GROUP BY LOWER(owner) ORDER BY COUNT(1) DESC LIMIT ?`).all(TOP_HOLDERS).map(r=>r.a);
+  // Gather ALL distinct holders (no limit) plus a bounded set of recent traders
+  const owners = db.prepare(`SELECT LOWER(owner) a FROM tokens WHERE owner IS NOT NULL AND owner<>'' GROUP BY LOWER(owner)`).all().map(r=>r.a);
+  const RECENT_TRADERS = Math.min(Math.max(Number(process.env.ETHOS_RECENT_TRADERS || 5000), 0), 50000);
   const traders = db.prepare(`
     WITH alladdr AS (
       SELECT LOWER(from_addr) a, timestamp t FROM transfers WHERE from_addr IS NOT NULL AND from_addr<>''
@@ -40,7 +39,7 @@ async function main() {
     )
     SELECT a FROM alladdr ORDER BY t DESC LIMIT ?
   `).all(RECENT_TRADERS).map(r=>r.a);
-  const addrs = uniq([...top, ...traders]);
+  const addrs = uniq([...owners, ...traders]);
   if (!addrs.length) { console.log('no addresses to enrich'); return; }
 
   const up = db.prepare(`

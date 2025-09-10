@@ -8,43 +8,36 @@
   <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
   <!-- PIXI served from /lib; preconnect not required -->
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/client/styles/layout.css">
 </head>
 <body>
-  <header class="header">
-    <div class="logo">MAMMOTH.NETWORK</div>
-    <div class="header-controls">
-      <div class="presets">
-        <button class="preset-btn" data-preset="ownership">OWNERSHIP</button>
-        <button class="preset-btn" data-preset="trading">TRADING</button>
-        <button class="preset-btn" data-preset="rarity">RARITY</button>
-        <button class="preset-btn" data-preset="social">SOCIAL</button>
-        <button class="preset-btn" data-preset="whales">WHALES</button>
-        <button class="preset-btn" data-preset="frozen">FROZEN</button>
-      </div>
-      <div class="search-wrapper">
-        <input id="search" type="search" placeholder="TOKEN ID OR ADDRESS" class="header-search">
+  <div class="app">
+    <div class="header">
+      <div class="header__brand">MAMMOTHS.NETWORK</div>
+      <div class="header__controls">
+        <label for="mode">MODE</label>
+        <select id="mode">
+          <option value="holders">HOLDERS</option>
+          <option value="ownership">OWNERSHIP</option>
+          <option value="trading">TRADING</option>
+          <option value="rarity">RARITY</option>
+          <option value="social">SOCIAL</option>
+          <option value="whales">WHALES</option>
+          <option value="frozen">FROZEN</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:6px;"><input id="focus-toggle" type="checkbox"> FOCUS</label>
+        <input id="search" type="search" placeholder="TOKEN ID OR ADDRESS" class="header-search" />
         <button id="clear-search" class="clear-btn" title="Clear (ESC)">✕</button>
       </div>
     </div>
-  </header>
-  <div class="main-container">
-    <aside class="left-panel">
+
+    <div class="left">
       <div class="controls-section">
-        <div class="mode-selector">
-          <label>MODE</label>
-          <select id="mode">
-            <option value="holders">HOLDERS</option>
-            <option value="transfers">TRANSFERS</option>
-            <option value="traits">TRAITS</option>
-            <option value="wallets">WALLETS</option>
-          </select>
-        </div>
         <div class="edge-controls">
           <label>EDGES</label>
           <input type="range" id="edges-slider" min="0" max="500" value="200">
           <span id="edge-count">200</span>
         </div>
-        <label class="focus-toggle"><input type="checkbox" id="focus"> FOCUS MODE</label>
         <div class="legend" id="legend">Color by owner; same-owner links.</div>
         <div class="layer-toggles">
           <h4>EDGE LAYERS</h4>
@@ -59,12 +52,14 @@
         <button id="clear-filters" class="preset-btn" style="width:100%;margin-bottom:12px;">CLEAR FILTERS</button>
         <div id="traits-container"></div>
       </div>
-    </aside>
-    <div class="center-panel"><canvas id="stage"></canvas></div>
-    <aside class="right-panel" id="sidebar">
+    </div>
+
+    <div class="canvas"><canvas id="stage"></canvas></div>
+
+    <div class="right" id="sidebar">
       <img id="thumb" alt="thumb" style="display:none">
       <div id="details">Select a node…</div>
-    </aside>
+    </div>
   </div>
   <script src="/lib/pixi.min.js"></script>
   <script src="/main.js"></script>

@@ -39,9 +39,12 @@ export async function getEthosForAddress(address) {
       displayName: user.displayName || null,
       username: user.username || null,
       avatarUrl: user.avatarUrl || null,
+      profileId: user.profileId ?? null,
+      status: user.status || null,
       score: (score && typeof score.score === 'number') ? score.score : (typeof user.score === 'number' ? user.score : null),
       level: score?.level || null,
       links: user.links || null,
+      userkeys: Array.isArray(user.userkeys) ? user.userkeys : [],
     };
   } catch (e) {
     return { ok: false, error: 'ethos-v2-failed' };

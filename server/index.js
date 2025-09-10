@@ -59,7 +59,7 @@ function idToColor(id) {
 // Fallback demo graph generator (fast)
 function generateFallbackGraph({ nodes = 10000, edges = 20000, seed = 42 }) {
   const nodesArr = new Array(nodes);
-  for (let i = 0; i < nodes; i++) nodesArr[i] = { id: i + 1, color: idToColor(i + 1) };
+  for (let i = 0; i < nodes; i++) nodesArr[i] = { id: i + 1, color: idToColor(i + 1), frozen: false, dormant: false };
 
   // Connect nodes with a few random clusters to simulate owners/traits
   const edgesArr = [];
@@ -151,6 +151,44 @@ function generateGraphFromDb({ mode = 'holders', nodes = 10000, edges = 20000 })
     console.warn('DB graph generation failed; using fallback. Error:', e.message);
     return generateFallbackGraph({ nodes, edges });
   }
+}
+
+// Lean Ethos profile cache: ethos_profiles(wallet, has_ethos, profile_json, updated_at)
+async function getEthosForWallet(wallet){
+  const addr = (wallet||'').toLowerCase();
+  if (!addr) return { hasEthos:false, profile:null };
+  const TTL = 24*3600; // seconds
+  try {
+    const row = db?.prepare?.('SELECT has_ethos, profile_json, updated_at FROM ethos_profiles WHERE wallet=?').get(addr);
+    const now = Math.floor(Date.now()/1000);
+    if (row && row.updated_at && (now - row.updated_at) < TTL){
+      return { hasEthos: !!row.has_ethos, profile: (row.has_ethos? JSON.parse(row.profile_json||'null') : null) };
+    }
+  } catch {}
+  // Fetch from Ethos API
+  let data = null; let accept = false;
+  try { data = await getEthosForAddress(addr); } catch {}
+  try {
+    // Strict: only accept wallets with an ACTIVE Ethos account or an explicit profileId (signed up)
+    const isActive = !!(data && String(data.status||'').toUpperCase() === 'ACTIVE');
+    const hasProfileId = !!(data && typeof data.profileId === 'number' && data.profileId > 0);
+    const hasProfileLink = !!(data && data.links && typeof data.links.profile === 'string' && data.links.profile.length > 0);
+    if (isActive || hasProfileId || hasProfileLink) accept = true;
+  } catch {}
+  const now = Math.floor(Date.now()/1000);
+  try {
+    const up = db?.prepare?.(`INSERT INTO ethos_profiles (wallet, has_ethos, profile_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(wallet) DO UPDATE SET has_ethos=excluded.has_ethos, profile_json=excluded.profile_json, updated_at=excluded.updated_at`);
+    if (up) up.run(addr, accept?1:0, accept? JSON.stringify(data) : null, now);
+  } catch {}
+  return { hasEthos: accept, profile: accept? data : null };
+}
+
+function ethosCredFromLevel(level){
+  if (!level || typeof level !== 'string') return null;
+  const idx = ['untrusted','questionable','neutral','known','established','reputable','exemplary','distinguished','revered','renowned'].indexOf(level.toLowerCase());
+  return idx >= 0 ? idx : null;
 }
 
 function detectTokenTable() {
@@ -577,7 +615,7 @@ app.get('/api/trait-tokens', (req, res) => {
 });
 
 // API: Token detail
-app.get('/api/token/:id', (req, res) => {
+app.get('/api/token/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
   try {
@@ -602,6 +640,12 @@ app.get('/api/token/:id', (req, res) => {
       dormant: row.dormant || 0,
       last_activity: row.last_activity || null,
     };
+    // Attach Ethos profile if verified/accepted
+    try {
+      const ep = await getEthosForWallet(row.owner);
+      if (ep?.hasEthos) out.ethos = { score: ep.profile?.score ?? null, level: ep.profile?.level ?? null, username: ep.profile?.username ?? null, displayName: ep.profile?.displayName ?? null };
+      else out.ethos = null;
+    } catch { out.ethos = null; }
     res.setHeader('Cache-Control', 'public, max-age=300');
     return res.json(out);
   } catch (e) {
@@ -651,7 +695,11 @@ app.get('/api/wallet/:address', (req, res) => {
   try {
     const rows = db.prepare('SELECT id FROM tokens WHERE LOWER(owner)=? ORDER BY id').all(addr);
     res.setHeader('Cache-Control', 'public, max-age=300');
-    return res.json({ address: addr, tokens: rows.map(r => r.id) });
+    // Attach lean ethos object
+    getEthosForWallet(addr).then(ep=>{
+      const ethos = (ep && ep.hasEthos) ? { score: ep.profile?.score ?? null, level: ep.profile?.level ?? null, username: ep.profile?.username ?? null, displayName: ep.profile?.displayName ?? null } : null;
+      return res.json({ address: addr, tokens: rows.map(r => r.id), ethos });
+    }).catch(()=> res.json({ address: addr, tokens: rows.map(r => r.id), ethos: null }));
   } catch (e) {
     return res.status(500).json({ error: 'db-error' });
   }
@@ -662,22 +710,20 @@ app.get('/api/wallet/:address/meta', (req, res) => {
   const addr = (req.params.address || '').toLowerCase();
   if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
   try {
-    const meta = db.prepare('SELECT address, ens_name, ethos_score, ethos_credibility, social_verified, total_holdings, first_acquired, last_activity, trade_count, updated_at FROM wallet_metadata WHERE address=?').get(addr) || null;
-    const now = Math.floor(Date.now() / 1000);
-    const stale = !meta || !meta.updated_at || (Date.parse(meta.updated_at)/1000 < now - 7*24*3600);
-    if (stale) {
-      refreshEthos(addr).catch(()=>{});
-    }
-    if (meta) {
+    const meta = db.prepare('SELECT address, ens_name, total_holdings, first_acquired, last_activity, trade_count, updated_at FROM wallet_metadata WHERE address=?').get(addr) || null;
+    const holdings = (meta?.total_holdings ?? db.prepare('SELECT COUNT(1) c FROM tokens WHERE LOWER(owner)=?').get(addr).c);
+    const first = (meta?.first_acquired ?? db.prepare('SELECT MIN(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t) ?? null;
+    const last = (meta?.last_activity ?? db.prepare('SELECT MAX(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t) ?? null;
+    const trades = (meta?.trade_count ?? db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).c);
+    return getEthosForWallet(addr).then(ep=>{
+      const score = (ep && ep.hasEthos) ? (ep.profile?.score ?? null) : null;
+      const level = (ep && ep.hasEthos) ? (ep.profile?.level ?? null) : null;
+      const cred = level ? ethosCredFromLevel(level) : null;
       res.setHeader('Cache-Control', 'public, max-age=300');
-      return res.json(meta);
-    }
-    // compute lightweight fallback
-    const holdings = db.prepare('SELECT COUNT(1) c FROM tokens WHERE LOWER(owner)=?').get(addr).c;
-    const first = db.prepare('SELECT MIN(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t || null;
-    const last = db.prepare('SELECT MAX(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t || null;
-    const trades = db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).c;
-    return res.json({ address: addr, ens_name: null, ethos_score: null, ethos_credibility: null, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades });
+      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: score, ethos_credibility: cred, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades });
+    }).catch(()=>{
+      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: null, ethos_credibility: null, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades });
+    });
   } catch (e) {
     return res.status(500).json({ error: 'db-error' });
   }

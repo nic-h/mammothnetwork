@@ -81,6 +81,13 @@ export function runMigrations(db) {
       trade_count INTEGER,
       updated_at DATETIME
     );
+    -- Lean Ethos cache per wallet
+    CREATE TABLE IF NOT EXISTS ethos_profiles (
+      wallet TEXT PRIMARY KEY,
+      has_ethos INTEGER NOT NULL DEFAULT 0,
+      profile_json TEXT,
+      updated_at INTEGER
+    );
   `);
 
   // Conditional column adds for transfers (price, tx_hash, event_type)
