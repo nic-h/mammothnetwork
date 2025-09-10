@@ -45,6 +45,7 @@ Performance
 
 Design system
 - Colors and typography align with dash.mammoths.tech (monospace, black/white/green)
+- See docs/TECH_SPEC.md for the living spec and proposed design tokens
 
 Modularium + Ethos
 - Jobs fill tokens/attributes/holders/transfers (with price) and wallet_metadata (Ethos v2 batch)
@@ -54,3 +55,6 @@ Notes
 - PIXI v7 UMD build is served at `/lib/pixi.min.js`; the app uses `new PIXI.Application({ ... })` and `app.view`
 - Images: served at `/images`; thumbnails at `/thumbnails` (nodes never load images)
 - If better‑sqlite3 native errors: `npm rebuild better-sqlite3 --build-from-source`
+
+Codex system instructions
+- Launch Codex with the repo’s system rules: `codex chat --system-file SYSTEM.md`

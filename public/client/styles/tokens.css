@@ -1,0 +1,21 @@
+:root{
+  /* Colors */
+  --bg: #000000;
+  --fg: #00ff66;
+  --fg-muted: #7bf0a8;
+  --blue: #4488ff; /* frozen */
+  --gray: #666666; /* dormant */
+  --green-rgb: 0,255,102; /* for rgba() */
+
+  /* Typography */
+  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, 'Fira Code', SFMono-Regular, monospace;
+  --fs-10: 10px; --fs-11: 11px; --fs-12: 12px; --fs-14: 14px; --fs-18: 18px;
+  --fw-regular: 400; --fw-bold: 700;
+
+  /* Spacing & container widths */
+  --pad-4: 4px; --pad-6: 6px; --pad-8: 8px; --pad-12: 12px; --pad-16: 16px;
+  --col-left: 280px; --col-right: 420px;
+}
+
+/* baseline application */
+html, body { background: var(--bg); color: var(--fg); font-family: var(--font-mono); }
