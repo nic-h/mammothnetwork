@@ -4,7 +4,7 @@ const stageEl = document.getElementById('stage');
 const wrapEl = document.querySelector('.center-panel') || stageEl?.parentElement || document.body;
 const modeEl = document.getElementById('mode');
 const edgesEl = document.getElementById('edges-slider');
-let focusMode = false; // keyboard 'f' or header toggle
+let focusMode = false; // focus hidden; remains available internally if needed
 const legendEl = document.getElementById('legend');
 const statusEl = null;
 const traitsContainer = document.getElementById('traits-container');
@@ -132,10 +132,7 @@ async function init() {
   const clearBtn = document.getElementById('clear-search');
   if (clearBtn){ clearBtn.addEventListener('click', ()=>{ searchEl.value=''; searchEl.focus(); }); }
   window.addEventListener('keydown', (e)=>{ if (e.key==='Escape'){ searchEl.value=''; }});
-  // Focus toggle UI + keyboard shortcut
-  const focusEl = document.getElementById('focus');
-  if (focusEl) focusEl.addEventListener('change', ()=>{ focusMode = !!focusEl.checked; if (selectedIndex>=0) applyFocus(); else resetAlpha(); });
-  window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='f'){ focusMode=!focusMode; if (focusEl) focusEl.checked = focusMode; if (selectedIndex>=0) applyFocus(); else resetAlpha(); }});
+  // Focus control disabled in UI; keep keyboard shortcut off
   stageEl.addEventListener('dblclick', ()=> resetView());
   // Search: token id or wallet address
   searchEl.addEventListener('keydown', async e=>{
@@ -229,7 +226,7 @@ async function load(mode, edges){
     if (!nodes || !nodes.length) {
       try {
         const h = await fetch('/api/health', { cache:'no-store' }).then(r=>r.json());
-        showToast(`No nodes loaded. DB=${h?.haveDb?'ok':'missing'} path=${h?.dbPath||'--'}`);
+        showBanner(`No nodes loaded. DB=${h?.haveDb?'ok':'missing'} path=${h?.dbPath||'--'}`);
       } catch {}
     }
   }
@@ -958,6 +955,18 @@ function layoutPreset(p){
 
 // Toast (console-based minimal)
 function showToast(msg){ console.log('[toast]', msg); }
+
+function showBanner(msg){
+  let el = document.getElementById('status-banner');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'status-banner';
+    el.style.cssText = 'position:fixed;top:44px;right:12px;z-index:200;background:#0a0;border:1px solid rgba(0,255,102,.4);color:#00ff66;padding:8px 10px;font:12px/1.3 var(--font-mono, monospace);box-shadow:0 0 12px rgba(0,255,102,.2)';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  setTimeout(()=>{ if (el) el.remove(); }, 4000);
+}
 let selectedIndex = -1;
 let selectedWalletSet = null;
 
