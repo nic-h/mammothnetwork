@@ -1,7 +1,7 @@
 * { box-sizing: border-box; font: var(--fs-12)/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-template-rows: 32px 1fr; }
-.header { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 20px; border-bottom:1px solid rgba(var(--green-rgb),.3); }
+.header { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 20px; border-bottom:1px solid rgba(var(--green-rgb),.3); position: sticky; top: 0; z-index: 100; background: var(--bg); }
 .logo { font-weight:700; }
 .header .preset-btn,
 .header select,
