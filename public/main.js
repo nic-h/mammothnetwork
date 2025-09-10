@@ -4,7 +4,7 @@ const stageEl = document.getElementById('stage');
 const wrapEl = document.querySelector('.center-panel') || stageEl?.parentElement || document.body;
 const modeEl = document.getElementById('mode');
 const edgesEl = document.getElementById('edges-slider');
-let focusMode = false; // focus hidden; remains available internally if needed
+let focusMode = true; // enable highlight on selection by default
 const legendEl = document.getElementById('legend');
 const statusEl = null;
 const traitsContainer = document.getElementById('traits-container');
@@ -133,8 +133,8 @@ async function init() {
   const clearBtn = document.getElementById('clear-search');
   if (clearBtn){ clearBtn.addEventListener('click', ()=>{ searchEl.value=''; searchEl.focus(); }); }
   window.addEventListener('keydown', (e)=>{ if (e.key==='Escape'){ searchEl.value=''; }});
-  // Focus control disabled in UI; keep keyboard shortcut off
-  stageEl.addEventListener('dblclick', ()=> resetView());
+  // Double-click resets selection and view
+  stageEl.addEventListener('dblclick', ()=> { selectedIndex=-1; clearSelectionOverlay(); resetAlpha(); resetView(); });
   // Search: token id or wallet address
   searchEl.addEventListener('keydown', async e=>{
     if(e.key!=='Enter') return;
@@ -213,7 +213,7 @@ async function load(mode, edges){
       if (Array.isArray(det) && det.length) edgesData = det;
     } catch {}
   }
-  // If no nodes loaded, attempt a recovery fetch and surface status
+  // If no nodes loaded, attempt a recovery fetch
   if (!nodes || !nodes.length) {
     try {
       const r = await fetch(`/api/network-graph?mode=holders&nodes=10000&edges=0&v=${Date.now()}`, { cache:'no-store' });
@@ -223,12 +223,9 @@ async function load(mode, edges){
         buildSprites(nodes.map(n=>n.color||BRAND.GREEN));
       }
     } catch {}
-    // Optional health overlay
+    // Still empty: only log to console (no UI banner per design)
     if (!nodes || !nodes.length) {
-      try {
-        const h = await fetch('/api/health', { cache:'no-store' }).then(r=>r.json());
-        showBanner(`No nodes loaded. DB=${h?.haveDb?'ok':'missing'} path=${h?.dbPath||'--'}`);
-      } catch {}
+      try { const h = await fetch('/api/health', { cache:'no-store' }).then(r=>r.json()); console.warn('No nodes loaded', h); } catch {}
     }
   }
   // No physics: static grid layout
@@ -294,12 +291,17 @@ function layoutGrid(){
 }
 
 function drawEdges(){
-  const n = sprites.length;
   try {
     const maxDraw = 500;
     edgesGfx.clear();
+    const s = world?.scale?.x || 1;
+    // LOD: do not render edges when zoomed out too far
+    if (s < 0.45) return;
     if ((edgesData?.length||0) && edgesData.length <= maxDraw) {
       const mode = modeEl?.value || 'holders';
+      // scale factors for width/alpha based on zoom
+      const aF = Math.max(0, Math.min(1, (s - 0.45) / 0.8));
+      const wF = 0.9 + aF * 0.8;
       for (let e=0;e<edgesData.length;e++){
         const item = edgesData[e];
         const a = Array.isArray(item)? item[0] : (item.a ?? item.source ?? item.from ?? 0);
@@ -309,8 +311,12 @@ function drawEdges(){
         if (i==null || j==null) continue;
         const x1 = sprites[i].x, y1 = sprites[i].y;
         const x2 = sprites[j].x, y2 = sprites[j].y;
-        const style = pickEdgeStyle(mode, i, j, item);
+        let style = pickEdgeStyle(mode, i, j, item);
         if (!layerEnabled(style, item)) continue;
+        // Weight-aware adjustment
+        const weight = Number(item?.count || item?.weight || (Array.isArray(item)? item[2] : 1)) || 1;
+        const t = Math.min(1, Math.log2(weight + 1) / 4);
+        style = { ...style, width: Math.min(2.2, (style.width || 0.6) * wF * (1 + t)), opacity: (style.opacity ?? 0.8) * (0.3 + 0.7 * aF) };
         strokeEdge(edgesGfx, x1, y1, x2, y2, style);
       }
     }
@@ -455,6 +461,7 @@ function setupPanZoom(){
     world.position.x = sx - wx * nx;
     world.position.y = sy - wy * nx;
     clampWorldToContent(40);
+    drawEdges(); // update LOD stroke thickness/visibility
   }, {passive:false});
 }
 
@@ -565,7 +572,7 @@ async function selectNode(index){
     `;
     // chip events
     detailsEl.querySelectorAll('.chip').forEach(el=> el.addEventListener('click', ()=>{ const tok = Number(el.dataset.token); const idx = idToIndex.get(tok); if (idx!=null) selectNode(idx); }));
-    const closeBtn = document.getElementById('close-detail'); if (closeBtn) closeBtn.onclick = ()=>{ selectedIndex=-1; clearSelectionOverlay(); detailsEl.innerHTML='Select a node…'; thumbEl.style.display='none'; };
+    const closeBtn = document.getElementById('close-detail'); if (closeBtn) closeBtn.onclick = ()=>{ selectedIndex=-1; clearSelectionOverlay(); detailsEl.innerHTML='Select a node…'; thumbEl.style.display='none'; resetAlpha(); };
     if (ethos==null && t.owner) {
       setTimeout(async ()=>{
         try {
@@ -951,17 +958,7 @@ function layoutPreset(p){
 // Toast (console-based minimal)
 function showToast(msg){ console.log('[toast]', msg); }
 
-function showBanner(msg){
-  let el = document.getElementById('status-banner');
-  if (!el){
-    el = document.createElement('div');
-    el.id = 'status-banner';
-    el.style.cssText = 'position:fixed;top:44px;right:12px;z-index:200;background:#0a0;border:1px solid rgba(0,255,102,.4);color:#00ff66;padding:8px 10px;font:12px/1.3 var(--font-mono, monospace);box-shadow:0 0 12px rgba(0,255,102,.2)';
-    document.body.appendChild(el);
-  }
-  el.textContent = msg;
-  setTimeout(()=>{ if (el) el.remove(); }, 4000);
-}
+// Status banner removed per design; use console for diagnostics
 let selectedIndex = -1;
 let selectedWalletSet = null;
 
