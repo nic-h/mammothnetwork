@@ -26,27 +26,36 @@ const PRESET_MODE = { ownership: 'holders', trading: 'transfers', whales: 'walle
 let ethosMin = 0, ethosMax = 1;
 let ownerCounts = null;
 let highlightSet = null; // Set of ids currently highlighted by filter
+// Centralized brand palette for colors
+const BRAND = {
+  GREEN: 0x00ff66,
+  BLUE:  0x4488ff,
+  GRAY:  0x666666,
+  WHITE: 0xffffff,
+  RED:   0xff3b3b,
+  GOLD:  0xffd700,
+};
 // Edge style mapping (lightweight, perf-friendly)
 const EDGE_STYLES = {
-  OWNERSHIP:      { kind:'solid',  width:1.0, color:0x00ff00, opacity:0.9 },
+  OWNERSHIP:      { kind:'solid',  width:1.0, color:BRAND.GREEN, opacity:0.9 },
   RECENT_TRADE:   { kind:'solid',  width:0.8, color:0x00ffaa, opacity:0.8 },
-  OLD_TRADE:      { kind:'dashed', width:0.6, color:0x666666, opacity:0.4 },
+  OLD_TRADE:      { kind:'dashed', width:0.6, color:BRAND.GRAY, opacity:0.4 },
   RARE_TRAIT:     { kind:'dotted', width:0.6, color:0xffaa00, opacity:0.7 },
-  HIGH_VALUE:     { kind:'solid',  width:1.0, color:0xffd700, opacity:1.0 },
+  HIGH_VALUE:     { kind:'solid',  width:1.0, color:BRAND.GOLD, opacity:1.0 },
   SAME_WHALE:     { kind:'double', width:0.8, color:0x00ccff, opacity:0.7 },
   // Transaction styles
   SALE:           { kind:'arrow',  width:0.8, color:0xff3b3b, opacity:0.95 },
-  PURCHASE:       { kind:'arrow',  width:0.8, color:0x00ff00, opacity:0.95 },
+  PURCHASE:       { kind:'arrow',  width:0.8, color:BRAND.GREEN, opacity:0.95 },
   TRANSFER:       { kind:'dashed', width:0.6, color:0x00aaff, opacity:0.9 },
-  MINT:           { kind:'dotted', width:0.6, color:0xffffff, opacity:0.95 },
-  MULTI:          { kind:'solid',  width:1.0, color:0xffd700, opacity:0.95 },
+  MINT:           { kind:'dotted', width:0.6, color:BRAND.WHITE, opacity:0.95 },
+  MULTI:          { kind:'solid',  width:1.0, color:BRAND.GOLD, opacity:0.95 },
 };
 
 // Utils
 const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
 function lerp(a,b,t){ return a + (b-a)*t; }
 function throttle(fn, ms){ let last=0; let t=null; return function(...args){ const now=Date.now(); const run=()=>{ last=now; t=null; fn.apply(this,args); }; if (now-last>=ms){ if (t){ clearTimeout(t); t=null; } run(); } else if (!t){ t=setTimeout(run, ms-(now-last)); } }; }
-function makeCircleTexture(renderer, r=5, color=0x00ff00){
+function makeCircleTexture(renderer, r=5, color=BRAND.GREEN){
   const g = new PIXI.Graphics();
   g.lineStyle(1, color, 1.0).beginFill(color, 0.85).drawCircle(r, r, r).endFill();
   const t = renderer.generateTexture(g);
@@ -70,7 +79,7 @@ async function init() {
   app.stage.addChildAt(gridGfx, 0);
   selectGfx = new PIXI.Graphics();
   world.addChild(selectGfx);
-  circleTexture = makeCircleTexture(app.renderer, 4, 0x00ff00);
+  circleTexture = makeCircleTexture(app.renderer, 4, BRAND.GREEN);
 
   // Resize to grid cell
   const drawGrid = ()=>{
@@ -78,7 +87,7 @@ async function init() {
       gridGfx.clear();
       const w = app.renderer.width, h = app.renderer.height;
       const step = 50;
-      const c = 0x00ff00; const a = 0.06;
+      const c = BRAND.GREEN; const a = 0.12;
       gridGfx.lineStyle(1, c, a);
       for (let x=0;x<=w;x+=step){ gridGfx.moveTo(x,0); gridGfx.lineTo(x,h); }
       for (let y=0;y<=h;y+=step){ gridGfx.moveTo(0,y); gridGfx.lineTo(w,y); }
@@ -175,7 +184,7 @@ async function init() {
 async function load(mode, edges){
   const data = await fetchGraph(mode, edges).catch(()=> lastGraph || {nodes:[],edges:[]});
   nodes = data.nodes||[]; edgesData = data.edges||[];
-  buildSprites(nodes.map(n=>n.color||0x00ff00));
+  buildSprites(nodes.map(n=>n.color||BRAND.GREEN));
   if (mode === 'transfers') {
     try {
       const det = await fetch(`/api/transfer-edges?limit=${encodeURIComponent(edges||200)}&nodes=10000`, { cache:'no-store' }).then(r=>r.json());
@@ -212,7 +221,7 @@ function buildSprites(colors){
   for(let i=0;i<count;i++){
     const sp = new PIXI.Sprite(circleTexture);
     sp.anchor.set(0.5);
-    sp.tint = colors[i]||0x00ff00;
+    sp.tint = colors[i]||BRAND.GREEN;
     sp.alpha=0.95;
     sp.scale.set(1,1);
     sp.x=0; sp.y=0;
@@ -311,14 +320,14 @@ function strokeEdge(g, x1, y1, x2, y2, st){
 }
 
 function lineSolid(g, x1, y1, x2, y2, s){
-  g.lineStyle({ width:s.width||0.6, color:s.color||0x00ff00, alpha:s.opacity??0.8, cap:'round' });
+  g.lineStyle({ width:s.width||0.6, color:s.color||BRAND.GREEN, alpha:s.opacity??0.8, cap:'round' });
   g.moveTo(x1, y1); g.lineTo(x2, y2);
 }
 
 function lineDashed(g, x1, y1, x2, y2, s, dash=6, gap=4){
   const dx = x2-x1, dy = y2-y1; const len = Math.hypot(dx,dy);
   const ux = dx/len, uy = dy/len;
-  g.lineStyle({ width:s.width||0.5, color:s.color||0x666666, alpha:s.opacity??0.6, cap:'butt' });
+  g.lineStyle({ width:s.width||0.5, color:s.color||BRAND.GRAY, alpha:s.opacity??0.6, cap:'butt' });
   let dist = 0; let on=true; let cx=x1, cy=y1;
   while (dist < len){
     const step = on? dash : gap; const nx = cx + ux*step; const ny = cy + uy*step;
@@ -329,14 +338,14 @@ function lineDashed(g, x1, y1, x2, y2, s, dash=6, gap=4){
 
 function lineArrow(g, x1, y1, x2, y2, s){
   const w = s.width || 0.6;
-  g.lineStyle({ width:w, color:s.color||0xff3b3b, alpha:s.opacity??0.9, cap:'round' });
+  g.lineStyle({ width:w, color:s.color||BRAND.RED, alpha:s.opacity??0.9, cap:'round' });
   g.moveTo(x1, y1); g.lineTo(x2, y2);
   const dx = x2 - x1, dy = y2 - y1; const len = Math.hypot(dx, dy) || 1;
   const ux = dx/len, uy = dy/len;
   const size = Math.max(6, Math.min(10, 10*w+4));
   const bx = x2 - ux*size, by = y2 - uy*size;
   const nx = -uy, ny = ux;
-  g.lineStyle({ width:w, color:s.color||0xff3b3b, alpha:s.opacity??0.9, join:'miter' });
+  g.lineStyle({ width:w, color:s.color||BRAND.RED, alpha:s.opacity??0.9, join:'miter' });
   g.moveTo(x2, y2); g.lineTo(bx + nx*(size*0.4), by + ny*(size*0.4));
   g.moveTo(x2, y2); g.lineTo(bx - nx*(size*0.4), by - ny*(size*0.4));
 }
@@ -547,9 +556,9 @@ function updateSelectionOverlay(){
   const idx = selectedIndex; if (idx<0 || idx>=sprites.length) return;
   const s = sprites[idx];
   // ring with subtle glow
-  selectGfx.lineStyle({ width: 2, color: 0x00ff00, alpha: 1, cap: 'round', join: 'round' });
+  selectGfx.lineStyle({ width: 2, color: BRAND.GREEN, alpha: 1, cap: 'round', join: 'round' });
   selectGfx.drawCircle(s.x, s.y, 8);
-  selectGfx.lineStyle({ width: 6, color: 0x00ff00, alpha: 0.15 });
+  selectGfx.lineStyle({ width: 6, color: BRAND.GREEN, alpha: 0.15 });
   selectGfx.drawCircle(s.x, s.y, 10);
   // node indicators: ethos ring (gold) if high ethos; whale ring (cyan dashed) if large holdings
   const i = idx;
@@ -557,7 +566,7 @@ function updateSelectionOverlay(){
     const oi = presetData?.ownerIndex?.[i] ?? -1;
     const ethos = (oi>=0)? (presetData?.ownerEthos?.[oi] ?? null) : null;
     const high = (typeof ethos==='number' && ethos > (ethosMin + (ethosMax-ethosMin)*0.8));
-    if (high){ selectGfx.lineStyle({ width:2, color:0xffd700, alpha:1 }); selectGfx.drawCircle(s.x, s.y, 12); }
+  if (high){ selectGfx.lineStyle({ width:2, color:BRAND.GOLD, alpha:1 }); selectGfx.drawCircle(s.x, s.y, 12); }
     if (ownerCounts && oi>=0){
       const hold = ownerCounts[oi] || 0; const maxHold = Math.max(...ownerCounts);
       if (hold >= Math.max(5, maxHold*0.5)){
@@ -728,7 +737,7 @@ async function ensurePresetData(){
 function applyPreset(p){
   if (!sprites.length) return;
   if (!p) { // reset
-    for(let i=0;i<sprites.length;i++) sprites[i].tint = nodes[i]?.color||0x00ff00;
+    for(let i=0;i<sprites.length;i++) sprites[i].tint = nodes[i]?.color||BRAND.GREEN;
     return;
   }
   for (let i=0;i<sprites.length;i++){
@@ -745,7 +754,7 @@ function applyPreset(p){
             else if (days > 60) dormant = 1; // 2-6 months = dormant as well
           }
         }
-        sprites[i].tint = frozen ? 0x4488ff : (dormant ? 0x666666 : 0x00ff00); // blue frozen, gray dormant, green active
+        sprites[i].tint = frozen ? BRAND.BLUE : (dormant ? BRAND.GRAY : BRAND.GREEN); // blue frozen, gray dormant, green active
         break;
       }
       case 'rarity': {
@@ -774,7 +783,7 @@ function applyPreset(p){
       case 'trading': {
         const t = presetData?.tokenLastActivity?.[i] ?? 0;
         const fresh = t ? ((Date.now()/1000 - t) < 30*24*3600) : false;
-        sprites[i].tint = fresh ? 0x00ff00 : 0x444444;
+        sprites[i].tint = fresh ? BRAND.GREEN : 0x444444;
         break;
       }
       case 'ownership': {
@@ -785,7 +794,7 @@ function applyPreset(p){
         break;
       }
       default:
-        sprites[i].tint = nodes[i]?.color||0x00ff00;
+        sprites[i].tint = nodes[i]?.color||BRAND.GREEN;
     }
   }
 }
