@@ -25,6 +25,15 @@ const PRESET_MODE = { ownership: 'holders', trading: 'transfers', whales: 'walle
 let ethosMin = 0, ethosMax = 1;
 let ownerCounts = null;
 let highlightSet = null; // Set of ids currently highlighted by filter
+// Edge style mapping (lightweight, perf-friendly)
+const EDGE_STYLES = {
+  OWNERSHIP:      { kind:'solid',  width:2,   color:0x00ff66, opacity:1.0 },
+  RECENT_TRADE:   { kind:'solid',  width:1.5, color:0x00ffaa, opacity:0.8 },
+  OLD_TRADE:      { kind:'dashed', width:1,   color:0x666666, opacity:0.4 },
+  RARE_TRAIT:     { kind:'dotted', width:1,   color:0xffaa00, opacity:0.6 },
+  HIGH_VALUE:     { kind:'solid',  width:3,   color:0xffd700, opacity:1.0 },
+  SAME_WHALE:     { kind:'double', width:2,   color:0x00ccff, opacity:0.7 },
+};
 
 // Utils
 const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
@@ -208,17 +217,74 @@ function drawEdges(){
     const maxDraw = 500;
     edgesGfx.clear();
     if ((edgesData?.length||0) && edgesData.length <= maxDraw) {
-      edgesGfx.lineStyle(1, 0x004422, 0.6);
+      const mode = modeEl?.value || 'holders';
       for (let e=0;e<edgesData.length;e++){
-        const [a,b] = edgesData[e];
+        const item = edgesData[e];
+        const a = Array.isArray(item)? item[0] : (item.a ?? item.source ?? item.from ?? 0);
+        const b = Array.isArray(item)? item[1] : (item.b ?? item.target ?? item.to   ?? 0);
         const i = idToIndex.get(Number(a));
         const j = idToIndex.get(Number(b));
         if (i==null || j==null) continue;
-        edgesGfx.moveTo(sprites[i].x, sprites[i].y);
-        edgesGfx.lineTo(sprites[j].x, sprites[j].y);
+        const x1 = sprites[i].x, y1 = sprites[i].y;
+        const x2 = sprites[j].x, y2 = sprites[j].y;
+        const style = pickEdgeStyle(mode, i, j, item);
+        strokeEdge(edgesGfx, x1, y1, x2, y2, style);
       }
     }
   } catch {}
+}
+
+function pickEdgeStyle(mode, i, j, item){
+  // Prefer explicit type if provided
+  const type = (item && typeof item==='object' && item.type) ? String(item.type).toUpperCase() : null;
+  if (type && EDGE_STYLES[type]) return EDGE_STYLES[type];
+  // Infer from mode + recency/price when possible
+  if (mode === 'holders') return EDGE_STYLES.OWNERSHIP;
+  if (mode === 'wallets') return EDGE_STYLES.SAME_WHALE;
+  if (mode === 'traits')  return EDGE_STYLES.RARE_TRAIT;
+  if (mode === 'transfers'){
+    const now = Math.floor(Date.now()/1000);
+    const la = (presetData?.tokenLastActivity?.[i] || 0);
+    const lb = (presetData?.tokenLastActivity?.[j] || 0);
+    const last = Math.max(la, lb);
+    const days = last? (now-last)/86400 : 9999;
+    if (days <= 14) return EDGE_STYLES.RECENT_TRADE;
+    return EDGE_STYLES.OLD_TRADE;
+  }
+  return EDGE_STYLES.OWNERSHIP;
+}
+
+function strokeEdge(g, x1, y1, x2, y2, st){
+  const s = st || EDGE_STYLES.OWNERSHIP;
+  if (s.kind === 'double'){
+    const nx = y2 - y1, ny = -(x2 - x1);
+    const len = Math.max(1, Math.hypot(nx, ny));
+    const off = Math.max(1, s.width*1.2);
+    const ox = (nx/len)*off, oy = (ny/len)*off;
+    lineSolid(g, x1-ox, y1-oy, x2-ox, y2-oy, s);
+    lineSolid(g, x1+ox, y1+oy, x2+ox, y2+oy, s);
+    return;
+  }
+  if (s.kind === 'dashed') return lineDashed(g, x1, y1, x2, y2, s, 8, 6);
+  if (s.kind === 'dotted') return lineDashed(g, x1, y1, x2, y2, s, 2, 4);
+  return lineSolid(g, x1, y1, x2, y2, s);
+}
+
+function lineSolid(g, x1, y1, x2, y2, s){
+  g.lineStyle({ width:s.width||1, color:s.color||0x00ff66, alpha:s.opacity??0.6, cap:'round' });
+  g.moveTo(x1, y1); g.lineTo(x2, y2);
+}
+
+function lineDashed(g, x1, y1, x2, y2, s, dash=6, gap=4){
+  const dx = x2-x1, dy = y2-y1; const len = Math.hypot(dx,dy);
+  const ux = dx/len, uy = dy/len;
+  g.lineStyle({ width:s.width||1, color:s.color||0x666666, alpha:s.opacity??0.5, cap:'butt' });
+  let dist = 0; let on=true; let cx=x1, cy=y1;
+  while (dist < len){
+    const step = on? dash : gap; const nx = cx + ux*step; const ny = cy + uy*step;
+    if (on){ g.moveTo(cx, cy); g.lineTo(Math.min(nx, x2), Math.min(ny, y2)); }
+    cx = nx; cy = ny; dist += step; on = !on;
+  }
 }
 
 function clearSelectionOverlay(){ selectGfx?.clear?.(); }
@@ -402,6 +468,21 @@ function updateSelectionOverlay(){
   selectGfx.drawCircle(s.x, s.y, 8);
   selectGfx.lineStyle({ width: 6, color: 0x00ff66, alpha: 0.15 });
   selectGfx.drawCircle(s.x, s.y, 10);
+  // node indicators: ethos ring (gold) if high ethos; whale ring (cyan dashed) if large holdings
+  const i = idx;
+  try {
+    const oi = presetData?.ownerIndex?.[i] ?? -1;
+    const ethos = (oi>=0)? (presetData?.ownerEthos?.[oi] ?? null) : null;
+    const high = (typeof ethos==='number' && ethos > (ethosMin + (ethosMax-ethosMin)*0.8));
+    if (high){ selectGfx.lineStyle({ width:2, color:0xffd700, alpha:1 }); selectGfx.drawCircle(s.x, s.y, 12); }
+    if (ownerCounts && oi>=0){
+      const hold = ownerCounts[oi] || 0; const maxHold = Math.max(...ownerCounts);
+      if (hold >= Math.max(5, maxHold*0.5)){
+        // dashed cyan ring
+        dashedCircle(selectGfx, s.x, s.y, 14, 0x00ccff, 0.9, 10, 6, 3);
+      }
+    }
+  } catch {}
   // neighbor edges from the active edges set
   const tid = s.__tokenId;
   if (edgesData && edgesData.length){
@@ -426,6 +507,16 @@ function updateSelectionOverlay(){
       selectGfx.moveTo(s.x, s.y);
       selectGfx.lineTo(sprites[j].x, sprites[j].y);
     });
+  }
+}
+
+function dashedCircle(g, cx, cy, r, color, alpha, segLen=8, gap=6, width=2){
+  g.lineStyle({ width, color, alpha, cap:'butt' });
+  const circ = 2*Math.PI*r; const steps = Math.max(8, Math.floor(circ/(segLen+gap)));
+  for (let k=0;k<steps;k++){
+    const a1 = (k/steps)*2*Math.PI; const a2 = ((k+segLen/(segLen+gap))/steps)*2*Math.PI;
+    g.moveTo(cx + Math.cos(a1)*r, cy + Math.sin(a1)*r);
+    g.lineTo(cx + Math.cos(a2)*r, cy + Math.sin(a2)*r);
   }
 }
 
@@ -771,7 +862,7 @@ function applyFocus(){
     const id = sprites[i].__tokenId;
     const isSel = (i===selectedIndex);
     const keep = isSel || neighbors.has(id) || (selectedWalletSet && selectedWalletSet.has(id));
-    sprites[i].alpha = keep? 0.98 : 0.08;
+    sprites[i].alpha = keep? 0.98 : 0.25;
   }
 }
 
