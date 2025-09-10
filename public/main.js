@@ -47,14 +47,28 @@ async function init() {
   edgesGfx = new PIXI.Graphics();
   edgesGfx.zIndex = -1;
   world.addChild(edgesGfx);
-  // overlay for selection ring + neighbor edges
+  // background grid + overlay for selection ring + neighbor edges
+  const gridGfx = new PIXI.Graphics();
+  app.stage.addChildAt(gridGfx, 0);
   selectGfx = new PIXI.Graphics();
   world.addChild(selectGfx);
   circleTexture = makeCircleTexture(app.renderer, 4, 0x00ff66);
 
   // Resize to grid cell
-  try { new ResizeObserver(()=>app.renderer.resize(stageEl.clientWidth, stageEl.clientHeight)).observe(stageEl); } catch {}
+  const drawGrid = ()=>{
+    try{
+      gridGfx.clear();
+      const w = app.renderer.width, h = app.renderer.height;
+      const step = 50;
+      const c = 0x00ff66; const a = 0.06;
+      gridGfx.lineStyle(1, c, a);
+      for (let x=0;x<=w;x+=step){ gridGfx.moveTo(x,0); gridGfx.lineTo(x,h); }
+      for (let y=0;y<=h;y+=step){ gridGfx.moveTo(0,y); gridGfx.lineTo(w,y); }
+    }catch{}
+  };
+  try { new ResizeObserver(()=>{ app.renderer.resize(stageEl.clientWidth, stageEl.clientHeight); drawGrid(); }).observe(stageEl); } catch {}
   try { new ResizeObserver(()=>layoutGrid()).observe(document.querySelector('.shell')); } catch {}
+  drawGrid();
 
   // Load data and start
   await load(modeEl.value, Number(edgesEl?.value||200));
@@ -303,10 +317,13 @@ async function selectNode(index){
     const idx2 = idToIndex.get(id);
     const rScore = (idx2!=null && presetData?.rarity) ? presetData.rarity[idx2] : null;
     const addrShort = (t.owner||'--').slice(0,6)+'...'+(t.owner||'').slice(-4);
-    const ethosBar = ethos!=null ? '█'.repeat(Math.min(10, Math.round((ethos-ethosMin)/(ethosMax-ethosMin)*10))) + '░'.repeat(10 - Math.min(10, Math.round((ethos-ethosMin)/(ethosMax-ethosMin)*10))) : '';
+    const ethosValid = (typeof ethos==='number' && ethos>0);
+    const ethosBar = ethosValid ? '█'.repeat(Math.min(10, Math.round((ethos-ethosMin)/(ethosMax-ethosMin)*10))) + '░'.repeat(10 - Math.min(10, Math.round((ethos-ethosMin)/(ethosMax-ethosMin)*10))) : '';
     const trades = meta?.trade_count ?? null;
     const lastSeen = meta?.last_activity ? timeAgo(meta.last_activity*1000) : '--';
     const actLabel = trades!=null ? (trades>40?'Very Active':trades>10?'Active':'Low') : '';
+    const lastSeen = meta?.last_activity ? timeAgo(meta.last_activity*1000) : 'Never traded';
+    const status = t.frozen ? 'FROZEN' : (t.dormant ? 'DORMANT' : 'ACTIVE');
     // Similar tokens by rarest trait
     let similar = { similar: [], trait: null };
     try { similar = await fetch(`/api/token/${id}/similar?v=${Date.now()}`, { cache:'no-store' }).then(r=>r.json()); } catch {}
@@ -316,13 +333,12 @@ async function selectNode(index){
     detailsEl.innerHTML = `
       <div class='token-title'>MAMMOTH #${id.toString().padStart(4,'0')} <span class='token-close' id='close-detail'><i class="ri-close-line"></i></span></div>
       <div class='section-label'>OWNER</div>
-      <div class='address'>${addrShort}</div>
-      ${ens? `<div class='ens-name'>${ens} ✓</div>`:''}
+      ${ens? `<div class='ens-name'>${ens} ✓</div>`:`<div class='address'>${addrShort}</div>`}
       <div class='card2'>
         <div class='card'>
           <div class='label'>ETHOS</div>
-          <div class='big-number'>${ethos!=null?Math.round(ethos):'--'}</div>
-          <div class='small-meta'>${ethos!=null? ethosBar: ''}</div>
+          <div class='big-number'>${ethosValid?Math.round(ethos):'--'}</div>
+          <div class='small-meta'>${ethosValid? ethosBar: ''}</div>
         </div>
         <div class='card'>
           <div class='label'>HOLDINGS</div>
@@ -339,8 +355,13 @@ async function selectNode(index){
         <div class='card'>
           <div class='label'>LAST SEEN</div>
           <div class='big-number'>${lastSeen||'--'}</div>
-          <div class='small-meta'>ago</div>
+          <div class='small-meta'>${lastSeen==='Never traded'?'':'ago'}</div>
         </div>
+      </div>
+      <div class='card'>
+        <div class='label'>STATUS</div>
+        <div class='big-number'>${status}</div>
+        <div class='small-meta'>Blue=frozen Gray=dormant</div>
       </div>
       <div class='section-label'>TRAITS</div>
       <div class='traits-table'>${traitsRows}</div>
@@ -462,7 +483,7 @@ async function loadTraits(){
     const group = document.createElement('div');
     group.className = 'trait-group';
     const header = document.createElement('div'); header.className = 'trait-header'; header.innerHTML = `<span class="twist">▶</span><span>${t.type}</span>`; group.appendChild(header);
-    const valuesWrap = document.createElement('div'); valuesWrap.className = 'trait-values'; valuesWrap.style.display='block'; group.appendChild(valuesWrap);
+    const valuesWrap = document.createElement('div'); valuesWrap.className = 'trait-values'; valuesWrap.style.display='none'; group.appendChild(valuesWrap);
     const list = (t.values||[]);
     for (let i=0;i<list.length;i++){
       const v = list[i];
@@ -484,7 +505,7 @@ async function loadTraits(){
       valuesWrap.appendChild(row);
       if (i>120) break;
     }
-    let open = true; const tw0 = header.querySelector('.twist'); if (tw0) tw0.textContent='▼';
+    let open = false; const tw0 = header.querySelector('.twist'); if (tw0) tw0.textContent='▶';
     header.addEventListener('click', ()=>{
       open = !open;
       valuesWrap.style.display = open ? 'block' : 'none';
@@ -683,6 +704,8 @@ function layoutPreset(p){
         const hold = (oi>=0 && ownerCounts) ? ownerCounts[oi] : 1;
         const strength = Math.max(0, Math.min(1, hold / (maxHold||1)));
         const rad = 120 + (1-strength) * Math.min(cx,cy)*0.85;
+        const scale = 0.8 + strength*1.8; // node size varies by holdings
+        sprites[i].scale.set(scale, scale);
         place(i, cx + Math.cos(ang)*rad, cy + Math.sin(ang)*rad);
       }
       break;
