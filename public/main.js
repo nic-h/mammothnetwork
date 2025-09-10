@@ -96,7 +96,8 @@ async function init() {
   try { new ResizeObserver(()=>{ const w=Math.max(1,(wrapEl?.clientWidth||stageEl.clientWidth||800)); const h=Math.max(1,(wrapEl?.clientHeight||stageEl.clientHeight||600)); app.renderer.resize(w, h); drawGrid(); }).observe(wrapEl||stageEl); } catch {}
   try {
     const obsEl = document.querySelector('.center-panel') || document.querySelector('.shell') || document.body;
-    new ResizeObserver(()=>layoutGrid()).observe(obsEl);
+    // On container resize, keep current positions; just resize renderer/grid and clamp view.
+    new ResizeObserver(()=>{ try { drawGrid(); drawEdges(); clampWorldToContent(40); } catch {} }).observe(obsEl);
   } catch {}
   drawGrid();
 
@@ -517,15 +518,11 @@ async function selectNode(index){
     const ethosValid = (typeof ethos==='number' && ethos>0);
     const ethosBar = ethosValid ? '█'.repeat(Math.min(10, Math.round((ethos-ethosMin)/(ethosMax-ethosMin)*10))) + '░'.repeat(10 - Math.min(10, Math.round((ethos-ethosMin)/(ethosMax-ethosMin)*10))) : '';
     const trades = meta?.trade_count ?? null;
-    const lastSeen = meta?.last_activity ? timeAgo(meta.last_activity*1000) : '--';
     const actLabel = trades!=null ? (trades>40?'Very Active':trades>10?'Active':'Low') : '';
     const lastSeen = meta?.last_activity ? timeAgo(meta.last_activity*1000) : 'Never traded';
     const status = t.frozen ? 'FROZEN' : (t.dormant ? 'DORMANT' : 'ACTIVE');
-    // Similar tokens by rarest trait
-    let similar = { similar: [], trait: null };
-    try { similar = await fetch(`/api/token/${id}/similar?v=${Date.now()}`, { cache:'no-store' }).then(r=>r.json()); } catch {}
+    // Similar-by-trait removed per design; keep same-owner chips only
     const sameOwnerChips = (holdings||[]).slice(0,12).filter(x=>x!==id).map(n=>`<span class='chip' data-token='${n}'>#${String(n).padStart(4,'0')}</span>`).join('');
-    const similarChips = (similar.similar||[]).slice(0,12).map(n=>`<span class='chip' data-token='${n}'>#${String(n).padStart(4,'0')}</span>`).join('');
     const traitsRows = (t.traits||[]).slice(0,24).map(a=>`<div class='label'>${a.trait_type}</div><div class='value'>${a.trait_value}</div>`).join('');
     detailsEl.innerHTML = `
       <div class='token-title'>MAMMOTH #${id.toString().padStart(4,'0')} <span class='token-close' id='close-detail'><i class="ri-close-line"></i></span></div>
@@ -565,8 +562,6 @@ async function selectNode(index){
       <div class='section-label'>SIMILAR TOKENS</div>
       <div class='label'>Same Owner (${holdings?holdings.length-1:0})</div>
       <div class='chip-row' id='chips-owner'>${sameOwnerChips||''}</div>
-      <div class='label'>Same Rare Traits ${similar.trait?`(${similar.trait.type}: ${similar.trait.value})`:''}</div>
-      <div class='chip-row' id='chips-sim'>${similarChips||''}</div>
     `;
     // chip events
     detailsEl.querySelectorAll('.chip').forEach(el=> el.addEventListener('click', ()=>{ const tok = Number(el.dataset.token); const idx = idToIndex.get(tok); if (idx!=null) selectNode(idx); }));

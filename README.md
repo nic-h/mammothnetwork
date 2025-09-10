@@ -3,15 +3,20 @@ Mammoths Network Visualization
 
 WebGL network for the Mammoths NFT collection.
 
-Features
+Current Status
 - PIXI v7 WebGL (UMD at `/lib/pixi.min.js`), 10k nodes via `PIXI.ParticleContainer`
-- Worker physics (uniform‑grid repulsion + springs) and preset forces
+- Deterministic layouts (grid default + preset-specific)
 - Modes: `holders`, `transfers`, `traits`, `wallets`
-- Presets: Ownership, Trading, Trait Clusters, Social, Rarity, Activity, Hubs, Whales, Frozen, Discovery
-- Charts: timeline (count+volume), heatmap (7×24)
-- Detail sidebar: owner, ENS, Ethos v2 (user+score), holdings, trades, last activity, traits, thumbnail
-- Status vis: frozen (blue), dormant (gray alpha)
-- Grid background, zoom buttons, fullscreen, settings (grid/LOD), mobile fallback
+- Presets (6): Ownership, Trading, Rarity, Social, Whales, Frozen
+- Transfers mode now uses transaction-aware edges:
+  - Sales: solid red with arrowheads (→ buyer)
+  - Transfers: dashed blue
+  - Mints: dotted white
+  - Multiple trades between same parties: thicker gold
+  - Layer toggles: Sales / Transfers / Mints (plus Ownership/Trades/Traits/Value)
+- Sidebar: owner, ENS, Ethos (strict ACTIVE/profileId/profile link), holdings, trades, last activity, traits, thumbnail
+- Styling: black + brand green (#00ff66), frozen blue (#4488ff), dormant gray (#666666)
+- Header is sticky (40px row); grid background alpha ≈ 0.12
 
 Local setup
 1. `npm install`
@@ -31,6 +36,44 @@ Endpoints
 - `/api/wallet/:address`, `/api/wallet/:address/meta`
 - `/api/ethos/profile?address=0x…` (v2 user + score)
 - `/api/activity?interval=day|hour`, `/api/heatmap`, `/api/stats`, `/api/health`
+- `/api/transfer-edges?limit=500&nodes=10000` (aggregated wallet→wallet, mapped to representative tokens; used in transfers mode)
+
+Database overview (SQLite)
+- Tables
+  - `tokens` — core NFT data; owner, metadata, image paths, `frozen`, `dormant`, `last_activity`
+  - `attributes` — normalized traits (`trait_type`, `trait_value`) with indexes for fast filtering
+  - `transfers` — history (`token_id`, `from_addr`, `to_addr`, `timestamp`, `price`, `event_type`)
+  - `wallet_metadata` — ENS, Ethos scores/credibility, social links, holdings, activity rollups
+  - `ethos_profiles` — lean cache for ACTIVE/signed‑up Ethos users (`has_ethos`, `profile_json`, `updated_at`)
+  - `graph_cache` — precomputed graphs (holders/transfers/traits/wallets) with ETag
+  - `collection_stats` — global counters (total supply, holders, etc.)
+- Transaction semantics
+  - Sale: `price > 0` (or `event_type='sale'`)
+  - Transfer: `price IS NULL OR price <= 0` and not a mint
+  - Mint: `event_type='mint'` or empty `from_addr`
+- Caching
+  - In‑memory TTL (5m) + ETag; `/api/graph` also backed by `graph_cache`
+
+Quick checks
+```
+# Health & stats
+curl -s http://localhost:3000/api/health | jq .
+curl -s http://localhost:3000/api/stats  | jq .
+
+# Graph & preset data
+curl -s 'http://localhost:3000/api/network-graph?mode=holders&nodes=500&edges=0' | jq '.nodes|length'
+curl -s 'http://localhost:3000/api/preset-data?nodes=500' | jq 'keys'
+
+# Transfer edges (aggregated wallet→wallet)
+curl -s 'http://localhost:3000/api/transfer-edges?limit=25' | jq '.[0]'
+
+# DB sanity
+sqlite3 ./data/mammoths.db ".tables"
+sqlite3 -json ./data/mammoths.db "SELECT (SELECT COUNT(*) FROM tokens) AS tokens,
+                                       (SELECT COUNT(*) FROM attributes) AS attrs,
+                                       (SELECT COUNT(*) FROM transfers) AS xfers,
+                                       (SELECT COUNT(*) FROM wallet_metadata) AS wallets;"
+```
 
 Render.com
 - Persistent disk via `render.yaml`
@@ -43,9 +86,11 @@ Performance
 - Worker ~30Hz → main 60fps; resolution capped ≤ 2; WebGL guard
 - Grid is cheap; charts are lightweight Canvas overlay
 
-Design system
-- Colors and typography align with dash.mammoths.tech (monospace, black/white/green)
-- See docs/TECH_SPEC.md for the living spec and proposed design tokens
+Design & Tokens
+- Colors/typography align with dash.mammoths.tech (monospace, black/green)
+- Frozen = #4488ff, Dormant = #666666
+- See `docs/TECH_SPEC.md` for the living spec and proposed design tokens
+- Renderer uses a centralized palette in `public/main.js` (`BRAND` object)
 
 Modularium + Ethos
 - Jobs fill tokens/attributes/holders/transfers (with price) and wallet_metadata (Ethos v2 batch)
@@ -58,3 +103,6 @@ Notes
 
 Codex system instructions
 - Launch Codex with the repo’s system rules: `codex chat --system-file SYSTEM.md`
+
+Changelog (high level)
+- 2025‑09‑10: Added `/api/transfer-edges` and transaction edge styles with toggles; header sticky; grid visibility tuned; centralized JS palette.

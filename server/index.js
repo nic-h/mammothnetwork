@@ -393,23 +393,26 @@ app.get(['/api/graph', '/api/network-graph'], (req, res) => {
   const mode = (req.query.mode || 'holders').toString();
   const nodes = clamp(parseInt(req.query.nodes || '10000', 10), 100, 10000);
   const edges = clamp(parseInt(req.query.edges || '200', 10), 0, 500); // cap at 500
+  const force = String(req.query.force || '').toLowerCase() === '1';
   const key = cacheKey({ mode, nodes, edges });
 
-  // memory cache
-  const cached = memCache.get(key);
-  if (cached) {
-    const etag = cached.etag || makeEtag(cached.value || cached);
-    res.setHeader('ETag', etag);
-    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
-    const inm = req.headers['if-none-match'];
-    if (inm && inm === etag) return res.status(304).end();
-    return res.json(cached.value || cached);
+  // memory cache (skip when force=true)
+  if (!force) {
+    const cached = memCache.get(key);
+    if (cached) {
+      const etag = cached.etag || makeEtag(cached.value || cached);
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+      const inm = req.headers['if-none-match'];
+      if (inm && inm === etag) return res.status(304).end();
+      return res.json(cached.value || cached);
+    }
   }
 
-  // DB cache
-  if (haveDb) {
+  // DB cache with TTL (5 minutes); skip when force=true
+  if (!force && haveDb) {
     try {
-      const row = db.prepare('SELECT etag, payload FROM graph_cache WHERE key=?').get(key);
+      const row = db.prepare("SELECT etag, payload, updated_at FROM graph_cache WHERE key=? AND updated_at >= DATETIME('now', '-5 minutes')").get(key);
       if (row && row.payload) {
         const payload = JSON.parse(row.payload);
         res.setHeader('ETag', row.etag || makeEtag(payload));
