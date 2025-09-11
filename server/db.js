@@ -17,6 +17,7 @@ export function openDatabase(rootDir) {
 
 export function runMigrations(db) {
   if (!db) return;
+  try { db.pragma('busy_timeout = 5000'); } catch {}
   db.pragma('journal_mode = WAL');
   db.exec(`
     CREATE TABLE IF NOT EXISTS tokens (
