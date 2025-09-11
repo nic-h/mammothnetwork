@@ -109,6 +109,17 @@ input[type="checkbox"] { accent-color: var(--fg); }
 }
 .layer-toggle input[type="checkbox"]:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--green-rgb), .35); }
 .edge-controls input[type=range]:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--green-rgb), .25); }
+
+/* Brand tooltips for icon-only controls */
+.tooltipped[data-tooltip] { position: relative; }
+.tooltipped[data-tooltip]:hover::after,
+.tooltipped[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute; top: calc(100% + 6px); right: 0;
+  background: var(--bg); color: var(--fg); border: var(--border);
+  padding: var(--pad-4) var(--pad-6); white-space: nowrap; z-index: 300;
+  font-size: var(--fs-10);
+}
 .edge-controls input[type=range] {
   width: 180px;
   appearance: none; height: 6px; background: rgba(var(--green-rgb), .25); border: var(--border);

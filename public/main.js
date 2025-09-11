@@ -769,7 +769,7 @@ async function selectNode(index){
       </div>
       <div class='card'>
         <div class='label'>REALIZED PNL</div>
-        <div class='big-number' style='color:${(pnlTIA!=null && pnlTIA<0)?'#ff3b3b':'var(--fg)'}'>${pnlTIA!=null?fmtAmt(pnlTIA):'--'}</div>
+        <div class='big-number' style='color:${(pnlTIA!=null && pnlTIA<0)?'var(--danger)':'var(--fg)'}'>${pnlTIA!=null?fmtAmt(pnlTIA):'--'}</div>
         <div class='small-meta'>Based on token buy→sell pairs</div>
       </div>
       <div class='card2'>

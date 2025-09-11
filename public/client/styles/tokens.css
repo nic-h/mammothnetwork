@@ -12,6 +12,8 @@
   --green-rgb: 0,255,102;     /* for rgba(...) uses */
   --blue: #4488ff;            /* frozen */
   --gray: #666666;            /* dormant */
+  --danger: #ff3b3b;          /* semantic red for losses/sales UI */
+  --danger-rgb: 255,59,59;
 
   /* Typography */
   --font-mono: Menlo, 'Fira Code', 'SFMono-Regular', ui-monospace, monospace;
