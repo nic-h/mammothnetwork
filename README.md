@@ -33,14 +33,19 @@ Endpoints
 - `/api/network-graph?mode=holders|transfers|traits|wallets&nodes=10000&edges=0..500` (alias `/api/graph`)
 - `/api/preset-data?nodes=10000`
 - `/api/token/:id`
+  - Includes token sales/hold metrics: `sale_count`, `avg_sale_price`, `last_sale_price`, `first_sale_ts`, `last_sale_ts`, `last_acquired_ts`, `last_buy_price`, `hold_days`.
 - `/api/wallet/:address`, `/api/wallet/:address/meta`
 - `/api/ethos/profile?address=0x…` (v2 user + score)
 - `/api/activity?interval=day|hour`, `/api/heatmap`, `/api/stats`, `/api/health`
 - `/api/transfer-edges?limit=500&nodes=10000` (aggregated wallet→wallet, mapped to representative tokens; used in transfers mode)
+- `/api/top-traded-tokens?limit=50` — top tokens by total transfers (with sales count and last trade)
+- `/api/longest-held-tokens?limit=50` — currently held tokens with longest `hold_days`
+- `/api/trait-sale-stats?min_sales=3&limit=200` — average/min/max sale price aggregated per trait value
 
 Database overview (SQLite)
 - Tables
   - `tokens` — core NFT data; owner, metadata, image paths, `frozen`, `dormant`, `last_activity`
+    - Derived metrics: `sale_count`, `avg_sale_price`, `last_sale_price`, `first_sale_ts`, `last_sale_ts`, `last_acquired_ts`, `last_buy_price`, `hold_days`
   - `attributes` — normalized traits (`trait_type`, `trait_value`) with indexes for fast filtering
   - `transfers` — history (`token_id`, `from_addr`, `to_addr`, `timestamp`, `price`, `event_type`)
   - `wallet_metadata` — ENS, Ethos scores/credibility, social links, holdings, activity rollups
@@ -51,6 +56,9 @@ Database overview (SQLite)
   - Sale: `price > 0` (or `event_type='sale'`)
   - Transfer: `price IS NULL OR price <= 0` and not a mint
   - Mint: `event_type='mint'` or empty `from_addr`
+- Indexes
+  - `idx_transfers_token_time (token_id, timestamp)`
+  - `idx_transfers_token_to_time (token_id, to_addr, timestamp)` for last_acquired lookups
 - Caching
   - In‑memory TTL (5m) + ETag; `/api/graph` also backed by `graph_cache`
 

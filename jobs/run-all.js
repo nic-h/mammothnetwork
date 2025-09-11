@@ -12,6 +12,8 @@ run('node scripts/db.migrate.js');
 run('node jobs/sync-metadata.js', { DOWNLOAD_IMAGES: process.env.DOWNLOAD_IMAGES || '0', METADATA_CONC: process.env.METADATA_CONC || '8', START_ID: process.env.START_ID || '', END_ID: process.env.END_ID || '' });
 run('node jobs/sync-holders.js');
 run('node jobs/sync-activity.js');
+// Token-level metrics (sales/hold)
+run('node jobs/compute-token-metrics.js');
 run('node jobs/enrich-wallets.js');
 run('node jobs/ethos.js');
 // Precompute edges for all modes (holders, transfers, traits)

@@ -666,7 +666,7 @@ app.get('/api/token/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
   try {
-    const row = db.prepare('SELECT id, owner, name, description, image_local, thumbnail_local, attributes, frozen, dormant, last_activity FROM tokens WHERE id=?').get(id);
+    const row = db.prepare('SELECT id, owner, name, description, image_local, thumbnail_local, attributes, frozen, dormant, last_activity, sale_count, avg_sale_price, last_sale_price, first_sale_ts, last_sale_ts, last_acquired_ts, last_buy_price, hold_days FROM tokens WHERE id=?').get(id);
     if (!row) return res.status(404).json({ error: 'not-found' });
     // traits from attributes table (authoritative)
     let traits = [];
@@ -686,6 +686,14 @@ app.get('/api/token/:id', async (req, res) => {
       frozen: row.frozen || 0,
       dormant: row.dormant || 0,
       last_activity: row.last_activity || null,
+      sale_count: row.sale_count ?? null,
+      avg_sale_price: row.avg_sale_price ?? null,
+      last_sale_price: row.last_sale_price ?? null,
+      first_sale_ts: row.first_sale_ts ?? null,
+      last_sale_ts: row.last_sale_ts ?? null,
+      last_acquired_ts: row.last_acquired_ts ?? null,
+      last_buy_price: row.last_buy_price ?? null,
+      hold_days: row.hold_days ?? null,
     };
     // Attach Ethos profile if verified/accepted
     try {
@@ -711,6 +719,66 @@ app.get('/api/token/:id/transfers', (req, res) => {
   } catch (e) {
     return res.status(500).json({ error: 'db-error' });
   }
+});
+
+// API: Top traded tokens (by total transfers), includes sales count
+app.get('/api/top-traded-tokens', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  const limit = clamp(parseInt(req.query.limit || '50', 10), 1, 500);
+  try {
+    const rows = db.prepare(`
+      SELECT t.token_id AS id,
+             COUNT(1) AS trades,
+             SUM(CASE WHEN t.price IS NOT NULL AND t.price>0 THEN 1 ELSE 0 END) AS sales,
+             MAX(t.timestamp) AS last_trade_ts
+      FROM transfers t
+      GROUP BY t.token_id
+      ORDER BY trades DESC
+      LIMIT ?
+    `).all(limit);
+    return res.json({ tokens: rows });
+  } catch (e) { return res.status(500).json({ error: 'db-error' }); }
+});
+
+// API: Longest-held tokens (currently held, longest hold_days)
+app.get('/api/longest-held-tokens', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  const limit = clamp(parseInt(req.query.limit || '50', 10), 1, 500);
+  try {
+    const rows = db.prepare(`
+      SELECT id, owner, hold_days, last_acquired_ts, last_buy_price
+      FROM tokens
+      WHERE owner IS NOT NULL AND owner<>'' AND hold_days IS NOT NULL
+      ORDER BY hold_days DESC
+      LIMIT ?
+    `).all(limit);
+    return res.json({ tokens: rows });
+  } catch (e) { return res.status(500).json({ error: 'db-error' }); }
+});
+
+// API: Trait-level sale stats (avg/min/max sale price by trait)
+app.get('/api/trait-sale-stats', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  const limit = clamp(parseInt(req.query.limit || '200', 10), 1, 1000);
+  const minSales = clamp(parseInt(req.query.min_sales || '3', 10), 1, 1000);
+  try {
+    const rows = db.prepare(`
+      SELECT a.trait_type AS type,
+             a.trait_value AS value,
+             COUNT(t.price) AS sales,
+             AVG(t.price) AS avg_price,
+             MIN(t.price) AS min_price,
+             MAX(t.price) AS max_price
+      FROM attributes a
+      JOIN transfers t ON t.token_id = a.token_id
+      WHERE t.price IS NOT NULL AND t.price > 0
+      GROUP BY a.trait_type, a.trait_value
+      HAVING sales >= ?
+      ORDER BY avg_price DESC
+      LIMIT ?
+    `).all(minSales, limit);
+    return res.json({ traits: rows });
+  } catch (e) { return res.status(500).json({ error: 'db-error' }); }
 });
 
 // Similar tokens by rarest trait

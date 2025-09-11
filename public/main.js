@@ -539,6 +539,12 @@ async function selectNode(index){
     }).join('');
     const advChips = (similarAdv||[]).slice(0,12).map(x=>`<span class='chip' data-token='${x.token_id}'>#${String(x.token_id).padStart(4,'0')}</span>`).join('');
     const traitsRows = (t.traits||[]).slice(0,24).map(a=>`<div class='label'>${a.trait_type}</div><div class='value'>${a.trait_value}</div>`).join('');
+    // token-level metrics
+    const lastSaleTs = t.last_sale_ts ? Number(t.last_sale_ts) : null;
+    const lastBuyTs  = t.last_acquired_ts ? Number(t.last_acquired_ts) : null;
+    const lastSaleWhen = lastSaleTs ? (timeAgo(lastSaleTs*1000)+' ago') : '';
+    const lastBuyWhen  = lastBuyTs  ? (timeAgo(lastBuyTs*1000)+' ago') : '';
+    const holdDaysTxt = (t.hold_days!=null && isFinite(t.hold_days)) ? String(Math.round(Number(t.hold_days))) : '--';
     detailsEl.innerHTML = `
       <div class='token-title'>MAMMOTH #${id.toString().padStart(4,'0')} <span class='token-close' id='close-detail'><i class="ri-close-line"></i></span></div>
       <div class='section-label'>OWNER</div>
@@ -571,6 +577,23 @@ async function selectNode(index){
         <div class='label'>REALIZED PNL</div>
         <div class='big-number' style='color:${(pnlTIA!=null && pnlTIA<0)?'#ff3b3b':'#00ff66'}'>${pnlTIA!=null?fmtAmt(pnlTIA):'--'}</div>
         <div class='small-meta'>Based on token buy→sell pairs</div>
+      </div>
+      <div class='card2'>
+        <div class='card'>
+          <div class='label'>LAST BUY</div>
+          <div class='big-number'>${(t.last_buy_price!=null)?fmtAmt(Number(t.last_buy_price)):'--'}</div>
+          <div class='small-meta'>${lastBuyWhen}</div>
+        </div>
+        <div class='card'>
+          <div class='label'>LAST SALE</div>
+          <div class='big-number'>${(t.last_sale_price!=null)?fmtAmt(Number(t.last_sale_price)):'--'}</div>
+          <div class='small-meta'>${lastSaleWhen}</div>
+        </div>
+      </div>
+      <div class='card'>
+        <div class='label'>HOLD DAYS</div>
+        <div class='big-number'>${holdDaysTxt}</div>
+        <div class='small-meta'>Days since last buy</div>
       </div>
       <div class='card2'>
         <div class='card'>

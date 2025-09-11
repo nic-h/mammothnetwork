@@ -11,6 +11,7 @@
     "jobs:compute-edges": "node jobs/compute-edges.js",
     "jobs:sync-holders": "node jobs/sync-holders.js",
     "jobs:sync-activity": "node jobs/sync-activity.js",
+    "jobs:compute-token-metrics": "node jobs/compute-token-metrics.js",
     "jobs:enrich-wallets": "node jobs/enrich-wallets.js",
     "jobs:enrich-ethos": "node jobs/ethos.js",
     "jobs:sync-metadata": "node jobs/sync-metadata.js",

@@ -78,6 +78,7 @@ export function runMigrations(db) {
       timestamp INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_transfers_token_time ON transfers (token_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_transfers_token_to_time ON transfers (token_id, to_addr, timestamp);
     CREATE TABLE IF NOT EXISTS graph_cache (
       key TEXT PRIMARY KEY,
       etag TEXT,
@@ -151,5 +152,21 @@ export function runMigrations(db) {
       { name: 'unrealized_pnl_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN unrealized_pnl_tia REAL' },
     ];
     for (const c of want2) if (!cols2.includes(c.name)) db.exec(c.ddl);
+  } catch {}
+
+  // Conditional columns for token-level metrics (sales/holds)
+  try {
+    const colsT = db.prepare(`PRAGMA table_info(tokens)`).all().map(c => c.name);
+    const wantT = [
+      { name: 'sale_count', ddl: 'ALTER TABLE tokens ADD COLUMN sale_count INTEGER DEFAULT 0' },
+      { name: 'avg_sale_price', ddl: 'ALTER TABLE tokens ADD COLUMN avg_sale_price REAL' },
+      { name: 'last_sale_price', ddl: 'ALTER TABLE tokens ADD COLUMN last_sale_price REAL' },
+      { name: 'first_sale_ts', ddl: 'ALTER TABLE tokens ADD COLUMN first_sale_ts INTEGER' },
+      { name: 'last_sale_ts', ddl: 'ALTER TABLE tokens ADD COLUMN last_sale_ts INTEGER' },
+      { name: 'last_acquired_ts', ddl: 'ALTER TABLE tokens ADD COLUMN last_acquired_ts INTEGER' },
+      { name: 'last_buy_price', ddl: 'ALTER TABLE tokens ADD COLUMN last_buy_price REAL' },
+      { name: 'hold_days', ddl: 'ALTER TABLE tokens ADD COLUMN hold_days REAL' },
+    ];
+    for (const c of wantT) if (!colsT.includes(c.name)) db.exec(c.ddl);
   } catch {}
 }
