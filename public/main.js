@@ -661,7 +661,7 @@ async function selectNode(index){
       </div>
       <div class='card'>
         <div class='label'>REALIZED PNL</div>
-        <div class='big-number' style='color:${(pnlTIA!=null && pnlTIA<0)?'#ff3b3b':'#00ff66'}'>${pnlTIA!=null?fmtAmt(pnlTIA):'--'}</div>
+        <div class='big-number' style='color:${(pnlTIA!=null && pnlTIA<0)?'#ff3b3b':'var(--fg)'}'>${pnlTIA!=null?fmtAmt(pnlTIA):'--'}</div>
         <div class='small-meta'>Based on token buy→sell pairs</div>
       </div>
       <div class='card2'>
@@ -1269,7 +1269,7 @@ async function ensurePixi(){
 function showFatal(err){
   console.error('Init failed:', err);
   const el = document.createElement('div');
-  el.style.cssText = 'color:#f55;padding:16px;font:12px monospace;background:#111;border-bottom:1px solid #300';
+  el.style.cssText = 'color:#ff5555;padding: var(--pad-16); font: var(--fs-12)/1.5 var(--font-mono); background: #111; border-bottom: 1px solid rgba(0,0,0,.6)';
   el.innerHTML = `<b>Failed to initialize</b><br>${(err&&err.message)||err}`;
   document.body.prepend(el);
 }

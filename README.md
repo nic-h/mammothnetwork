@@ -104,6 +104,23 @@ Modularium + Ethos
 - Jobs fill tokens/attributes/holders/transfers (with price) and wallet_metadata (Ethos v2 batch)
 - Runtime reads only from SQLite; on‑demand Ethos proxy (`/api/ethos/profile`) caches 24h
 
+**Design Tokens (CSS Variables)**
+- Colors: `--bg`, `--fg`, `--fg-dim`, `--green-rgb` (use with `rgba(var(--green-rgb), .2)`), `--blue`, `--gray`, `--text`
+- Typography: `--font-mono`, sizes `--fs-10`, `--fs-12`, `--fs-14`, `--fs-18`
+- Spacing: `--pad-4`, `--pad-6`, `--pad-8`, `--pad-12`, `--pad-16`, `--pad-24`, `--pad-32`, `--pad-48`
+- Layout: `--col-left`, `--col-right`, `--radius`, `--line-rgb`
+- Controls: `--ctl-h`, `--ctl-pad-x`, `--ctl-pad-y`
+- Surfaces: `--card-bg`, `--text-muted`
+
+Usage examples
+```
+border: 1px solid rgba(var(--green-rgb), .15);
+padding: var(--pad-8) var(--pad-12);
+font: var(--fs-12)/1.5 var(--font-mono);
+color: var(--fg); background: var(--bg);
+height: var(--ctl-h); line-height: var(--ctl-h);
+```
+
 Notes
 - PIXI v7 UMD build is served at `/lib/pixi.min.js`; the app uses `new PIXI.Application({ ... })` and `app.view`
 - Images: served at `/images`; thumbnails at `/thumbnails` (nodes never load images)
