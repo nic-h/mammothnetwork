@@ -20,6 +20,7 @@ function classifyWallet(address){
     FROM transfers
     WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?
   `).get(addr, addr, addr, addr);
+  const lastTrade = db.prepare('SELECT MAX(timestamp) AS t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t || null;
 
   const now = Math.floor(Date.now()/1000);
   const holdRows = db.prepare(`
@@ -30,17 +31,27 @@ function classifyWallet(address){
     WHERE LOWER(t1.to_addr)=?
   `).all(addr, now, addr, now, addr);
   const avgHoldDays = holdRows.length ? holdRows.reduce((s, r)=>s+(r.hold_time||0),0)/holdRows.length/86400 : 0;
-  const flipRatio = holdings>0 ? (trades.sells||0) / (holdings + (trades.sells||0)) : 0;
+  const buyCount = trades.buys || 0;
+  const sellCount = trades.sells || 0;
+  const totalTrades = trades.total || 0;
+  const sellRatio = totalTrades ? sellCount / totalTrades : 0;
+  const flipRatio = (buyCount + sellCount) ? sellCount / (buyCount + sellCount) : 0;
 
   let walletType = 'casual';
-  if ((trades.sells||0) > holdings*2 && flipRatio > 0.6) walletType = 'flipper';
-  else if (avgHoldDays > 180 && flipRatio < 0.2) walletType = 'diamond_hands';
-  else if (holdings > 20) walletType = 'collector';
-  else if ((trades.max_price||0) > 10) walletType = 'whale_trader';
-  else if ((trades.total||0) === 0 && holdings > 0) walletType = 'holder';
-  else if ((trades.buys||0) > (trades.sells||0)*2) walletType = 'accumulator';
+  // Flipper: frequent selling with short holds
+  if (sellCount >= 3 && avgHoldDays <= 30 && (flipRatio >= 0.6 || sellCount >= buyCount)) walletType = 'flipper';
+  // Diamond hands: long holds, low sell ratio, and stale recent activity
+  else if (avgHoldDays >= 180 && sellRatio <= 0.2) walletType = 'diamond_hands';
+  // Collector: sizeable holdings and low sell pressure
+  else if (holdings >= 10 && sellRatio <= 0.3) walletType = 'collector';
+  // Whale trader: high ticket trades
+  else if ((trades.max_price||0) >= 5) walletType = 'whale_trader';
+  // Holder: no trades but currently holds
+  else if (totalTrades === 0 && holdings > 0) walletType = 'holder';
+  // Accumulator: buys much more than sells and growing holdings
+  else if (buyCount >= Math.max(3, sellCount*2)) walletType = 'accumulator';
 
-  return { type: walletType, avgHoldDays, flipRatio, buyCount: trades.buys||0, sellCount: trades.sells||0 };
+  return { type: walletType, avgHoldDays, flipRatio, buyCount, sellCount };
 }
 
 async function main(){

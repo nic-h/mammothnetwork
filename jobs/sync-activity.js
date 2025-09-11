@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { openDatabase, runMigrations } from '../server/db.js';
