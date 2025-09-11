@@ -15,22 +15,32 @@
     <div class="logo">MAMMOTH.NETWORK</div>
     <div class="header-controls">
       <div class="mode-chips" aria-label="Modes">
-        <button class="chip-btn" data-mode="holders" title="Holders"><i class="ri-node-tree"></i><span class="chip-label"> HOLDERS</span></button>
-        <button class="chip-btn" data-mode="transfers" title="Transfers"><i class="ri-exchange-line"></i><span class="chip-label"> TRANSFERS</span></button>
-        <button class="chip-btn" data-mode="traits" title="Traits"><i class="ri-shape-2-line"></i><span class="chip-label"> TRAITS</span></button>
-        <button class="chip-btn" data-mode="wallets" title="Wallets"><i class="ri-wallet-3-line"></i><span class="chip-label"> WALLETS</span></button>
+        <button class="btn btn--chip chip-btn" data-mode="holders" title="Holders"><i class="ri-node-tree"></i><span class="chip-label"> HOLDERS</span></button>
+        <button class="btn btn--chip chip-btn" data-mode="transfers" title="Transfers"><i class="ri-exchange-line"></i><span class="chip-label"> TRANSFERS</span></button>
+        <button class="btn btn--chip chip-btn" data-mode="traits" title="Traits"><i class="ri-shape-2-line"></i><span class="chip-label"> TRAITS</span></button>
+        <button class="btn btn--chip chip-btn" data-mode="wallets" title="Wallets"><i class="ri-wallet-3-line"></i><span class="chip-label"> WALLETS</span></button>
       </div>
       <div class="presets preset-bar" aria-label="Presets">
-        <button class="preset-btn" data-preset="ownership" title="Ownership"><i class="ri-links-line"></i><span class="preset-label"> OWNERSHIP</span></button>
-        <button class="preset-btn" data-preset="trading" title="Trading"><i class="ri-line-chart-line"></i><span class="preset-label"> TRADING</span></button>
-        <button class="preset-btn" data-preset="rarity" title="Rarity"><i class="ri-star-line"></i><span class="preset-label"> RARITY</span></button>
-        <button class="preset-btn" data-preset="social" title="Social"><i class="ri-user-3-line"></i><span class="preset-label"> SOCIAL</span></button>
-        <button class="preset-btn" data-preset="whales" title="Whales"><i class="ri-team-line"></i><span class="preset-label"> WHALES</span></button>
-        <button class="preset-btn" data-preset="frozen" title="Frozen"><i class="ri-snowflake-line"></i><span class="preset-label"> FROZEN</span></button>
+        <button class="btn btn--preset preset-btn" data-preset="ownership" title="Ownership"><i class="ri-links-line"></i><span class="preset-label"> OWNERSHIP</span></button>
+        <button class="btn btn--preset preset-btn" data-preset="trading" title="Trading"><i class="ri-line-chart-line"></i><span class="preset-label"> TRADING</span></button>
+        <button class="btn btn--preset preset-btn" data-preset="rarity" title="Rarity"><i class="ri-star-line"></i><span class="preset-label"> RARITY</span></button>
+        <button class="btn btn--preset preset-btn" data-preset="social" title="Social"><i class="ri-user-3-line"></i><span class="preset-label"> SOCIAL</span></button>
+        <button class="btn btn--preset preset-btn" data-preset="whales" title="Whales"><i class="ri-team-line"></i><span class="preset-label"> WHALES</span></button>
+        <button class="btn btn--preset preset-btn" data-preset="frozen" title="Frozen"><i class="ri-snowflake-line"></i><span class="preset-label"> FROZEN</span></button>
+      </div>
+      <div class="view-selector" aria-label="Views">
+        <label for="view">VIEW</label>
+        <select id="view">
+          <option value="ownership">OWNERSHIP NETWORK</option>
+          <option value="trading">TRADING ACTIVITY</option>
+          <option value="traits">TRAIT EXPLORER</option>
+          <option value="whales">WHALE WATCH</option>
+          <option value="health">COLLECTION HEALTH</option>
+        </select>
       </div>
       <div class="search-wrapper">
         <input id="search" type="search" placeholder="TOKEN ID OR ADDRESS" class="header-search">
-        <button id="clear-search" class="clear-btn" title="Clear (ESC)">✕</button>
+        <button id="clear-search" class="btn btn--clear clear-btn" title="Clear (ESC)">✕</button>
       </div>
     </div>
   </header>
@@ -70,7 +80,7 @@
       </div>
       <div class="traits-section">
         <div class="panel-title">TRAITS</div>
-        <button id="clear-filters" class="preset-btn" style="width:100%;margin-bottom:12px;">CLEAR FILTERS</button>
+        <button id="clear-filters" class="btn btn--preset preset-btn" style="width:100%;margin-bottom:12px;">CLEAR FILTERS</button>
         <div id="traits-container"></div>
       </div>
     </aside>

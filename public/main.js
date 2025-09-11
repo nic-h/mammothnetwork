@@ -217,6 +217,60 @@ async function init() {
   resetAlpha();
   resetView();
   setLegend(preset);
+
+  // Enable unified view selector behavior
+  try { document.body.classList.add('view-selector-enabled'); } catch {}
+  const viewEl = document.getElementById('view');
+  if (viewEl && !viewEl.dataset.bound) {
+    viewEl.dataset.bound = '1';
+    viewEl.addEventListener('change', async ()=>{
+      const v = viewEl.value;
+      const edges = Number(edgesEl?.value||200);
+      if (v === 'ownership') {
+        modeEl.value = 'holders';
+        await load('holders', edges);
+        preset = 'ownership';
+        await ensurePresetData();
+        applyPreset('ownership');
+        layoutClusters();
+        setLegend('ownership');
+      } else if (v === 'trading') {
+        modeEl.value = 'transfers';
+        await load('transfers', edges);
+        preset = 'trading';
+        await ensurePresetData();
+        applyPreset('trading');
+        layoutPreset('trading');
+        setLegend('trading');
+      } else if (v === 'traits') {
+        modeEl.value = 'traits';
+        await load('traits', edges);
+        preset = 'rarity';
+        await ensurePresetData();
+        applyPreset('rarity');
+        layoutPreset('rarity');
+        setLegend('rarity');
+      } else if (v === 'whales') {
+        modeEl.value = 'wallets';
+        await load('wallets', edges);
+        preset = 'whales';
+        await ensurePresetData();
+        applyPreset('whales');
+        layoutPreset('whales');
+        setLegend('whales');
+      } else if (v === 'health') {
+        modeEl.value = 'holders';
+        await load('holders', edges);
+        preset = 'frozen';
+        await ensurePresetData();
+        applyPreset('frozen');
+        layoutPreset('frozen');
+        setLegend('frozen');
+      }
+      resetAlpha();
+      resetView();
+    });
+  }
 }
 
 async function load(mode, edges){
