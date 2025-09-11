@@ -20,6 +20,7 @@ run('node jobs/compute-edges.js', { MODE: 'transfers', EDGES: process.env.EDGES 
 run('node jobs/compute-edges.js', { MODE: 'traits', EDGES: process.env.EDGES || '500' });
 // Listings + classifications + similarity
 run('node jobs/sync-listings.js', { LISTINGS_PAGES: process.env.LISTINGS_PAGES || '50' });
+// Metrics first (volumes), then classifier using those metrics
+run('node jobs/compute-wallet-metrics.js');
 run('node jobs/classify-wallets.js');
 run('node jobs/build-similarity.js');
-run('node jobs/compute-wallet-metrics.js');

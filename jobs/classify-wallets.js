@@ -22,6 +22,13 @@ function classifyWallet(address){
   `).get(addr, addr, addr, addr);
   const lastTrade = db.prepare('SELECT MAX(timestamp) AS t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t || null;
 
+  // Volume metrics (TIA)
+  const vol = db.prepare(`
+    SELECT 
+      (SELECT COALESCE(SUM(price),0) FROM transfers WHERE LOWER(to_addr)=? AND price IS NOT NULL) AS buy_vol,
+      (SELECT COALESCE(SUM(price),0) FROM transfers WHERE LOWER(from_addr)=? AND price IS NOT NULL) AS sell_vol
+  `).get(addr, addr);
+
   const now = Math.floor(Date.now()/1000);
   const holdRows = db.prepare(`
     SELECT t1.token_id, t1.timestamp AS acquired,
@@ -38,14 +45,19 @@ function classifyWallet(address){
   const flipRatio = (buyCount + sellCount) ? sellCount / (buyCount + sellCount) : 0;
 
   let walletType = 'casual';
-  // Flipper: frequent selling with short holds
-  if (sellCount >= 3 && avgHoldDays <= 30 && (flipRatio >= 0.6 || sellCount >= buyCount)) walletType = 'flipper';
+  // Thresholds (env overrides)
+  const MAX_HOLD_FLIP = Number(process.env.FLIPPER_MAX_HOLD_DAYS || 30);
+  const WHALE_TRADE_MAX = Number(process.env.WHALE_TRADE_MAX_TIA || 50); // single large trade
+  const WHALE_SELL_VOL = Number(process.env.WHALE_SELL_VOL_TIA || 500);   // cumulative revenue
+
+  // Flipper: sells >= buys and short average holds or high sell ratio
+  if ((sellCount >= buyCount && sellCount >= 3 && avgHoldDays <= MAX_HOLD_FLIP) || (sellRatio >= 0.6 && avgHoldDays <= MAX_HOLD_FLIP)) walletType = 'flipper';
   // Diamond hands: long holds, low sell ratio, and stale recent activity
   else if (avgHoldDays >= 180 && sellRatio <= 0.2 && (!lastTrade || (now - lastTrade) > 180*86400)) walletType = 'diamond_hands';
+  // Whale trader: high ticket trades or cumulative revenue
+  else if ((trades.max_price||0) >= WHALE_TRADE_MAX || (vol?.sell_vol||0) >= WHALE_SELL_VOL) walletType = 'whale_trader';
   // Collector: sizeable holdings and low sell pressure
   else if (holdings >= 10 && sellRatio <= 0.3) walletType = 'collector';
-  // Whale trader: high ticket trades
-  else if ((trades.max_price||0) >= 5) walletType = 'whale_trader';
   // Holder: no trades but currently holds
   else if (totalTrades === 0 && holdings > 0) walletType = 'holder';
   // Accumulator: buys much more than sells and growing holdings

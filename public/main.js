@@ -22,6 +22,7 @@ let worker = null; // disabled physics, keep ref for future
 let preset = null;
 let presetData = null;
 let lastGraph = null;
+let lastSelectedWalletMeta = null;
 const PRESET_MODE = { ownership: 'holders', trading: 'transfers', whales: 'wallets', frozen: 'holders', rarity: null, social: 'holders' };
 let ethosMin = 0, ethosMax = 1;
 let ownerCounts = null;
@@ -488,6 +489,7 @@ async function selectNode(index){
     }
     let meta = null;
     try { if (t.owner) meta = await fetch(`/api/wallet/${t.owner}/meta?v=${Date.now()}`, { cache:'no-store' }).then(r=>r.json()); } catch {}
+    lastSelectedWalletMeta = meta || null;
     const ethos = (meta && meta.ethos_score!=null) ? meta.ethos_score : null;
     const cred = (meta && meta.ethos_credibility!=null) ? meta.ethos_credibility : null;
     let ens = meta?.ens_name || null;
@@ -643,6 +645,13 @@ function updateSelectionOverlay(){
       }
     }
   } catch {}
+  // profitability badge when realized PnL > 0
+  try {
+    const profit = Number(lastSelectedWalletMeta?.realized_pnl_tia ?? 0);
+    if (isFinite(profit) && profit > 0) {
+      drawStar(selectGfx, s.x+12, s.y-12, 5, BRAND.GOLD);
+    }
+  } catch {}
   // neighbor edges from the active edges set
   const tid = s.__tokenId;
   if (edgesData && edgesData.length){
@@ -669,6 +678,19 @@ function updateSelectionOverlay(){
       selectGfx.moveTo(s.x, s.y);
       selectGfx.lineTo(sprites[j].x, sprites[j].y);
     });
+  }
+}
+
+function drawStar(g, cx, cy, r, color){
+  const points = 5; const step = Math.PI/points; const r2 = r*0.5;
+  g.lineStyle({ width:1.5, color: color, alpha:1, cap:'round', join:'round' });
+  for (let i=0;i<points*2;i++){
+    const ang1 = -Math.PI/2 + i*step;
+    const ang2 = -Math.PI/2 + (i+1)*step;
+    const rad1 = (i%2===0)? r : r2;
+    const rad2 = ((i+1)%2===0)? r : r2;
+    g.moveTo(cx + Math.cos(ang1)*rad1, cy + Math.sin(ang1)*rad1);
+    g.lineTo(cx + Math.cos(ang2)*rad2, cy + Math.sin(ang2)*rad2);
   }
 }
 

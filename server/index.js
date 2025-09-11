@@ -757,7 +757,7 @@ app.get('/api/wallet/:address/meta', (req, res) => {
   const addr = (req.params.address || '').toLowerCase();
   if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
   try {
-    const meta = db.prepare('SELECT address, ens_name, total_holdings, first_acquired, last_activity, trade_count, buy_count, sell_count, buy_volume_tia, sell_volume_tia, realized_pnl_tia, avg_buy_tia, avg_sell_tia, last_buy_ts, last_sell_ts, updated_at FROM wallet_metadata WHERE address=?').get(addr) || null;
+    const meta = db.prepare('SELECT address, ens_name, total_holdings, first_acquired, last_activity, trade_count, buy_count, sell_count, buy_volume_tia, sell_volume_tia, realized_pnl_tia, unrealized_pnl_tia, avg_buy_tia, avg_sell_tia, last_buy_ts, last_sell_ts, updated_at FROM wallet_metadata WHERE address=?').get(addr) || null;
     const holdings = (meta?.total_holdings ?? db.prepare('SELECT COUNT(1) c FROM tokens WHERE LOWER(owner)=?').get(addr).c);
     const first = (meta?.first_acquired ?? db.prepare('SELECT MIN(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t) ?? null;
     const last = (meta?.last_activity ?? db.prepare('SELECT MAX(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t) ?? null;
@@ -775,9 +775,9 @@ app.get('/api/wallet/:address/meta', (req, res) => {
       const level = (ep && ep.hasEthos) ? (ep.profile?.level ?? null) : null;
       const cred = level ? ethosCredFromLevel(level) : null;
       res.setHeader('Cache-Control', 'public, max-age=300');
-      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: score, ethos_credibility: cred, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades, buy_count: buyCount, sell_count: sellCount, buy_volume_tia: buyVol, sell_volume_tia: sellVol, realized_pnl_tia: (meta?.realized_pnl_tia ?? null), avg_buy_tia: avgBuy, avg_sell_tia: avgSell, last_buy_ts: lastBuy ?? null, last_sell_ts: lastSell ?? null });
+      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: score, ethos_credibility: cred, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades, buy_count: buyCount, sell_count: sellCount, buy_volume_tia: buyVol, sell_volume_tia: sellVol, realized_pnl_tia: (meta?.realized_pnl_tia ?? null), unrealized_pnl_tia: (meta?.unrealized_pnl_tia ?? null), avg_buy_tia: avgBuy, avg_sell_tia: avgSell, last_buy_ts: lastBuy ?? null, last_sell_ts: lastSell ?? null });
     }).catch(()=>{
-      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: null, ethos_credibility: null, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades, buy_count: buyCount, sell_count: sellCount, buy_volume_tia: buyVol, sell_volume_tia: sellVol, realized_pnl_tia: (meta?.realized_pnl_tia ?? null), avg_buy_tia: avgBuy, avg_sell_tia: avgSell, last_buy_ts: lastBuy ?? null, last_sell_ts: lastSell ?? null });
+      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: null, ethos_credibility: null, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades, buy_count: buyCount, sell_count: sellCount, buy_volume_tia: buyVol, sell_volume_tia: sellVol, realized_pnl_tia: (meta?.realized_pnl_tia ?? null), unrealized_pnl_tia: (meta?.unrealized_pnl_tia ?? null), avg_buy_tia: avgBuy, avg_sell_tia: avgSell, last_buy_ts: lastBuy ?? null, last_sell_ts: lastSell ?? null });
     });
   } catch (e) {
     return res.status(500).json({ error: 'db-error' });

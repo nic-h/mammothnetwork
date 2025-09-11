@@ -148,6 +148,7 @@ export function runMigrations(db) {
       { name: 'avg_sell_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN avg_sell_tia REAL' },
       { name: 'last_buy_ts', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN last_buy_ts INTEGER' },
       { name: 'last_sell_ts', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN last_sell_ts INTEGER' },
+      { name: 'unrealized_pnl_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN unrealized_pnl_tia REAL' },
     ];
     for (const c of want2) if (!cols2.includes(c.name)) db.exec(c.ddl);
   } catch {}
