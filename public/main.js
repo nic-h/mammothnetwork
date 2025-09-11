@@ -105,8 +105,9 @@ async function init() {
   } catch {}
   drawGrid();
 
-  // Load data and start
-  await load(modeEl.value, Number(edgesEl?.value||200));
+  // Load data and start (prefer ownership hierarchy by default)
+  modeEl.value = 'holders';
+  await load('holders', Number(edgesEl?.value||250));
 
   // Interactions
   // Install viewport controls (pan/zoom, zoom-at-cursor)
@@ -206,12 +207,13 @@ async function init() {
       });
     });
   } catch {}
-  // Default view: OWNERSHIP
+  // Default view: OWNERSHIP with cluster layout
   try { document.querySelector('.preset-btn[data-preset="ownership"]').classList.add('active'); } catch {}
   preset = 'ownership';
   await ensurePresetData();
-  applyPreset(preset);
-  layoutPreset(preset);
+  applyPreset('ownership');
+  layoutClusters();
+  if (legendEl) legendEl.textContent = 'Whale clusters center • Size = holdings • Green=profit • Red=loss • Cyan=high reputation';
   resetAlpha();
   resetView();
   setLegend(preset);
@@ -304,6 +306,62 @@ function layoutGrid(){
   clearSelectionOverlay();
 }
 
+// Organic ownership clusters (hierarchical hubs)
+function layoutClusters(){
+  const n = sprites.length; if (!n) return;
+  const ownerIdxArr = presetData?.ownerIndex || [];
+  const ownerMap = new Map();
+  for (let i=0;i<n;i++){
+    const oi = ownerIdxArr[i] ?? -1;
+    if (oi>=0){ if (!ownerMap.has(oi)) ownerMap.set(oi, []); ownerMap.get(oi).push(i); }
+  }
+  const owners = Array.from(ownerMap.entries()).sort((a,b)=> (b[1].length - a[1].length));
+  const cx = app.renderer.width/2, cy = app.renderer.height/2;
+  owners.forEach(([oi, tokens], ownerIdx)=>{
+    const holdings = tokens.length;
+    const isWhale = holdings > 20;
+    const isMedium = holdings > 5;
+    let hubX, hubY;
+    if (ownerIdx < 5 && isWhale){
+      const angle = (ownerIdx / 5) * Math.PI * 2;
+      hubX = cx + Math.cos(angle) * 150;
+      hubY = cy + Math.sin(angle) * 150;
+    } else if (ownerIdx < 20 && isMedium){
+      const angle = (ownerIdx / 20) * Math.PI * 2;
+      hubX = cx + Math.cos(angle) * 350;
+      hubY = cy + Math.sin(angle) * 350;
+    } else {
+      const angle = (ownerIdx / Math.max(1, owners.length)) * Math.PI * 2;
+      const radius = 500 + (ownerIdx % 3) * 100;
+      hubX = cx + Math.cos(angle) * radius;
+      hubY = cy + Math.sin(angle) * radius;
+    }
+    // Arrange tokens around hub
+    tokens.forEach((ti, i) => {
+      const sp = sprites[ti];
+      if (!sp) return;
+      if (i === 0){
+        sp.x = hubX; sp.y = hubY; sp.scale.set(isWhale?2.0:(isMedium?1.5:1.0));
+      } else {
+        const level = Math.floor(Math.log2(i + 1));
+        const levelAngle = (i / Math.max(1, tokens.length)) * Math.PI * 2;
+        const branchRadius = 30 + level * 25;
+        sp.x = hubX + Math.cos(levelAngle) * branchRadius;
+        sp.y = hubY + Math.sin(levelAngle) * branchRadius;
+        sp.scale.set(0.8);
+      }
+      // Color by wallet metrics
+      const ethos = presetData?.ownerEthos?.[oi] ?? null;
+      const pnl = presetData?.ownerPnl?.[oi] ?? 0;
+      if (pnl > 0) sp.tint = 0x00ff66;
+      else if (pnl < 0) sp.tint = 0xff6644;
+      else if (ethos && ethos > 1500) sp.tint = 0x66ddff;
+      else sp.tint = 0x888888;
+    });
+  });
+  drawEdges();
+}
+
 function drawEdges(){
   try {
     const maxDraw = 500;
@@ -315,8 +373,29 @@ function drawEdges(){
     if (selectedIndex >= 0) return;
     // Ambient toggle: when off, skip drawing ambient edges
     if (ambientEdgesEl && !ambientEdgesEl.checked) return;
+    const mode = modeEl?.value || 'holders';
+    // Ownership: draw hub→child tree edges (organic slight curves)
+    if (mode === 'holders'){
+      const ownerIdxArr = presetData?.ownerIndex || [];
+      const clusters = new Map();
+      const n = sprites.length;
+      for (let i=0;i<n;i++){ const oi = ownerIdxArr[i]??-1; if (oi>=0){ if(!clusters.has(oi)) clusters.set(oi, []); clusters.get(oi).push(i); } }
+      clusters.forEach(tokens => {
+        if (!tokens || tokens.length<2) return;
+        const hub = sprites[tokens[0]]; if (!hub) return;
+        const width = tokens.length>20 ? 1.2 : 0.6;
+        for (let k=1;k<tokens.length;k++){
+          const child = sprites[tokens[k]]; if (!child) continue;
+          const x1 = hub.x, y1 = hub.y; const x2 = child.x, y2 = child.y;
+          const mx = (x1+x2)/2; const my = (y1+y2)/2 - 12; // subtle curve
+          edgesGfx.lineStyle({ width, color: 0x00ff66, alpha: 0.28, cap:'round' });
+          edgesGfx.moveTo(x1, y1);
+          edgesGfx.quadraticCurveTo(mx, my, x2, y2);
+        }
+      });
+      return;
+    }
     if ((edgesData?.length||0) && edgesData.length <= maxDraw) {
-      const mode = modeEl?.value || 'holders';
       // scale factors for width/alpha based on zoom (gentler falloff)
       const aF = Math.max(0, Math.min(1, (s - 0.35) / 0.9));
       const wF = 0.6 + aF * 0.4; // keep ambient edges thin
