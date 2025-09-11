@@ -22,3 +22,4 @@ run('node jobs/compute-edges.js', { MODE: 'traits', EDGES: process.env.EDGES || 
 run('node jobs/sync-listings.js', { LISTINGS_PAGES: process.env.LISTINGS_PAGES || '50' });
 run('node jobs/classify-wallets.js');
 run('node jobs/build-similarity.js');
+run('node jobs/compute-wallet-metrics.js');

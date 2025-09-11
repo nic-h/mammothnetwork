@@ -48,7 +48,6 @@ async function main() {
       inserted += batch.length;
       batchNum++;
       fs.writeFileSync(path.join(ROOT, 'data', '.checkpoints', 'sync-activity.txt'), new Date().toISOString() + ` page=${page} transfers+=${inserted}\n`);
-      if (batch.length < limit) break;
     }
   } else {
     let cursor = since;

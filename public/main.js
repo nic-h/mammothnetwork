@@ -55,7 +55,8 @@ const EDGE_STYLES = {
 const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
 function lerp(a,b,t){ return a + (b-a)*t; }
 function throttle(fn, ms){ let last=0; let t=null; return function(...args){ const now=Date.now(); const run=()=>{ last=now; t=null; fn.apply(this,args); }; if (now-last>=ms){ if (t){ clearTimeout(t); t=null; } run(); } else if (!t){ t=setTimeout(run, ms-(now-last)); } }; }
-function fmtEth(n){ if (n==null || !isFinite(n)) return '--'; const x=Math.round(n*100)/100; return x+" ETH"; }
+const CURRENCY = 'TIA';
+function fmtAmt(n){ if (n==null || !isFinite(n)) return '--'; const x=Math.round(n*100)/100; return x+" "+CURRENCY; }
 function makeCircleTexture(renderer, r=5, color=BRAND.GREEN){
   const g = new PIXI.Graphics();
   g.lineStyle(1, color, 1.0).beginFill(color, 0.85).drawCircle(r, r, r).endFill();
@@ -508,6 +509,12 @@ async function selectNode(index){
     const trades = meta?.trade_count ?? null;
     const actLabel = trades!=null ? (trades>40?'Very Active':trades>10?'Active':'Low') : '';
     const lastSeen = meta?.last_activity ? timeAgo(meta.last_activity*1000) : 'Never traded';
+    // Wallet volumes and PnL (TIA)
+    const buyVol = (meta && meta.buy_volume_tia!=null) ? Number(meta.buy_volume_tia) : null;
+    const sellVol = (meta && meta.sell_volume_tia!=null) ? Number(meta.sell_volume_tia) : null;
+    const pnlTIA = (meta && meta.realized_pnl_tia!=null) ? Number(meta.realized_pnl_tia) : null;
+    const avgBuy = (meta && meta.avg_buy_tia!=null) ? Number(meta.avg_buy_tia) : null;
+    const avgSell = (meta && meta.avg_sell_tia!=null) ? Number(meta.avg_sell_tia) : null;
     const status = t.frozen ? 'FROZEN' : (t.dormant ? 'DORMANT' : 'ACTIVE');
     // Listings + advanced similarity
     let listings = [];
@@ -526,7 +533,7 @@ async function selectNode(index){
       const when = l.listed_at ? (timeAgo(Number(l.listed_at)*1000)+' ago') : '';
       const plat = (l.platform||'').toUpperCase();
       const st = (l.status||'').toUpperCase();
-      return `<div class='label'>${plat}</div><div class='value'>${fmtEth(Number(l.price)||0)} <span class='small-meta'>${[st, when].filter(Boolean).join(' · ')}</span></div>`;
+      return `<div class='label'>${plat}</div><div class='value'>${fmtAmt(Number(l.price)||0)} <span class='small-meta'>${[st, when].filter(Boolean).join(' · ')}</span></div>`;
     }).join('');
     const advChips = (similarAdv||[]).slice(0,12).map(x=>`<span class='chip' data-token='${x.token_id}'>#${String(x.token_id).padStart(4,'0')}</span>`).join('');
     const traitsRows = (t.traits||[]).slice(0,24).map(a=>`<div class='label'>${a.trait_type}</div><div class='value'>${a.trait_value}</div>`).join('');
@@ -545,6 +552,23 @@ async function selectNode(index){
           <div class='big-number'>${holdings? holdings.length : '--'}</div>
           <div class='small-meta'>${holdings&&ownerCounts? rankLabel(ownerCounts, t.owner, presetData): ''}</div>
         </div>
+      </div>
+      <div class='card2'>
+        <div class='card'>
+          <div class='label'>SPEND</div>
+          <div class='big-number'>${buyVol!=null?fmtAmt(buyVol):'--'}</div>
+          <div class='small-meta'>Avg buy ${avgBuy!=null?fmtAmt(avgBuy):'--'}</div>
+        </div>
+        <div class='card'>
+          <div class='label'>REVENUE</div>
+          <div class='big-number'>${sellVol!=null?fmtAmt(sellVol):'--'}</div>
+          <div class='small-meta'>Avg sell ${avgSell!=null?fmtAmt(avgSell):'--'}</div>
+        </div>
+      </div>
+      <div class='card'>
+        <div class='label'>REALIZED PNL</div>
+        <div class='big-number' style='color:${(pnlTIA!=null && pnlTIA<0)?'#ff3b3b':'#00ff66'}'>${pnlTIA!=null?fmtAmt(pnlTIA):'--'}</div>
+        <div class='small-meta'>Based on token buy→sell pairs</div>
       </div>
       <div class='card2'>
         <div class='card'>

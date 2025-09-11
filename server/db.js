@@ -141,6 +141,13 @@ export function runMigrations(db) {
       { name: 'flip_ratio', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN flip_ratio REAL' },
       { name: 'buy_count', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN buy_count INTEGER DEFAULT 0' },
       { name: 'sell_count', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN sell_count INTEGER DEFAULT 0' },
+      { name: 'buy_volume_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN buy_volume_tia REAL' },
+      { name: 'sell_volume_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN sell_volume_tia REAL' },
+      { name: 'realized_pnl_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN realized_pnl_tia REAL' },
+      { name: 'avg_buy_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN avg_buy_tia REAL' },
+      { name: 'avg_sell_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN avg_sell_tia REAL' },
+      { name: 'last_buy_ts', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN last_buy_ts INTEGER' },
+      { name: 'last_sell_ts', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN last_sell_ts INTEGER' },
     ];
     for (const c of want2) if (!cols2.includes(c.name)) db.exec(c.ddl);
   } catch {}

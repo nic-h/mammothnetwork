@@ -757,19 +757,27 @@ app.get('/api/wallet/:address/meta', (req, res) => {
   const addr = (req.params.address || '').toLowerCase();
   if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
   try {
-    const meta = db.prepare('SELECT address, ens_name, total_holdings, first_acquired, last_activity, trade_count, updated_at FROM wallet_metadata WHERE address=?').get(addr) || null;
+    const meta = db.prepare('SELECT address, ens_name, total_holdings, first_acquired, last_activity, trade_count, buy_count, sell_count, buy_volume_tia, sell_volume_tia, realized_pnl_tia, avg_buy_tia, avg_sell_tia, last_buy_ts, last_sell_ts, updated_at FROM wallet_metadata WHERE address=?').get(addr) || null;
     const holdings = (meta?.total_holdings ?? db.prepare('SELECT COUNT(1) c FROM tokens WHERE LOWER(owner)=?').get(addr).c);
     const first = (meta?.first_acquired ?? db.prepare('SELECT MIN(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t) ?? null;
     const last = (meta?.last_activity ?? db.prepare('SELECT MAX(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t) ?? null;
     const trades = (meta?.trade_count ?? db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).c);
+    const buyCount = meta?.buy_count ?? db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(to_addr)=? AND price IS NOT NULL').get(addr).c;
+    const sellCount = meta?.sell_count ?? db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(from_addr)=? AND price IS NOT NULL').get(addr).c;
+    const buyVol = meta?.buy_volume_tia ?? db.prepare('SELECT COALESCE(SUM(price),0) v FROM transfers WHERE LOWER(to_addr)=? AND price IS NOT NULL').get(addr).v;
+    const sellVol = meta?.sell_volume_tia ?? db.prepare('SELECT COALESCE(SUM(price),0) v FROM transfers WHERE LOWER(from_addr)=? AND price IS NOT NULL').get(addr).v;
+    const avgBuy = meta?.avg_buy_tia ?? (buyCount? buyVol/buyCount : null);
+    const avgSell = meta?.avg_sell_tia ?? (sellCount? sellVol/sellCount : null);
+    const lastBuy = meta?.last_buy_ts ?? db.prepare('SELECT MAX(timestamp) t FROM transfers WHERE LOWER(to_addr)=? AND price IS NOT NULL').get(addr).t;
+    const lastSell = meta?.last_sell_ts ?? db.prepare('SELECT MAX(timestamp) t FROM transfers WHERE LOWER(from_addr)=? AND price IS NOT NULL').get(addr).t;
     return getEthosForWallet(addr).then(ep=>{
       const score = (ep && ep.hasEthos) ? (ep.profile?.score ?? null) : null;
       const level = (ep && ep.hasEthos) ? (ep.profile?.level ?? null) : null;
       const cred = level ? ethosCredFromLevel(level) : null;
       res.setHeader('Cache-Control', 'public, max-age=300');
-      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: score, ethos_credibility: cred, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades });
+      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: score, ethos_credibility: cred, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades, buy_count: buyCount, sell_count: sellCount, buy_volume_tia: buyVol, sell_volume_tia: sellVol, realized_pnl_tia: (meta?.realized_pnl_tia ?? null), avg_buy_tia: avgBuy, avg_sell_tia: avgSell, last_buy_ts: lastBuy ?? null, last_sell_ts: lastSell ?? null });
     }).catch(()=>{
-      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: null, ethos_credibility: null, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades });
+      return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: null, ethos_credibility: null, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades, buy_count: buyCount, sell_count: sellCount, buy_volume_tia: buyVol, sell_volume_tia: sellVol, realized_pnl_tia: (meta?.realized_pnl_tia ?? null), avg_buy_tia: avgBuy, avg_sell_tia: avgSell, last_buy_ts: lastBuy ?? null, last_sell_ts: lastSell ?? null });
     });
   } catch (e) {
     return res.status(500).json({ error: 'db-error' });
