@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { openDatabase, runMigrations } from '../server/db.js';
 import path from 'path';
 import fs from 'fs';
@@ -16,13 +17,16 @@ function jaccard(a, b){
 
 async function main(){
   console.log('Building token similarity matrix (traits)...');
-  const rows = db.prepare('SELECT id FROM tokens WHERE id<=10000 ORDER BY id').all();
+  const LIMIT = Number(process.env.SIM_LIMIT || 0);
+  const rows = LIMIT > 0
+    ? db.prepare('SELECT id FROM tokens WHERE id<=10000 ORDER BY id LIMIT ?').all(LIMIT)
+    : db.prepare('SELECT id FROM tokens WHERE id<=10000 ORDER BY id').all();
   const tokenTraits = new Map();
   for (const r of rows){
-    const t = db.prepare('SELECT trait_type || ":" || trait_value AS trait FROM attributes WHERE token_id=?').all(r.id).map(x=>x.trait);
+    const t = db.prepare("SELECT trait_type || ':' || trait_value AS trait FROM attributes WHERE token_id=?").all(r.id).map(x=>x.trait);
     tokenTraits.set(r.id, t);
   }
-  const insert = db.prepare('INSERT OR REPLACE INTO token_similarity (token_a, token_b, similarity, similarity_type) VALUES (?, ?, ?, "trait")');
+  const insert = db.prepare("INSERT OR REPLACE INTO token_similarity (token_a, token_b, similarity, similarity_type) VALUES (?, ?, ?, 'trait')");
   let count = 0; const THRESH = 0.3;
   const tx = db.transaction(()=>{
     for (let i=0;i<rows.length;i++){
@@ -49,4 +53,3 @@ async function main(){
 }
 
 try { await main(); } finally { db.close(); }
-

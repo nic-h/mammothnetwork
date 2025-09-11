@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { openDatabase, runMigrations } from '../server/db.js';
 import path from 'path';
 import fs from 'fs';
@@ -84,4 +85,3 @@ async function main(){
 }
 
 try { await main(); } finally { db.close(); }
-

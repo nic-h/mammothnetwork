@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { openDatabase, runMigrations } from '../server/db.js';
 import { fetchListings } from './modularium.js';
 import path from 'path';
@@ -74,4 +75,3 @@ async function main() {
 }
 
 try { await main(); } finally { db.close(); }
-

@@ -55,6 +55,7 @@ const EDGE_STYLES = {
 const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
 function lerp(a,b,t){ return a + (b-a)*t; }
 function throttle(fn, ms){ let last=0; let t=null; return function(...args){ const now=Date.now(); const run=()=>{ last=now; t=null; fn.apply(this,args); }; if (now-last>=ms){ if (t){ clearTimeout(t); t=null; } run(); } else if (!t){ t=setTimeout(run, ms-(now-last)); } }; }
+function fmtEth(n){ if (n==null || !isFinite(n)) return '--'; const x=Math.round(n*100)/100; return x+" ETH"; }
 function makeCircleTexture(renderer, r=5, color=BRAND.GREEN){
   const g = new PIXI.Graphics();
   g.lineStyle(1, color, 1.0).beginFill(color, 0.85).drawCircle(r, r, r).endFill();
@@ -508,8 +509,26 @@ async function selectNode(index){
     const actLabel = trades!=null ? (trades>40?'Very Active':trades>10?'Active':'Low') : '';
     const lastSeen = meta?.last_activity ? timeAgo(meta.last_activity*1000) : 'Never traded';
     const status = t.frozen ? 'FROZEN' : (t.dormant ? 'DORMANT' : 'ACTIVE');
-    // Similar-by-trait removed per design; keep same-owner chips only
+    // Listings + advanced similarity
+    let listings = [];
+    let similarAdv = [];
+    try {
+      const [ls, sa] = await Promise.all([
+        fetch(`/api/token/${id}/listings?v=${Date.now()}`, { cache:'no-store' }).then(r=>r.ok?r.json():{listings:[]}).catch(()=>({listings:[]})),
+        fetch(`/api/token/${id}/similar-advanced?v=${Date.now()}`, { cache:'no-store' }).then(r=>r.ok?r.json():{similar:[]}).catch(()=>({similar:[]})),
+      ]);
+      listings = Array.isArray(ls?.listings) ? ls.listings : [];
+      similarAdv = Array.isArray(sa?.similar) ? sa.similar : [];
+    } catch {}
+    // Same-owner chips
     const sameOwnerChips = (holdings||[]).slice(0,12).filter(x=>x!==id).map(n=>`<span class='chip' data-token='${n}'>#${String(n).padStart(4,'0')}</span>`).join('');
+    const listingRows = (listings||[]).slice(0,6).map(l=>{
+      const when = l.listed_at ? (timeAgo(Number(l.listed_at)*1000)+' ago') : '';
+      const plat = (l.platform||'').toUpperCase();
+      const st = (l.status||'').toUpperCase();
+      return `<div class='label'>${plat}</div><div class='value'>${fmtEth(Number(l.price)||0)} <span class='small-meta'>${[st, when].filter(Boolean).join(' · ')}</span></div>`;
+    }).join('');
+    const advChips = (similarAdv||[]).slice(0,12).map(x=>`<span class='chip' data-token='${x.token_id}'>#${String(x.token_id).padStart(4,'0')}</span>`).join('');
     const traitsRows = (t.traits||[]).slice(0,24).map(a=>`<div class='label'>${a.trait_type}</div><div class='value'>${a.trait_value}</div>`).join('');
     detailsEl.innerHTML = `
       <div class='token-title'>MAMMOTH #${id.toString().padStart(4,'0')} <span class='token-close' id='close-detail'><i class="ri-close-line"></i></span></div>
@@ -544,11 +563,15 @@ async function selectNode(index){
         <div class='big-number'>${status}</div>
         <div class='small-meta'>Blue=frozen Gray=dormant</div>
       </div>
+      <div class='section-label'>LISTINGS</div>
+      <div class='traits-table'>${listingRows || `<div class='label'>NO LISTINGS</div><div class='value'>--</div>`}</div>
       <div class='section-label'>TRAITS</div>
       <div class='traits-table'>${traitsRows}</div>
       <div class='section-label'>SIMILAR TOKENS</div>
       <div class='label'>Same Owner (${holdings?holdings.length-1:0})</div>
       <div class='chip-row' id='chips-owner'>${sameOwnerChips||''}</div>
+      <div class='label'>Similar by Traits</div>
+      <div class='chip-row' id='chips-sim-adv'>${advChips||''}</div>
     `;
     // chip events
     detailsEl.querySelectorAll('.chip').forEach(el=> el.addEventListener('click', ()=>{ const tok = Number(el.dataset.token); const idx = idToIndex.get(tok); if (idx!=null) selectNode(idx); }));
