@@ -925,9 +925,19 @@ function layoutPreset(p){
   const ownerEthos = presetData?.ownerEthos || [];
   const tokenLast = presetData?.tokenLastActivity || [];
   const tokenPrice = presetData?.tokenPrice || [];
+  const tokenSaleCount = presetData?.tokenSaleCount || [];
+  const tokenLastSaleTs = presetData?.tokenLastSaleTs || [];
+  const tokenLastSalePrice = presetData?.tokenLastSalePrice || [];
+  const tokenHoldDays = presetData?.tokenHoldDays || [];
   const tokenTraitKey = presetData?.tokenTraitKey || [];
   const traitKeys = presetData?.traitKeys || [];
   const rarity = presetData?.rarity || [];
+  const ownerWalletType = presetData?.ownerWalletType || [];
+  const ownerPnl = presetData?.ownerPnl || [];
+  const ownerBuyVol = presetData?.ownerBuyVol || [];
+  const ownerSellVol = presetData?.ownerSellVol || [];
+  const ownerAvgHoldDays = presetData?.ownerAvgHoldDays || [];
+  const ownerFlipRatio = presetData?.ownerFlipRatio || [];
 
   // precompute owner frequencies for whales layout
   let ownerCounts = null;
@@ -944,22 +954,40 @@ function layoutPreset(p){
       for (let i=0;i<n;i++){
         const oi = ownerIndex[i] ?? -1;
         const ang = ((oi>=0?oi: (i%owners)) / owners) * Math.PI*2;
-        const ring = 180 + (oi>=0? (oi%6)*40 : 200);
-        const jitter = (prng(i)-0.5)*20;
+        const baseRing = 200 + ((oi>=0? (oi%6): (i%6)) * 36);
+        // Pull profitable wallets closer to center
+        const pnl = (oi>=0) ? (ownerPnl[oi] ?? 0) : 0;
+        const profitBonus = pnl>0 ? Math.min(120, Math.log(1+Math.abs(pnl))*40) : 0;
+        const ring = Math.max(80, baseRing - profitBonus);
+        const jitter = (prng(i)-0.5)*18;
+        // Color by wallet type (if present)
+        const wtype = (oi>=0) ? (ownerWalletType[oi] || 'casual') : 'casual';
+        const typeColors = { flipper: 0xff6600, diamond_hands: 0x00ffff, whale_trader: 0x0066ff, collector: 0x9966ff, holder: 0x66ff66, accumulator: 0xffcc00 };
+        sprites[i].tint = typeColors[wtype] ?? (nodes[i]?.color||BRAND.GREEN);
+        // Size by hold days (token-level)
+        const hd = tokenHoldDays[i] ?? 0; const scl = 0.7 + Math.min(2.0, Math.max(0, hd)/365);
+        sprites[i].scale.set(scl, scl);
         place(i, cx + Math.cos(ang)*(ring+jitter), cy + Math.sin(ang)*(ring+jitter));
       }
       break;
     }
     case 'trading': {
-      // x: last activity time normalized; y: price or ethos
-      let tmin=Infinity, tmax=-Infinity; for (let i=0;i<n;i++){ const t=tokenLast[i]||0; if(t){ if(t<tmin) tmin=t; if(t>tmax) tmax=t; } }
-      if (!isFinite(tmin) || !isFinite(tmax) || tmin===tmax){ tmin=0; tmax=3600*24*365; }
+      // X = recency of last sale; Y = turnover (sale count); size = last sale price; color by heat
       for (let i=0;i<n;i++){
-        const t = tokenLast[i]||0; const tn = (t-tmin)/(tmax-tmin);
-        const x = 80 + tn * (cw-160);
-        let v = tokenPrice[i]; if (v==null){ const oi=ownerIndex[i]??-1; const e = (oi>=0? ownerEthos[oi]: null); v = e!=null ? e/2800 : 0.5; }
-        const jitter = (prng(i)-0.5)*20;
-        const y = ch-80 - Math.max(0, Math.min(1, v))* (ch-160) + jitter;
+        const lastTs = Number(tokenLastSaleTs[i] || tokenLast[i] || 0);
+        const daysSince = lastTs ? ((Date.now()/1000 - lastTs)/86400) : 365;
+        const xn = Math.max(0, Math.min(1, 1 - Math.min(365, daysSince)/365));
+        const x = 80 + xn * (cw-160);
+        const sc = Number(tokenSaleCount[i] || 0);
+        const vol = Math.log(1 + sc);
+        const y = 100 + Math.min(ch-200, vol*120) + (prng(i)-0.5)*12;
+        const lastPrice = Number(tokenLastSalePrice[i] || tokenPrice[i] || 0);
+        const sz = lastPrice>0 ? (0.6 + Math.min(2.0, lastPrice/10)) : 0.6;
+        sprites[i].scale.set(sz, sz);
+        // Heat coloring
+        let color = 0x444444;
+        if (sc>10) color = 0xff3333; else if (sc>5) color = 0xff9933; else if (sc>2) color = 0xffcc33; else if (daysSince<30) color = BRAND.GREEN;
+        sprites[i].tint = color;
         place(i, x, y);
       }
       break;
@@ -969,6 +997,12 @@ function layoutPreset(p){
         const r = Math.max(0, Math.min(1, rarity[i]||0));
         const ang = (i*0.1618)%1 * Math.PI*10;
         const rad = 120 + r* Math.min(cx,cy)*0.9;
+        const lastPrice = Number(tokenLastSalePrice[i] || tokenPrice[i] || 0);
+        const sz = lastPrice>0 ? (0.7 + Math.min(2.2, lastPrice/12)) : 0.7;
+        sprites[i].scale.set(sz, sz);
+        // Highlight if high sale_count in rare region
+        const sc = Number(tokenSaleCount[i]||0);
+        if (r>0.7 && sc>=3) sprites[i].tint = 0xffee66;
         place(i, cx + Math.cos(ang)*rad, cy + Math.sin(ang)*rad);
       }
       break;
@@ -979,38 +1013,62 @@ function layoutPreset(p){
         const oi = ownerIndex[i] ?? -1;
         const ang = ((oi>=0?oi:(i%owners))/owners)*Math.PI*2;
         const e = oi>=0 ? (ownerEthos[oi] ?? null) : null;
-        const en = (e==null) ? 0.2 : (e - ethosMin) / (ethosMax - ethosMin);
-        const rad = 100 + (1-en) * Math.min(cx,cy)*0.85;
-        const jitter = (prng(i)-0.5)*18;
+        const en = (e==null) ? 0.2 : (e - ethosMin) / (ethosMax - ethosMin + 1e-9);
+        const pnl = (oi>=0) ? (ownerPnl[oi] ?? 0) : 0;
+        const pnlBonus = pnl>0 ? 0.12 : (pnl<0 ? -0.06 : 0);
+        const rad = 80 + (1 - Math.max(0, Math.min(1, en + pnlBonus))) * Math.min(cx,cy)*0.9;
+        // RGB by ethos/pnl
+        const green = Math.floor(100 + Math.max(0, Math.min(1, en))*155);
+        const red = pnl<0 ? Math.min(120, Math.round(Math.log(1+Math.abs(pnl))*60)) : 0;
+        const blue = pnl>0 ? Math.min(155, Math.round(Math.log(1+pnl)*80)) : 0;
+        sprites[i].tint = (red<<16)|(green<<8)|blue;
+        const jitter = (prng(i)-0.5)*16;
         place(i, cx + Math.cos(ang)*(rad+jitter), cy + Math.sin(ang)*(rad+jitter));
       }
       break;
     }
     case 'whales': {
-      const maxHold = ownerCounts? Math.max(...ownerCounts): 1;
+      // Size & position by wallet trading volume; closer to center = higher volume
       const owners = Math.max(1, (ownerCounts?.length||12));
+      // Precompute volume per owner
+      const ownerVol = new Array(owners).fill(0);
+      for (let oi=0; oi<owners; oi++){
+        const v = (ownerBuyVol[oi]||0) + (ownerSellVol[oi]||0);
+        ownerVol[oi] = v || 0;
+      }
+      const maxVol = Math.max(1e-6, ...ownerVol);
       for (let i=0;i<n;i++){
         const oi = ownerIndex[i] ?? -1;
         const ang = ((oi>=0?oi:(i%owners))/owners)*Math.PI*2;
-        const hold = (oi>=0 && ownerCounts) ? ownerCounts[oi] : 1;
-        const strength = Math.max(0, Math.min(1, hold / (maxHold||1)));
-        const rad = 120 + (1-strength) * Math.min(cx,cy)*0.85;
-        const scale = 0.8 + strength*1.8; // node size varies by holdings
-        sprites[i].scale.set(scale, scale);
+        const voln = (oi>=0) ? Math.max(0, Math.min(1, (ownerVol[oi]||0)/maxVol)) : 0;
+        const rad = 120 + (1 - voln) * Math.min(cx,cy)*0.85;
+        const scl = 0.8 + voln*2.0;
+        sprites[i].scale.set(scl, scl);
+        // Color by wallet type for whales
+        const wtype = (oi>=0) ? (ownerWalletType[oi] || 'casual') : 'casual';
+        const typeColors = { whale_trader: 0x0066ff, flipper: 0xff6600, accumulator: 0xffcc00 };
+        if (ownerVol[oi] > maxVol*0.2) sprites[i].tint = typeColors[wtype] || BRAND.BLUE;
         place(i, cx + Math.cos(ang)*rad, cy + Math.sin(ang)*rad);
       }
       break;
     }
     case 'frozen': {
-      // x left/right by recency; y as a tidy grid band
-      let tmin=Infinity, tmax=-Infinity; for (let i=0;i<n;i++){ const t=tokenLast[i]||0; if(t){ if(t<tmin) tmin=t; if(t>tmax) tmax=t; } }
-      if (!isFinite(tmin) || !isFinite(tmax) || tmin===tmax){ tmin=0; tmax=3600*24*365; }
-      const rows = Math.ceil(Math.sqrt(n)); const gap=10;
+      // Stratify by status and activity
       for (let i=0;i<n;i++){
-        const t = tokenLast[i]||0; const tn = (t-tmin)/(tmax-tmin);
-        const x = 80 + tn * (cw-160);
-        const r = Math.floor(i/rows); const y = 80 + (r%rows)*gap;
-        place(i, x, y);
+        const frozen = nodes[i]?.frozen ? 1 : 0;
+        const dormant = nodes[i]?.dormant ? 1 : 0;
+        const hd = Number(tokenHoldDays[i] || 0);
+        const sc = Number(tokenSaleCount[i] || 0);
+        let layer = 3; let color = BRAND.GREEN; let xPos = 100 + (i%60)*15; let yJitter=0;
+        if (frozen) { layer=0; color=BRAND.BLUE; xPos = 100 + (i%40)*20; }
+        else if (dormant || hd>180) { layer=1; color=0x888888; xPos = 100 + Math.min(1, hd/365)*(cw-200); yJitter = Math.sin(i*0.1)*10; }
+        else if (sc>3) { layer=2; color=0xff6633; xPos = 100 + Math.min(1, sc/20)*(cw-200); yJitter = Math.sin(Date.now()*0.002 + i)*12; }
+        const yBase = 100 + layer*150;
+        sprites[i].tint = color; place(i, xPos, yBase + yJitter);
+        // Alpha by recent sale recency
+        const lastTs = Number(tokenLastSaleTs[i] || tokenLast[i] || 0);
+        const daysSince = lastTs ? ((Date.now()/1000 - lastTs)/86400) : 999;
+        sprites[i].alpha = daysSince < 30 ? 0.95 : 0.6;
       }
       break;
     }

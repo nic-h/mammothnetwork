@@ -523,10 +523,10 @@ app.get('/api/heatmap', (req, res) => {
 
 // API: Preset data for layouts (compact arrays for performance)
 app.get('/api/preset-data', (req, res) => {
-  if (!haveDb || !db) return res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
+  if (!haveDb || !db) return res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], tokenSaleCount: [], tokenLastSaleTs: [], tokenLastSalePrice: [], tokenHoldDays: [], ownerWalletType: [], ownerPnl: [], ownerBuyVol: [], ownerSellVol: [], ownerAvgHoldDays: [], ownerFlipRatio: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
   const N = parseInt(req.query.nodes || '10000', 10) || 10000;
   try {
-    const rows = db.prepare("SELECT id, LOWER(COALESCE(owner,'')) AS owner FROM tokens WHERE id<=? ORDER BY id").all(N);
+    const rows = db.prepare("SELECT id, LOWER(COALESCE(owner,'')) AS owner, sale_count, last_sale_ts, last_sale_price, hold_days FROM tokens WHERE id<=? ORDER BY id").all(N);
     const owners = [];
     const ownerMap = new Map();
     const ownerIndex = new Array(rows.length);
@@ -553,6 +553,12 @@ app.get('/api/preset-data', (req, res) => {
       const pm = new Map(priceRows.map(r => [r.id, r.p || null]));
       tokenPrice = rows.map(r => pm.get(r.id) ?? null);
     } catch {}
+
+    // token-level metrics arrays
+    const tokenSaleCount = rows.map(r => r.sale_count ?? 0);
+    const tokenLastSaleTs = rows.map(r => r.last_sale_ts ?? null);
+    const tokenLastSalePrice = rows.map(r => r.last_sale_price ?? null);
+    const tokenHoldDays = rows.map(r => r.hold_days ?? null);
 
     // trait frequencies and token dominant traitKey
     const traitCountRows = db.prepare("SELECT trait_type||':'||trait_value AS k, COUNT(1) AS c FROM attributes WHERE token_id<=? GROUP BY k").all(N);
@@ -590,9 +596,29 @@ app.get('/api/preset-data', (req, res) => {
     for (let i = 0; i < rows.length; i++) { const s = sumMap.get(rows[i].id) || 0; rarityRaw[i] = s; maxS = Math.max(maxS, s); minS = Math.min(minS, s); }
     const rarity = rarityRaw.map(s => (s - minS) / (maxS - minS + 1e-9));
 
-    res.json({ owners, ownerIndex, ownerEthos, tokenLastActivity, tokenPrice, traitKeys, tokenTraitKey, rarity });
+    // owner-level wallet metrics aligned to owners array
+    const metaRows = db.prepare('SELECT address, wallet_type, realized_pnl_tia, buy_volume_tia, sell_volume_tia, avg_hold_days, flip_ratio FROM wallet_metadata').all();
+    const metaMap = new Map(metaRows.map(r => [ (r.address||'').toLowerCase(), r ]));
+    const ownerWalletType = new Array(owners.length).fill(null);
+    const ownerPnl = new Array(owners.length).fill(null);
+    const ownerBuyVol = new Array(owners.length).fill(null);
+    const ownerSellVol = new Array(owners.length).fill(null);
+    const ownerAvgHoldDays = new Array(owners.length).fill(null);
+    const ownerFlipRatio = new Array(owners.length).fill(null);
+    for (let i=0;i<owners.length;i++){
+      const m = metaMap.get(owners[i]);
+      if (!m) continue;
+      ownerWalletType[i] = m.wallet_type ?? null;
+      ownerPnl[i] = m.realized_pnl_tia ?? null;
+      ownerBuyVol[i] = m.buy_volume_tia ?? null;
+      ownerSellVol[i] = m.sell_volume_tia ?? null;
+      ownerAvgHoldDays[i] = m.avg_hold_days ?? null;
+      ownerFlipRatio[i] = m.flip_ratio ?? null;
+    }
+
+    res.json({ owners, ownerIndex, ownerEthos, tokenLastActivity, tokenPrice, tokenSaleCount, tokenLastSaleTs, tokenLastSalePrice, tokenHoldDays, ownerWalletType, ownerPnl, ownerBuyVol, ownerSellVol, ownerAvgHoldDays, ownerFlipRatio, traitKeys, tokenTraitKey, rarity });
   } catch (e) {
-    res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
+    res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], tokenSaleCount: [], tokenLastSaleTs: [], tokenLastSalePrice: [], tokenHoldDays: [], ownerWalletType: [], ownerPnl: [], ownerBuyVol: [], ownerSellVol: [], ownerAvgHoldDays: [], ownerFlipRatio: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
   }
 });
 
