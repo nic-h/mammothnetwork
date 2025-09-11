@@ -1,4 +1,4 @@
-* { box-sizing: border-box; font: var(--fs-12)/1.4 var(--font-mono); letter-spacing: .05em; }
+* { box-sizing: border-box; font: var(--fs-12)/1.5 var(--font-mono); }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-template-rows: 40px 1fr; }
 .header { display:grid; grid-template-columns: auto 1fr; align-items:center; gap:12px; padding:4px 20px; border-bottom:1px solid rgba(var(--green-rgb),.3); position: sticky; top: 0; z-index: 100; background: var(--bg); }
@@ -29,9 +29,9 @@ body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-te
 .mode-selector .select-caret { position:absolute; right:8px; pointer-events:none; color: var(--fg); font-size: 18px; }
 @media (min-width: 901px){ .mode-selector { display:none; } }
 .header-search { background: var(--bg); color: var(--fg); border: var(--border); padding:6px 12px; outline:none; width:280px; }
-.header-search::placeholder { color: rgba(var(--green-rgb),.6); font-size:11px; }
+.header-search::placeholder { color: rgba(var(--green-rgb),.6); font-size: var(--fs-10); }
 .presets { display:flex; gap:8px; }
-.preset-btn { background: var(--bg); color: var(--fg); border: var(--border); padding:4px 8px; cursor:pointer; font-size:10px; }
+.preset-btn { background: var(--bg); color: var(--fg); border: var(--border); padding:4px 8px; cursor:pointer; font-size: var(--fs-10); }
 .preset-btn i { font-size:12px; vertical-align:middle; }
 .preset-btn:hover { background: rgba(var(--green-rgb),.1); }
 .preset-btn.active { background: var(--fg); color:#000; }
@@ -40,10 +40,10 @@ body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-te
 .panel-title { color:rgba(var(--green-rgb),.6); margin:12px 0 6px; }
 #traits-container { display:block; }
 .trait-group { margin-bottom: 6px; border-bottom:1px solid rgba(0,255,102,.05); }
-.trait-header { color: var(--fg); font-weight:700; padding:2px 0; font-size:10px; cursor:pointer; display:flex; align-items:center; gap:6px; }
+.trait-header { color: var(--fg); font-weight:700; padding:2px 0; font-size: var(--fs-10); cursor:pointer; display:flex; align-items:center; gap:6px; }
 .trait-header .twist { display:inline-block; width:8px; text-align:center; opacity:.6; }
 .trait-values { display:none; margin:4px 0 8px; }
-.trait-value { padding:2px 4px; cursor:pointer; font-size:10px; display:flex; justify-content:space-between; }
+.trait-value { padding:2px 4px; cursor:pointer; font-size: var(--fs-10); display:flex; justify-content:space-between; }
 .trait-value:hover { background:rgba(var(--green-rgb),.1); }
 .trait-value.active { background:rgba(var(--green-rgb),.2); color:var(--fg); }
 .trait-count { opacity:.5; }
@@ -53,21 +53,21 @@ body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-te
 .right-panel #details { word-break: break-all; overflow-wrap: anywhere; }
 .right-panel img#thumb { width:256px; max-width:100%; display:block; margin:0 auto 12px; border:1px solid rgba(var(--green-rgb),.2); }
 .right-panel .grid { display:grid; grid-template-columns: 100px 1fr; gap:4px 8px; }
-.right-panel .label { opacity:.75; font-size:10px; color:rgba(var(--green-rgb),.7); text-transform:uppercase; }
-.panel-title { font-weight:700; font-size:14px; color: var(--fg); text-transform:uppercase; }
-.section-label { font-size:10px; color:#68d694; text-transform:uppercase; opacity:.8; margin:8px 0 4px; }
-.big-number { font-weight:700; font-size:14px; color: var(--fg); text-transform:none; }
-.data-value { font-size:12px; color:#d7ffd7; }
-.small-meta { font-size:9px; color:#7dd9a3; }
+.right-panel .label { opacity:.75; font-size: var(--fs-10); color:rgba(var(--green-rgb),.7); text-transform:uppercase; }
+.panel-title { font-weight:700; font-size: var(--fs-14); color: var(--fg); text-transform:uppercase; }
+.section-label { font-size: var(--fs-10); color:#68d694; text-transform:uppercase; opacity:.8; margin:8px 0 4px; }
+.big-number { font-weight:700; font-size: var(--fs-14); color: var(--fg); text-transform:none; }
+.data-value { font-size: var(--fs-12); color:#d7ffd7; }
+.small-meta { font-size: var(--fs-10); color:#7dd9a3; }
 .card2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin:10px 0; }
 .card { border:1px solid rgba(var(--green-rgb),.15); padding:8px; background:#0a0a0a; }
-.token-title { font-weight:700; font-size:14px; color: var(--fg); text-transform:uppercase; display:flex; justify-content:space-between; align-items:center; }
+.token-title { font-weight:700; font-size: var(--fs-14); color: var(--fg); text-transform:uppercase; display:flex; justify-content:space-between; align-items:center; }
 .token-close { cursor:pointer; border:1px solid rgba(var(--green-rgb),.3); padding:0 6px; height:18px; line-height:18px; }
 .ens-name { font-weight:500; font-size:14px; color:#fff; }
-.address { font-family: var(--font-mono); font-size:11px; color:#9eecb9; }
+.address { font-family: var(--font-mono); font-size: var(--fs-12); color:#9eecb9; }
 .traits-table { display:grid; grid-template-columns: 1fr 1fr; gap:4px 8px; border:1px solid rgba(var(--green-rgb),.1); padding:8px; }
 .chip-row { display:flex; flex-wrap:wrap; gap:6px; }
-.chip { border:1px solid rgba(var(--green-rgb),.3); padding:2px 6px; font-size:10px; cursor:pointer; }
+.chip { border:1px solid rgba(var(--green-rgb),.3); padding:2px 6px; font-size: var(--fs-10); cursor:pointer; }
 .legend { font-size:10px; opacity:.8; color: var(--fg-dim); margin-left:4px; }
 
 /* Detail panel text normalization */
@@ -143,7 +143,10 @@ input[type="checkbox"] { accent-color: var(--fg); }
 /* Consolidated button patterns */
 .preset-btn, .chip-btn, .clear-btn {
   background: var(--bg); color: var(--fg); border: var(--border);
-  padding: var(--pad-4) var(--pad-8); cursor:pointer;
+  padding: var(--pad-4) var(--pad-8); cursor:pointer; font-size: var(--fs-10);
 }
 .preset-btn:hover, .chip-btn:hover, .clear-btn:hover { background: rgba(var(--green-rgb), .1); }
 .preset-btn.active, .chip-btn.active { background: var(--fg); color:#000; box-shadow: 0 0 12px rgba(var(--green-rgb), .35); }
+
+/* Scoped letter-spacing for uppercase UI elements */
+.preset-btn, .chip-btn, .panel-title, .section-label, .right-panel .label, .token-title { letter-spacing: .06em; }
