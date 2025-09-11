@@ -67,21 +67,37 @@
         </div>
         <!-- Focus removed -->
         <div class="legend" id="legend">Color by owner; same-owner links.</div>
-        <div class="layer-toggles">
-          <h4>EDGE LAYERS</h4>
-          <div class="layer-toggle"><label>Ownership</label><input type="checkbox" id="layer-ownership" checked></div>
-          <div class="layer-toggle"><label>Recent Trades</label><input type="checkbox" id="layer-trades" checked></div>
-          <div class="layer-toggle"><label>Rare Traits</label><input type="checkbox" id="layer-traits"></div>
-          <div class="layer-toggle"><label>High Value</label><input type="checkbox" id="layer-value"></div>
-          <div class="layer-toggle"><label>Sales</label><input type="checkbox" id="layer-sales" checked></div>
-          <div class="layer-toggle"><label>Transfers</label><input type="checkbox" id="layer-transfers" checked></div>
-          <div class="layer-toggle"><label>Mints</label><input type="checkbox" id="layer-mints" checked></div>
+        <div class="edge-groups">
+          <div class="edge-group open" data-group="relationships">
+            <div class="edge-group-header">RELATIONSHIPS <span class="twist">▶</span></div>
+            <div class="edge-group-body">
+              <div class="layer-toggle"><label>Ownership</label><input type="checkbox" id="layer-ownership" checked></div>
+              <div class="layer-toggle"><label>Rare Traits</label><input type="checkbox" id="layer-traits"></div>
+            </div>
+          </div>
+          <div class="edge-group open" data-group="transactions">
+            <div class="edge-group-header">TRANSACTIONS <span class="twist">▶</span></div>
+            <div class="edge-group-body">
+              <div class="layer-toggle"><label>Recent Trades</label><input type="checkbox" id="layer-trades" checked></div>
+              <div class="layer-toggle"><label>Sales</label><input type="checkbox" id="layer-sales" checked></div>
+              <div class="layer-toggle"><label>Transfers</label><input type="checkbox" id="layer-transfers" checked></div>
+              <div class="layer-toggle"><label>Mints</label><input type="checkbox" id="layer-mints" checked></div>
+            </div>
+          </div>
+          <div class="edge-group" data-group="analysis">
+            <div class="edge-group-header">ANALYSIS <span class="twist">▶</span></div>
+            <div class="edge-group-body">
+              <div class="layer-toggle"><label>High Value</label><input type="checkbox" id="layer-value"></div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="traits-section">
-        <div class="panel-title">TRAITS</div>
-        <button id="clear-filters" class="btn btn--preset preset-btn" style="width:100%;margin-bottom:12px;">CLEAR FILTERS</button>
-        <div id="traits-container"></div>
+        <div class="panel-title traits-header"><span class="twist">▶</span> TRAITS</div>
+        <div class="traits-body">
+          <button id="clear-filters" class="btn btn--preset preset-btn" style="width:100%;margin-bottom:12px;">CLEAR FILTERS</button>
+          <div id="traits-container"></div>
+        </div>
       </div>
     </aside>
     <div class="center-panel"><canvas id="stage"></canvas></div>

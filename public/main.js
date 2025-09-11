@@ -226,6 +226,10 @@ async function init() {
     viewEl.addEventListener('change', async ()=>{
       const v = viewEl.value;
       const edges = Number(edgesEl?.value||200);
+      // edge group contextual open states
+      const rel = document.querySelector('.edge-group[data-group="relationships"]');
+      const trx = document.querySelector('.edge-group[data-group="transactions"]');
+      const anal = document.querySelector('.edge-group[data-group="analysis"]');
       if (v === 'ownership') {
         modeEl.value = 'holders';
         await load('holders', edges);
@@ -234,6 +238,7 @@ async function init() {
         applyPreset('ownership');
         layoutClusters();
         setLegend('ownership');
+        rel?.classList.add('open'); trx?.classList.remove('open'); anal?.classList.remove('open');
       } else if (v === 'trading') {
         modeEl.value = 'transfers';
         await load('transfers', edges);
@@ -242,6 +247,7 @@ async function init() {
         applyPreset('trading');
         layoutPreset('trading');
         setLegend('trading');
+        rel?.classList.remove('open'); trx?.classList.add('open'); anal?.classList.remove('open');
       } else if (v === 'traits') {
         modeEl.value = 'traits';
         await load('traits', edges);
@@ -250,6 +256,8 @@ async function init() {
         applyPreset('rarity');
         layoutPreset('rarity');
         setLegend('rarity');
+        rel?.classList.add('open'); trx?.classList.remove('open'); anal?.classList.add('open');
+        document.querySelector('.traits-section')?.classList.add('open');
       } else if (v === 'whales') {
         modeEl.value = 'wallets';
         await load('wallets', edges);
@@ -258,6 +266,8 @@ async function init() {
         applyPreset('whales');
         layoutPreset('whales');
         setLegend('whales');
+        rel?.classList.add('open'); trx?.classList.add('open'); anal?.classList.remove('open');
+        document.querySelector('.traits-section')?.classList.remove('open');
       } else if (v === 'health') {
         modeEl.value = 'holders';
         await load('holders', edges);
@@ -266,11 +276,23 @@ async function init() {
         applyPreset('frozen');
         layoutPreset('frozen');
         setLegend('frozen');
+        rel?.classList.add('open'); trx?.classList.add('open'); anal?.classList.add('open');
+        document.querySelector('.traits-section')?.classList.remove('open');
       }
       resetAlpha();
       resetView();
     });
   }
+
+  // Click handlers for collapsibles (traits and edge groups)
+  try {
+    const th = document.querySelector('.traits-header');
+    if (th && !th.dataset.bound){ th.dataset.bound='1'; th.addEventListener('click', ()=>{ document.querySelector('.traits-section')?.classList.toggle('open'); }); }
+    document.querySelectorAll('.edge-group').forEach(g=>{
+      const h = g.querySelector('.edge-group-header');
+      if (h && !h.dataset.bound){ h.dataset.bound='1'; h.addEventListener('click', ()=> g.classList.toggle('open')); }
+    });
+  } catch {}
 }
 
 async function load(mode, edges){
