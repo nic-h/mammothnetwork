@@ -207,3 +207,21 @@ input[type="checkbox"] { accent-color: var(--fg); }
 /* Hide redundant controls when unified views are present */
 body.view-selector-enabled .mode-chips,
 body.view-selector-enabled .preset-bar { display: none; }
+
+/* Mobile overflow menu */
+.more { position: relative; display: none; }
+.more-panel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 200;
+  background: var(--bg); border: var(--border); min-width: 180px; padding: var(--pad-6);
+}
+.more-panel .menu-item {
+  display:block; width:100%; text-align:left; background: var(--bg); color: var(--fg);
+  border: var(--border); padding: var(--pad-6) var(--pad-8); margin-bottom: var(--pad-6);
+  font-size: var(--fs-12); cursor:pointer;
+}
+.more-panel .menu-item:last-child { margin-bottom: 0; }
+.more-panel .menu-item:hover, .more-panel .menu-item:focus { background: rgba(var(--green-rgb), .1); outline: none; }
+
+@media (max-width: 768px){
+  .more { display: block; }
+}

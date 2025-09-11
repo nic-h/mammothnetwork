@@ -292,6 +292,38 @@ async function init() {
       const h = g.querySelector('.edge-group-header');
       if (h && !h.dataset.bound){ h.dataset.bound='1'; h.addEventListener('click', ()=> g.classList.toggle('open')); }
     });
+    const moreBtn = document.getElementById('more-btn');
+    const morePanel = document.getElementById('more-panel');
+    if (moreBtn && morePanel && !moreBtn.dataset.bound){
+      moreBtn.dataset.bound='1';
+      const closeMenu = ()=>{ morePanel.hidden = true; moreBtn.setAttribute('aria-expanded','false'); };
+      moreBtn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        const isOpen = !morePanel.hidden;
+        if (isOpen) closeMenu(); else { morePanel.hidden = false; moreBtn.setAttribute('aria-expanded','true'); }
+      });
+      document.addEventListener('click', (e)=>{
+        if (!morePanel.hidden && !morePanel.contains(e.target) && e.target !== moreBtn) closeMenu();
+      });
+      document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') closeMenu(); });
+      morePanel.querySelectorAll('.menu-item').forEach(it=>{
+        it.addEventListener('click', ()=>{
+          const act = it.dataset.action;
+          if (act === 'ambient'){
+            const amb = document.getElementById('ambient-edges');
+            if (amb){ amb.checked = !amb.checked; drawEdges(); updateSelectionOverlay(); }
+          } else if (act === 'scroll'){
+            const tgt = it.dataset.target;
+            const panel = document.querySelector('.left-panel');
+            let el = null;
+            if (tgt === 'edges'){ el = document.querySelector('.edge-groups'); if (el) { try { el.closest('.edge-group')?.classList.add('open'); } catch {} } }
+            if (tgt === 'traits'){ const ts = document.querySelector('.traits-section'); ts?.classList.add('open'); el = ts; }
+            if (panel && el){ try { el.scrollIntoView({ behavior:'smooth', block:'start' }); } catch { panel.scrollTop = el.offsetTop - 12; } }
+          }
+          closeMenu();
+        });
+      });
+    }
   } catch {}
 }
 
