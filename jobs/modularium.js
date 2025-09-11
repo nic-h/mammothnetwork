@@ -174,11 +174,12 @@ export async function fetchTokenMeta(id) {
 }
 
 // Returns array of transfers: { token_id, from, to, timestamp }
-export async function fetchTransfers({ since, limit = 5000 } = {}) {
+export async function fetchTransfers({ since, limit = 5000, page = null } = {}) {
   if (!CONTRACT) throw new Error('CONTRACT_ADDRESS not set');
   const qs = new URLSearchParams();
   if (since) qs.set('since', String(since));
   if (limit) qs.set('limit', String(limit));
+  if (page != null) qs.set('page', String(page));
   const suffix = qs.toString() ? ('?' + qs.toString()) : '';
   const urls = [
     urlJoin(BASE, 'collection', CONTRACT, 'transfers') + suffix,
@@ -205,16 +206,21 @@ export async function fetchTransfers({ since, limit = 5000 } = {}) {
     }
     const tx_hash = ev.txHash || ev.transactionHash || ev.hash || null;
     const event_type = ev.eventType || ev.type || null;
-    return {
-      token_id: Number(ev.tokenId || ev.token_id || ev.id),
-      from: (ev.from || ev.from_address || ev.seller || null)?.toLowerCase?.() || null,
-      to: (ev.to || ev.to_address || ev.buyer || null)?.toLowerCase?.() || null,
-      timestamp: Number(ev.blockTime || ev.timestamp || ev.time || Date.parse(ev.time || 0)/1000) || null,
-      price,
-      tx_hash,
-      event_type,
-    };
-  }).filter(x => x.token_id > 0);
+    let from = (ev.from || ev.from_address || ev.seller || null)?.toLowerCase?.() || null;
+    let to = (ev.to || ev.to_address || ev.buyer || null)?.toLowerCase?.() || null;
+    // Map generic activity (MAKE/TAKE/CANCEL) to transfers
+    const evType = String(ev.event || evType || '').toUpperCase();
+    const ordType = String(ev.orderType || '').toUpperCase();
+    const maker = (ev.maker || '').toLowerCase();
+    const taker = (ev.taker || '').toLowerCase();
+    if ((!from || !to) && evType === 'TAKE' && maker && taker) {
+      if (ordType === 'SELL') { from = maker; to = taker; }
+      else if (ordType === 'BUY') { from = taker; to = maker; }
+    }
+    const token_id = Number(ev.tokenId || ev.token_id || ev.id);
+    const timestamp = Number(ev.blockTime || ev.timestamp || ev.time || Date.parse(ev.time || 0)/1000) || null;
+    return { token_id, from, to, timestamp, price, tx_hash, event_type };
+  }).filter(x => x.token_id > 0 && x.timestamp);
 }
 
 // Attempt holders map via metadata fallback if no direct endpoint
