@@ -41,7 +41,7 @@ function classifyWallet(address){
   // Flipper: frequent selling with short holds
   if (sellCount >= 3 && avgHoldDays <= 30 && (flipRatio >= 0.6 || sellCount >= buyCount)) walletType = 'flipper';
   // Diamond hands: long holds, low sell ratio, and stale recent activity
-  else if (avgHoldDays >= 180 && sellRatio <= 0.2) walletType = 'diamond_hands';
+  else if (avgHoldDays >= 180 && sellRatio <= 0.2 && (!lastTrade || (now - lastTrade) > 180*86400)) walletType = 'diamond_hands';
   // Collector: sizeable holdings and low sell pressure
   else if (holdings >= 10 && sellRatio <= 0.3) walletType = 'collector';
   // Whale trader: high ticket trades
