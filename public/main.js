@@ -4,6 +4,7 @@ const stageEl = document.getElementById('stage');
 const wrapEl = document.querySelector('.center-panel') || stageEl?.parentElement || document.body;
 const modeEl = document.getElementById('mode');
 const edgesEl = document.getElementById('edges-slider');
+const ambientEdgesEl = document.getElementById('ambient-edges');
 let focusMode = true; // enable highlight on selection by default
 const legendEl = document.getElementById('legend');
 const statusEl = null;
@@ -130,6 +131,10 @@ async function init() {
       }
     });
   } catch {}
+  if (ambientEdgesEl && !ambientEdgesEl.dataset.bound) {
+    ambientEdgesEl.dataset.bound='1';
+    ambientEdgesEl.addEventListener('change', ()=>{ drawEdges(); updateSelectionOverlay(); });
+  }
   if (edgesEl){
     const ec = document.getElementById('edge-count');
     edgesEl.addEventListener('input', ()=>{ if (ec) ec.textContent = String(edgesEl.value); load(modeEl.value, Number(edgesEl.value||200)); });
@@ -217,10 +222,10 @@ async function load(mode, edges){
   nodes = data.nodes||[]; edgesData = data.edges||[];
   buildSprites(nodes.map(n=>n.color||BRAND.GREEN));
   if (mode === 'transfers') {
-    try {
-      const det = await fetch(`/api/transfer-edges?limit=${encodeURIComponent(edges||200)}&nodes=10000`, { cache:'no-store' }).then(r=>r.json());
-      if (Array.isArray(det) && det.length) edgesData = det;
-    } catch {}
+  try {
+    const det = await fetch(`/api/transfer-edges?limit=${encodeURIComponent(edges||200)}&nodes=10000`, { cache:'no-store' }).then(r=>r.json());
+    if (Array.isArray(det) && det.length) edgesData = det;
+  } catch {}
   }
   // If no nodes loaded, attempt a recovery fetch
   if (!nodes || !nodes.length) {
@@ -308,6 +313,8 @@ function drawEdges(){
     if (s < 0.35) return;
     // If a node is selected, defer to selection overlay only (avoid clutter)
     if (selectedIndex >= 0) return;
+    // Ambient toggle: when off, skip drawing ambient edges
+    if (ambientEdgesEl && !ambientEdgesEl.checked) return;
     if ((edgesData?.length||0) && edgesData.length <= maxDraw) {
       const mode = modeEl?.value || 'holders';
       // scale factors for width/alpha based on zoom (gentler falloff)
