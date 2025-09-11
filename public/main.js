@@ -306,11 +306,13 @@ function drawEdges(){
     const s = world?.scale?.x || 1;
     // LOD: keep edges visible more often; only skip when very far out
     if (s < 0.35) return;
+    // If a node is selected, defer to selection overlay only (avoid clutter)
+    if (selectedIndex >= 0) return;
     if ((edgesData?.length||0) && edgesData.length <= maxDraw) {
       const mode = modeEl?.value || 'holders';
       // scale factors for width/alpha based on zoom (gentler falloff)
       const aF = Math.max(0, Math.min(1, (s - 0.35) / 0.9));
-      const wF = 0.8 + aF * 0.9;
+      const wF = 0.6 + aF * 0.4; // keep ambient edges thin
       for (let e=0;e<edgesData.length;e++){
         const item = edgesData[e];
         const a = Array.isArray(item)? item[0] : (item.a ?? item.source ?? item.from ?? 0);
@@ -322,10 +324,8 @@ function drawEdges(){
         const x2 = sprites[j].x, y2 = sprites[j].y;
         let style = pickEdgeStyle(mode, i, j, item);
         if (!layerEnabled(style, item)) continue;
-        // Weight-aware adjustment
-        const weight = Number(item?.count || item?.weight || (Array.isArray(item)? item[2] : 1)) || 1;
-        const t = Math.min(1, Math.log2(weight + 1) / 4);
-        style = { ...style, width: Math.min(2.4, Math.max(0.4, (style.width || 0.6) * wF * (1 + t))), opacity: Math.max(0.18, (style.opacity ?? 0.8) * (0.28 + 0.72 * aF)) };
+        // Ambient edges: very light and thin; no weight-based thickening
+        style = { ...style, width: Math.max(0.25, Math.min(0.5, (style.width || 0.6) * wF)), opacity: Math.max(0.08, (style.opacity ?? 0.8) * 0.18) };
         strokeEdge(edgesGfx, x1, y1, x2, y2, style);
       }
     }
@@ -436,12 +436,12 @@ function layerEnabled(style, item){
 function setLegend(p){
   if (!legendEl) return;
   const text = {
-    ownership: 'Color by owner; same-owner links.',
-    trading: 'X = last activity, Y = price/ethos; transfer links.',
-    rarity: 'Spiral by rarity; grayscale by rarity score.',
-    social: 'Cyan brightness/center = higher Ethos.',
-    whales: 'Large holders emphasized; wallet relation links.',
-    frozen: 'Blue = frozen, Gray = dormant, Green = active.'
+    ownership: 'Color by wallet type; size by hold days; PnL pulls inward.',
+    trading: 'X=recent sale, Y=turnover; Red arrows=sales, dashed=transfers, dotted=mints.',
+    rarity: 'Spiral by rarity; size by last sale; highlight active rares.',
+    social: 'Radial by Ethos; color blends PnL (red loss/blue profit).',
+    whales: 'Proximity/size by wallet volume; whale types colored.',
+    frozen: 'Blue=frozen, Gray=dormant, Green=active; alpha by recent sale.'
   }[p] || '';
   legendEl.textContent = text;
 }
@@ -686,8 +686,12 @@ function updateSelectionOverlay(){
         const ia = idToIndex.get(Number(a));
         const ib = idToIndex.get(Number(b));
         if (ia==null || ib==null) continue;
-        const style = pickEdgeStyle(modeEl?.value||'holders', ia, ib, item);
-        if (!layerEnabled(style, item)) continue;
+        const base = pickEdgeStyle(modeEl?.value||'holders', ia, ib, item);
+        if (!layerEnabled(base, item)) continue;
+        // Emphasize on selection: thicker, brighter; reflect weight modestly
+        const weight = Number(item?.count || item?.weight || (Array.isArray(item)? item[2] : 1)) || 1;
+        const bump = Math.min(1.2, 0.4 + Math.log2(weight+1)*0.25);
+        const style = { ...base, width: Math.min(2.2, (base.width||0.8) * (1.2 + bump)), opacity: 1.0 };
         strokeEdge(selectGfx, sprites[ia].x, sprites[ia].y, sprites[ib].x, sprites[ib].y, style);
       }
     }
