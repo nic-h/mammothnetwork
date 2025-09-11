@@ -821,6 +821,56 @@ app.get('/api/health', (req, res) => {
   res.json(status);
 });
 
+// API: token listings
+app.get('/api/token/:id/listings', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  try {
+    const rows = db.prepare(`
+      SELECT price, COALESCE(marketplace, platform) AS platform, listed_at, delisted_at, status, seller_address
+      FROM listings WHERE token_id = ? ORDER BY listed_at DESC LIMIT 50
+    `).all(id);
+    res.json({ listings: rows });
+  } catch (e) { res.status(500).json({ error: 'db-error' }); }
+});
+
+// API: desire paths (frequently listed tokens)
+app.get('/api/desire-paths', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  try {
+    const rows = db.prepare(`
+      SELECT token_id,
+             COUNT(1) AS list_count,
+             AVG(price) AS avg_price,
+             MIN(price) AS min_price,
+             MAX(price) AS max_price,
+             SUM(CASE WHEN status='sold' THEN 1 ELSE 0 END) AS sold_count
+      FROM listings
+      GROUP BY token_id
+      HAVING list_count > 2
+      ORDER BY list_count DESC
+      LIMIT 100
+    `).all();
+    res.json({ desire_paths: rows });
+  } catch (e) { res.status(500).json({ error: 'db-error' }); }
+});
+
+// API: similar tokens (advanced cache)
+app.get('/api/token/:id/similar-advanced', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  try {
+    const rows = db.prepare(`
+      SELECT token_b AS token_id, similarity, similarity_type
+      FROM token_similarity
+      WHERE token_a = ? AND similarity > 0.5
+      ORDER BY similarity DESC
+      LIMIT 20
+    `).all(id);
+    res.json({ similar: rows });
+  } catch (e) { res.status(500).json({ error: 'db-error' }); }
+});
+
 // Fallback to index.html for any other route
 app.get('*', (req, res) => {
   res.sendFile(path.join(ROOT, 'public', 'index.html'));

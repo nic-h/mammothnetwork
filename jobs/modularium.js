@@ -37,6 +37,41 @@ export async function fetchTokenIds() {
   return Array.isArray(data) ? data : (data.ids || []);
 }
 
+// Listings/orders for the collection (normalizes several Modularium shapes)
+export async function fetchListings({ page = 1, limit = 1000 } = {}) {
+  if (!CONTRACT) throw new Error('CONTRACT_ADDRESS not set');
+  const bases = [
+    urlJoin(BASE, 'collection', CONTRACT, 'listings'),
+    urlJoin(BASE, 'v1', 'collection', CONTRACT, 'listings'),
+    urlJoin(BASE, 'collection', CONTRACT, 'orders'),
+    urlJoin(BASE, 'collection', CONTRACT, 'asks'),
+  ];
+  const params = new URLSearchParams({ page: String(page), limit: String(limit), status: 'all' });
+  for (const b of bases) {
+    const url = `${b}?${params}`;
+    try {
+      const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.listings || data.orders || data.items || []);
+      return list.map(normalizeListing);
+    } catch {}
+  }
+  throw new Error('No listings endpoint responded');
+}
+
+function normalizeListing(raw) {
+  return {
+    token_id: Number(raw?.tokenId ?? raw?.token_id ?? raw?.id ?? 0),
+    price: Number(raw?.price ?? raw?.amount ?? raw?.value ?? 0) || 0,
+    platform: String(raw?.marketplace ?? raw?.platform ?? raw?.source ?? 'unknown'),
+    listed_at: Number(raw?.listedAt ?? raw?.listed_at ?? raw?.timestamp ?? raw?.createdAt ?? 0) || 0,
+    delisted_at: (raw?.delistedAt ?? raw?.delisted_at ?? raw?.cancelledAt ?? null) ? Number(raw?.delistedAt ?? raw?.delisted_at ?? raw?.cancelledAt) : null,
+    status: String(raw?.status ?? (raw?.active ? 'active' : 'unknown')),
+    seller: String((raw?.seller ?? raw?.maker ?? raw?.from ?? '').toLowerCase()),
+  };
+}
+
 // Wallet freezes for a specific contract (defensive query param names)
 export async function fetchWalletFreezes(address) {
   if (!CONTRACT) throw new Error('CONTRACT_ADDRESS not set');

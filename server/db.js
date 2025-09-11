@@ -35,6 +35,23 @@ export function runMigrations(db) {
       last_activity INTEGER,
       updated_at DATETIME
     );
+    -- Listings for active and historical marketplace asks
+    CREATE TABLE IF NOT EXISTS listings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_id INTEGER NOT NULL,
+      price REAL,
+      platform TEXT,
+      marketplace TEXT,
+      listed_at INTEGER,
+      delisted_at INTEGER,
+      status TEXT,
+      seller_address TEXT,
+      updated_at INTEGER,
+      UNIQUE(token_id, listed_at, platform)
+    );
+    CREATE INDEX IF NOT EXISTS idx_listings_token ON listings(token_id);
+    CREATE INDEX IF NOT EXISTS idx_listings_status ON listings(status);
+    CREATE INDEX IF NOT EXISTS idx_listings_time ON listings(listed_at, delisted_at);
     CREATE TABLE IF NOT EXISTS attributes (
       token_id INTEGER,
       trait_type TEXT,
@@ -88,6 +105,15 @@ export function runMigrations(db) {
       profile_json TEXT,
       updated_at INTEGER
     );
+    -- Token similarity cache
+    CREATE TABLE IF NOT EXISTS token_similarity (
+      token_a INTEGER,
+      token_b INTEGER,
+      similarity REAL,
+      similarity_type TEXT,
+      PRIMARY KEY (token_a, token_b, similarity_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_similarity_high ON token_similarity(similarity);
   `);
 
   // Conditional column adds for transfers (price, tx_hash, event_type)
@@ -109,6 +135,11 @@ export function runMigrations(db) {
       { name: 'links_x', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN links_x TEXT' },
       { name: 'links_fc', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN links_fc TEXT' },
       { name: 'social_verified', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN social_verified INTEGER' },
+      { name: 'wallet_type', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN wallet_type TEXT' },
+      { name: 'avg_hold_days', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN avg_hold_days REAL' },
+      { name: 'flip_ratio', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN flip_ratio REAL' },
+      { name: 'buy_count', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN buy_count INTEGER DEFAULT 0' },
+      { name: 'sell_count', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN sell_count INTEGER DEFAULT 0' },
     ];
     for (const c of want2) if (!cols2.includes(c.name)) db.exec(c.ddl);
   } catch {}
