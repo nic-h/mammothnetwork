@@ -23,6 +23,13 @@
   --col-left: 280px; --col-right: 420px;
   --radius: 0;
   --line-rgb: 0,255,102; /* alias for borders/shadows */
+  /* Controls */
+  --ctl-h: 32px;
+  --ctl-pad-x: 8px;
+  --ctl-pad-y: 6px;
+  /* Surfaces */
+  --card-bg: #0a0a0a;
+  --text-muted: rgba(230,255,230,.85);
 }
 
 /* baseline application */
