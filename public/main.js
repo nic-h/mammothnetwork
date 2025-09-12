@@ -284,14 +284,33 @@ async function init() {
     });
   }
 
-  // Click handlers for collapsibles (traits and edge groups)
+  // Click handlers for collapsibles (traits and edge groups) and view tip
   try {
     const th = document.querySelector('.traits-header');
-    if (th && !th.dataset.bound){ th.dataset.bound='1'; th.addEventListener('click', ()=>{ document.querySelector('.traits-section')?.classList.toggle('open'); }); }
+    if (th && !th.dataset.bound){
+      th.dataset.bound='1';
+      const toggleTraits = ()=>{
+        const sec = document.querySelector('.traits-section');
+        if (!sec) return;
+        const open = sec.classList.toggle('open');
+        th.setAttribute('aria-expanded', open? 'true' : 'false');
+      };
+      th.addEventListener('click', toggleTraits);
+      th.addEventListener('keydown', (e)=>{ if (e.key==='Enter' || e.key===' ') { e.preventDefault(); toggleTraits(); } });
+    }
     document.querySelectorAll('.edge-group').forEach(g=>{
       const h = g.querySelector('.edge-group-header');
-      if (h && !h.dataset.bound){ h.dataset.bound='1'; h.addEventListener('click', ()=> g.classList.toggle('open')); }
+      if (h && !h.dataset.bound){
+        h.dataset.bound='1';
+        const toggle = ()=>{ const open = g.classList.toggle('open'); h.setAttribute('aria-expanded', open? 'true' : 'false'); };
+        h.addEventListener('click', toggle);
+        h.addEventListener('keydown', (e)=>{ if (e.key==='Enter' || e.key===' ') { e.preventDefault(); toggle(); } });
+      }
     });
+    const tip = document.getElementById('view-tip');
+    const tipClose = document.getElementById('view-tip-close');
+    const dismissed = typeof localStorage !== 'undefined' ? localStorage.getItem('viewTipDismissed') === '1' : true;
+    if (tip && tipClose){ if (!dismissed) tip.hidden = false; tipClose.addEventListener('click', ()=>{ tip.hidden = true; try { localStorage.setItem('viewTipDismissed','1'); } catch {} }); }
     const moreBtn = document.getElementById('more-btn');
     const morePanel = document.getElementById('more-panel');
     if (moreBtn && morePanel && !moreBtn.dataset.bound){

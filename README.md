@@ -165,6 +165,17 @@ height: var(--ctl-h); line-height: var(--ctl-h);
 - Whale Watch: proximity/size by wallet trading volume; whale types colored; ownership relationships visible.
 - Collection Health (Frozen): layers by status/activity; alpha by recent sale; blue=frozen, gray=dormant, green=active.
 
+Visual Encoding Table
+```
+| View                | Position                        | Size                  | Color                           | Edges                               | Extras                   |
+|---------------------|----------------------------------|-----------------------|----------------------------------|--------------------------------------|--------------------------|
+| Ownership Network   | Owner clusters; whales centered  | Hold-days / holdings  | Wallet type                      | Subtle green curves (ownership)      | Cluster layout (desktop) |
+| Trading Activity    | Recency of last sale (X); count  | Last sale price       | Heat by activity                 | Sales red arrows; dashed transfers   |                          |
+| Trait Explorer      | Spiral constellation             | Last sale price       | Rare highlight (active rares)    | Rare trait edges (optional)          | Traits open              |
+| Whale Watch         | Distance to high-volume wallets  | Volume (buy+sell)     | Whale types                      | Ownership + volume relations         |                          |
+| Collection Health   | Status layering                  | —                     | Blue=frozen, Gray=dormant, Green | Transaction edges, subdued ownership |                          |
+```
+
 Notes
 - PIXI v7 UMD build is served at `/lib/pixi.min.js`; the app uses `new PIXI.Application({ ... })` and `app.view`
 - Images: served at `/images`; thumbnails at `/thumbnails` (nodes never load images)

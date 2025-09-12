@@ -52,6 +52,10 @@
       </div>
     </div>
   </header>
+  <div id="view-tip" class="view-tip" role="region" aria-live="polite" hidden>
+    <span class="tip-text">TIP: Use VIEW to switch Ownership, Trading, Traits, Whales, Health.</span>
+    <button id="view-tip-close" class="btn btn--clear" aria-label="Dismiss view tip">✕</button>
+  </div>
   <div class="main-container">
     <aside class="left-panel">
       <div class="controls-section">
@@ -77,15 +81,15 @@
         <div class="legend" id="legend">Color by owner; same-owner links.</div>
         <div class="edge-groups">
           <div class="edge-group open" data-group="relationships">
-            <div class="edge-group-header">RELATIONSHIPS <span class="twist">▶</span></div>
-            <div class="edge-group-body">
+            <div class="edge-group-header" role="button" tabindex="0" aria-expanded="true" aria-controls="relationships-body">RELATIONSHIPS <span class="twist">▶</span></div>
+            <div id="relationships-body" class="edge-group-body">
               <div class="layer-toggle"><label>Ownership</label><input type="checkbox" id="layer-ownership" checked></div>
               <div class="layer-toggle"><label>Rare Traits</label><input type="checkbox" id="layer-traits"></div>
             </div>
           </div>
           <div class="edge-group open" data-group="transactions">
-            <div class="edge-group-header">TRANSACTIONS <span class="twist">▶</span></div>
-            <div class="edge-group-body">
+            <div class="edge-group-header" role="button" tabindex="0" aria-expanded="true" aria-controls="transactions-body">TRANSACTIONS <span class="twist">▶</span></div>
+            <div id="transactions-body" class="edge-group-body">
               <div class="layer-toggle"><label>Recent Trades</label><input type="checkbox" id="layer-trades" checked></div>
               <div class="layer-toggle"><label>Sales</label><input type="checkbox" id="layer-sales" checked></div>
               <div class="layer-toggle"><label>Transfers</label><input type="checkbox" id="layer-transfers" checked></div>
@@ -93,16 +97,16 @@
             </div>
           </div>
           <div class="edge-group" data-group="analysis">
-            <div class="edge-group-header">ANALYSIS <span class="twist">▶</span></div>
-            <div class="edge-group-body">
+            <div class="edge-group-header" role="button" tabindex="0" aria-expanded="false" aria-controls="analysis-body">ANALYSIS <span class="twist">▶</span></div>
+            <div id="analysis-body" class="edge-group-body">
               <div class="layer-toggle"><label>High Value</label><input type="checkbox" id="layer-value"></div>
             </div>
           </div>
         </div>
       </div>
       <div class="traits-section">
-        <div class="panel-title traits-header"><span class="twist">▶</span> TRAITS</div>
-        <div class="traits-body">
+        <div class="panel-title traits-header" role="button" tabindex="0" aria-expanded="false" aria-controls="traits-body"><span class="twist">▶</span> TRAITS</div>
+        <div id="traits-body" class="traits-body">
           <button id="clear-filters" class="btn btn--preset preset-btn" style="width:100%;margin-bottom: var(--pad-12);">CLEAR FILTERS</button>
           <div id="traits-container"></div>
         </div>
