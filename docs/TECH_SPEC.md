@@ -25,13 +25,16 @@ Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownershi
 
 ## API Surface
 - `/api/graph` (alias `/api/network-graph`) — nodes+edges with ETag
-- `/api/preset-data` — compact arrays for presets (owners, ownerIndex, ownerEthos, tokenLastActivity, tokenPrice, traitKeys, tokenTraitKey, rarity)
+- `/api/preset-data` — compact arrays for views (see “Preset Data Payload”)
 - `/api/token/:id` — token details; `ethos` present only for active/signed-up wallets
 - `/api/wallet/:address` — token list + ethos if active
 - `/api/wallet/:address/meta` — wallet stats + ethos_score (null unless accepted)
 - `/api/ethos/profile` — v2 proxy; 24h cache
 - `/api/activity`, `/api/heatmap`, `/api/traits`, `/api/stats`, `/api/health`
 - `/api/transfer-edges?limit=500&nodes=10000` — aggregated wallet→wallet edges with `{ a, b, type, count, sales, transfers, mints }`; maps wallets to representative token IDs for display.
+- `/api/top-traded-tokens?limit=50` — tokens ordered by total transfers (with sales count, last trade ts)
+- `/api/longest-held-tokens?limit=50` — currently held tokens ordered by `hold_days`
+- `/api/trait-sale-stats?min_sales=3&limit=200` — sale stats per trait value (avg/min/max)
 
 ## Data Model (SQLite)
 Tables: `tokens`, `attributes`, `transfers`, `graph_cache`, `wallet_metadata`, `collection_stats`, `ethos_profiles`.
@@ -79,6 +82,7 @@ CREATE TABLE transfers (
   event_type TEXT
 );
 CREATE INDEX idx_transfers_token_time ON transfers (token_id, timestamp);
+CREATE INDEX idx_transfers_token_to_time ON transfers (token_id, to_addr, timestamp);
 
 -- wallet_metadata: enriched wallet data and rollups
 CREATE TABLE wallet_metadata (
@@ -180,6 +184,30 @@ Usage: prefer variables in new styles; existing rules can be updated opportunist
 
 ---
 
+## Preset Data Payload
+`GET /api/preset-data?nodes=10000` returns dense arrays aligned by token index or owner index to keep the UI fast:
+
+- Token-aligned arrays:
+  - `tokenLastActivity` — last transfer per token (unix sec)
+  - `tokenPrice` — last known price per token (nullable)
+  - `tokenSaleCount` — sale count per token
+  - `tokenLastSaleTs` — last sale timestamp per token (nullable)
+  - `tokenLastSalePrice` — last sale price per token (nullable)
+  - `tokenHoldDays` — days since last acquisition (nullable)
+  - `tokenTraitKey` — index of rarest trait (or -1)
+  - `rarity` — 0..1 rarity score
+- Owner-aligned arrays:
+  - `owners` — distinct lowercased addresses
+  - `ownerIndex` — per-token owner index
+  - `ownerEthos` — ethos score aligned to owners
+  - `ownerWalletType` — classification (flipper, diamond_hands, whale_trader, collector, holder, accumulator)
+  - `ownerPnl` — realized PnL (TIA)
+  - `ownerBuyVol`, `ownerSellVol` — buy/sell volumes (TIA)
+  - `ownerAvgHoldDays`, `ownerFlipRatio` — behavior metrics
+
+These arrays are computed server-side from SQLite and cached in‑memory per request. The UI uses them to color/size/position tokens without additional API calls.
+
+
 # Changelog
 - v2.0 — Spec aligned to current implementation; added tokens proposal; clarified decisions.
 
@@ -195,6 +223,15 @@ curl -s 'http://localhost:3000/api/network-graph?mode=holders&nodes=500&edges=0'
 
 # Preset payload present
 curl -s 'http://localhost:3000/api/preset-data?nodes=500' | jq 'keys'
+-- token-level trading/hold metrics (added via conditional migrations)
+ALTER TABLE tokens ADD COLUMN sale_count INTEGER DEFAULT 0;          -- if missing
+ALTER TABLE tokens ADD COLUMN avg_sale_price REAL;                   -- if missing
+ALTER TABLE tokens ADD COLUMN last_sale_price REAL;                  -- if missing
+ALTER TABLE tokens ADD COLUMN first_sale_ts INTEGER;                 -- if missing
+ALTER TABLE tokens ADD COLUMN last_sale_ts INTEGER;                  -- if missing
+ALTER TABLE tokens ADD COLUMN last_acquired_ts INTEGER;              -- if missing
+ALTER TABLE tokens ADD COLUMN last_buy_price REAL;                   -- if missing
+ALTER TABLE tokens ADD COLUMN hold_days REAL;                        -- if missing
 
 # Token + Wallet
 curl -s 'http://localhost:3000/api/token/1' | jq '{id:.id, owner:.owner, ethos:.ethos}'

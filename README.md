@@ -3,6 +3,13 @@ Mammoths Network Visualization
 
 WebGL network for the Mammoths NFT collection.
 
+At‑a‑Glance System Overview
+- Frontend: PIXI.js v7 renders 10k token nodes (colored circles) with thin, layered edges; unified “Views” selector toggles Ownership, Trading, Traits, Whales, Health.
+- Backend: Express + SQLite (better-sqlite3). `/api/graph` delivers nodes/edges; `/api/preset-data` provides compact arrays for fast view encoding; ETag + TTL cache.
+- Data sources: Modularium API (holders, activity/transfers, listings), Ethos API (scores/users). Jobs fetch and cache into SQLite; UI reads only from DB.
+- Storage: images/thumbnails on disk (optional); no per-node images in the graph, only in the sidebar.
+- Deployment: Render.com with persistent disk; weekly cron refreshes data (see `jobs/run-all.js`).
+
 Current Status
 - PIXI v7 WebGL (UMD at `/lib/pixi.min.js`), 10k nodes via `PIXI.ParticleContainer`
 - Deterministic layouts (grid default + preset-specific)
@@ -29,6 +36,10 @@ Local setup
    - `npm run jobs:all`
 4. `npm run dev` → http://localhost:3000
 
+Environment
+- Required: `CONTRACT_ADDRESS`, `MODULARIUM_API`, `ETHOS_API`
+- Optional: `DATABASE_PATH` (default `./data/mammoths.db`), `DOWNLOAD_IMAGES=1`, `ROYALTY_BPS` (default `250`), and job tuning vars (see Jobs & Data Flow)
+
 Endpoints
 - `/api/network-graph?mode=holders|transfers|traits|wallets&nodes=10000&edges=0..500` (alias `/api/graph`)
 - `/api/preset-data?nodes=10000`
@@ -41,6 +52,11 @@ Endpoints
 - `/api/top-traded-tokens?limit=50` — top tokens by total transfers (with sales count and last trade)
 - `/api/longest-held-tokens?limit=50` — currently held tokens with longest `hold_days`
 - `/api/trait-sale-stats?min_sales=3&limit=200` — average/min/max sale price aggregated per trait value
+
+Preset data payload (compact arrays)
+`GET /api/preset-data?nodes=10000` returns fast arrays for UI encodings:
+- Token arrays: `tokenLastActivity`, `tokenPrice`, `tokenSaleCount`, `tokenLastSaleTs`, `tokenLastSalePrice`, `tokenHoldDays`, `tokenTraitKey`, `rarity`
+- Owner arrays: `owners`, `ownerIndex`, `ownerEthos`, `ownerWalletType`, `ownerPnl`, `ownerBuyVol`, `ownerSellVol`, `ownerAvgHoldDays`, `ownerFlipRatio`
 
 Database overview (SQLite)
 - Tables
@@ -61,6 +77,21 @@ Database overview (SQLite)
   - `idx_transfers_token_to_time (token_id, to_addr, timestamp)` for last_acquired lookups
 - Caching
   - In‑memory TTL (5m) + ETag; `/api/graph` also backed by `graph_cache`
+
+Jobs & Data Flow
+1) `scripts/db.migrate.js` — creates/tunes tables/indexes (idempotent)
+2) `jobs/sync-metadata.js` — tokens + attributes + images (optional)
+3) `jobs/sync-holders.js` — owners per token (Modularium or metadata fallback)
+4) `jobs/sync-activity.js` — transfers (with price/tx/hash/event_type), cursored; supports full backfill
+5) `jobs/enrich-wallets.js` — wallet_metadata baseline (holdings, first/last activity, trades)
+6) `jobs/ethos.js` — batch Ethos v2 enrichment (scores/users/links)
+7) `jobs/compute-edges.js` — precompute bounded-degree edges for graph_cache (holders/transfers/traits)
+8) `jobs/sync-listings.js` — marketplace listings (status, price, platform)
+9) `jobs/compute-wallet-metrics.js` — wallet TIA volumes, avg buy/sell, realized/unrealized PnL (FIFO + royalties), last buy/sell
+10) `jobs/classify-wallets.js` — behavior classification: flipper, diamond_hands, whale_trader, collector, holder, accumulator
+11) `jobs/compute-token-metrics.js` — token-level sale/hold metrics (sale_count, last/avg sale, hold_days)
+
+One-shot: `npm run jobs:all` runs them in order. Cron: see `jobs/run-all.js`.
 
 Quick checks
 ```
