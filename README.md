@@ -121,6 +121,19 @@ color: var(--fg); background: var(--bg);
 height: var(--ctl-h); line-height: var(--ctl-h);
 ```
 
+**Sanctioned Palette & Usage**
+- UI Chrome: only `--bg` (black), `--fg` (brand green), `--text`, with borders using `rgba(var(--green-rgb), .2..3)`.
+- Status Colors: `--blue` (frozen), `--gray` (dormant) apply to token nodes and legend, not to UI chrome.
+- Negative/Alerts: `--danger` is reserved for semantic negatives (e.g., realized losses, sale edges). Do not use for generic UI.
+- Data Encodings (Transfers): Sales = red arrows, Transfers = blue dashed, Mints = white dotted, Multi = gold solid.
+
+**Visual Encoding by View**
+- Ownership Network: position by owner clusters (whales centered), size by holdings/hold-days, color by wallet type; ownership edges subtle and curved.
+- Trading Activity: X = recency of last sale; Y = turnover (sale count); size by last sale price; heat color for activity.
+- Trait Explorer: spiral constellation; size by last sale price; highlight active rares; traits pane open.
+- Whale Watch: proximity/size by wallet trading volume; whale types colored; ownership relationships visible.
+- Collection Health (Frozen): layers by status/activity; alpha by recent sale; blue=frozen, gray=dormant, green=active.
+
 Notes
 - PIXI v7 UMD build is served at `/lib/pixi.min.js`; the app uses `new PIXI.Application({ ... })` and `app.view`
 - Images: served at `/images`; thumbnails at `/thumbnails` (nodes never load images)

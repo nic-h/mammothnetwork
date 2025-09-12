@@ -110,15 +110,27 @@ input[type="checkbox"] { accent-color: var(--fg); }
 .layer-toggle input[type="checkbox"]:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--green-rgb), .35); }
 .edge-controls input[type=range]:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--green-rgb), .25); }
 
-/* Brand tooltips for icon-only controls */
-.tooltipped[data-tooltip] { position: relative; }
-.tooltipped[data-tooltip]:hover::after,
-.tooltipped[data-tooltip]:focus-visible::after {
-  content: attr(data-tooltip);
-  position: absolute; top: calc(100% + 6px); right: 0;
-  background: var(--bg); color: var(--fg); border: var(--border);
-  padding: var(--pad-4) var(--pad-6); white-space: nowrap; z-index: 300;
-  font-size: var(--fs-10);
+/* Brand tooltips for icon-only controls (desktop only) */
+@media (hover: hover) and (pointer: fine){
+  .tooltipped[data-tooltip] { position: relative; }
+  .tooltipped[data-tooltip]:hover::after,
+  .tooltipped[data-tooltip]:focus-visible::after {
+    content: attr(data-tooltip);
+    position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+    background: var(--bg); color: var(--fg); border: var(--border);
+    padding: var(--pad-4) var(--pad-6); white-space: nowrap; z-index: 300;
+    font-size: var(--fs-10); opacity: 1; transition: opacity 200ms ease;
+  }
+  .tooltipped[data-tooltip]::after{ opacity: 0; pointer-events:none; }
+  .tooltipped[data-tooltip]:hover::before,
+  .tooltipped[data-tooltip]:focus-visible::before {
+    content: '';
+    position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%);
+    width: 0; height: 0; z-index: 301;
+    border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 6px solid var(--bg);
+    /* border outline */
+    box-shadow: 0 -1px 0 0 rgba(var(--green-rgb), .25);
+  }
 }
 .edge-controls input[type=range] {
   width: 180px;
@@ -235,4 +247,6 @@ body.view-selector-enabled .preset-bar { display: none; }
 
 @media (max-width: 768px){
   .more { display: block; }
+  /* Stronger active feedback for icon-only buttons on touch */
+  .btn:active { background: rgba(var(--green-rgb), .15); }
 }
