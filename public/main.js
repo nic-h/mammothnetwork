@@ -14,7 +14,7 @@ const sidebar = document.getElementById('sidebar');
 const thumbEl = document.getElementById('thumb');
 const detailsEl = document.getElementById('details');
 
-let app, world, nodeContainer, circleTexture, edgesGfx, selectGfx;
+let app, world, nodeContainer, circleTexture, edgesGfx, hullGfx, selectGfx;
 let sprites = []; // PIXI.Sprite
 let nodes = [];   // server nodes
 let edgesData = [];
@@ -75,8 +75,10 @@ async function init() {
   app.stage.addChild(world);
   nodeContainer = new PIXI.ParticleContainer(10000, { position:true, scale:true, tint:true, alpha:true });
   world.addChild(nodeContainer);
+  // Hulls (below nodes) and edges (below nodes, above hulls)
+  hullGfx = new PIXI.Graphics();
+  world.addChildAt(hullGfx, 0);
   edgesGfx = new PIXI.Graphics();
-  edgesGfx.zIndex = -1;
   world.addChild(edgesGfx);
   // background grid + overlay for selection ring + neighbor edges
   const gridGfx = new PIXI.Graphics();
@@ -319,13 +321,26 @@ async function init() {
       moreBtn.addEventListener('click', (e)=>{
         e.stopPropagation();
         const isOpen = !morePanel.hidden;
-        if (isOpen) closeMenu(); else { morePanel.hidden = false; moreBtn.setAttribute('aria-expanded','true'); }
+        if (isOpen) closeMenu(); else { 
+          morePanel.hidden = false; moreBtn.setAttribute('aria-expanded','true'); 
+          const first = morePanel.querySelector('.menu-item'); if (first) first.focus();
+        }
       });
+      moreBtn.addEventListener('keydown', (e)=>{ if (e.key==='ArrowDown'){ const first = morePanel.querySelector('.menu-item'); if (first){ e.preventDefault(); if (morePanel.hidden){ morePanel.hidden=false; moreBtn.setAttribute('aria-expanded','true'); } first.focus(); } } });
       document.addEventListener('click', (e)=>{
         if (!morePanel.hidden && !morePanel.contains(e.target) && e.target !== moreBtn) closeMenu();
       });
       document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') closeMenu(); });
-      morePanel.querySelectorAll('.menu-item').forEach(it=>{
+      const items = Array.from(morePanel.querySelectorAll('.menu-item'));
+      morePanel.addEventListener('keydown', (e)=>{
+        if (!items.length) return;
+        const i = items.indexOf(document.activeElement);
+        if (e.key==='ArrowDown'){ e.preventDefault(); const n = items[(i+1+items.length)%items.length]; n?.focus(); }
+        if (e.key==='ArrowUp'){ e.preventDefault(); const p = items[(i-1+items.length)%items.length]; p?.focus(); }
+        if (e.key==='Home'){ e.preventDefault(); items[0]?.focus(); }
+        if (e.key==='End'){ e.preventDefault(); items[items.length-1]?.focus(); }
+      });
+      items.forEach(it=>{
         it.addEventListener('click', ()=>{
           const act = it.dataset.action;
           if (act === 'ambient'){
@@ -493,6 +508,7 @@ function drawEdges(){
   try {
     const maxDraw = 500;
     edgesGfx.clear();
+    try { hullGfx.clear(); } catch {}
     const s = world?.scale?.x || 1;
     // LOD: keep edges visible more often; only skip when very far out
     if (s < 0.35) return;
@@ -501,8 +517,15 @@ function drawEdges(){
     // Ambient toggle: when off, skip drawing ambient edges
     if (ambientEdgesEl && !ambientEdgesEl.checked) return;
     const mode = modeEl?.value || 'holders';
-    // Ownership: draw hub→child tree edges (organic slight curves)
+    // Ownership: draw optional hulls (desktop-only, ambient-gated), then hub→child tree edges
     if (mode === 'holders'){
+      // Hulls: only on desktop (hover:fine) and when ambient edges are enabled, and when no selection
+      try {
+        const isDesktop = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+        if (isDesktop && (!ambientEdgesEl || ambientEdgesEl.checked) && selectedIndex < 0){
+          drawOwnershipHulls();
+        }
+      } catch {}
       const ownerIdxArr = presetData?.ownerIndex || [];
       const clusters = new Map();
       const n = sprites.length;
@@ -541,6 +564,34 @@ function drawEdges(){
         style = { ...style, width: Math.max(0.25, Math.min(0.5, (style.width || 0.6) * wF)), opacity: Math.max(0.08, (style.opacity ?? 0.8) * 0.18) };
         strokeEdge(edgesGfx, x1, y1, x2, y2, style);
       }
+    }
+  } catch {}
+}
+
+// Draw subtle translucent hulls around top owner clusters (desktop-only)
+function drawOwnershipHulls(){
+  try {
+    const ownerIdxArr = presetData?.ownerIndex || [];
+    const byOwner = new Map();
+    for (let i=0;i<sprites.length;i++){
+      const oi = ownerIdxArr[i] ?? -1; if (oi<0) continue;
+      if (!byOwner.has(oi)) byOwner.set(oi, []);
+      byOwner.get(oi).push(i);
+    }
+    const clusters = Array.from(byOwner.entries()).sort((a,b)=> (b[1].length - a[1].length)).slice(0, 12);
+    for (const [oi, idxs] of clusters){
+      if (idxs.length < 4) continue;
+      // compute centroid
+      let sx=0, sy=0; for (const i of idxs){ sx += sprites[i].x; sy += sprites[i].y; }
+      const cx = sx/idxs.length, cy = sy/idxs.length;
+      // compute radius as quantile distance
+      const dists = idxs.map(i=> Math.hypot(sprites[i].x - cx, sprites[i].y - cy)).sort((a,b)=>a-b);
+      const r = (dists[Math.floor(dists.length*0.8)] || 20) * 1.15 + 18;
+      // draw soft ring (fill + stroke) with brand green
+      hullGfx.lineStyle({ width: 1, color: 0x00ff66, alpha: 0.18, cap:'round' });
+      hullGfx.beginFill(0x00ff66, 0.035);
+      hullGfx.drawCircle(cx, cy, r);
+      hullGfx.endFill();
     }
   } catch {}
 }

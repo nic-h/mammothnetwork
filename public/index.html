@@ -29,11 +29,11 @@
         <button class="btn btn--preset preset-btn" data-preset="frozen" title="Frozen"><i class="ri-snowflake-line"></i><span class="preset-label"> FROZEN</span></button>
       </div>
       <div class="more">
-        <button id="more-btn" class="btn btn--chip tooltipped" title="More" data-tooltip="MORE" aria-haspopup="true" aria-expanded="false"><i class="ri-more-2-fill"></i></button>
-        <div id="more-panel" class="more-panel" hidden>
-          <button class="menu-item" data-action="scroll" data-target="edges">EDGE LAYERS</button>
-          <button class="menu-item" data-action="scroll" data-target="traits">TRAITS</button>
-          <button class="menu-item" data-action="ambient">AMBIENT EDGES</button>
+        <button id="more-btn" class="btn btn--chip tooltipped" title="More" data-tooltip="MORE" aria-haspopup="menu" aria-expanded="false" aria-controls="more-panel"><i class="ri-more-2-fill"></i></button>
+        <div id="more-panel" class="more-panel" role="menu" hidden>
+          <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="edges">EDGE LAYERS</button>
+          <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="traits">TRAITS</button>
+          <button class="menu-item" role="menuitem" tabindex="-1" data-action="ambient">AMBIENT EDGES</button>
         </div>
       </div>
       <div class="view-selector" aria-label="Views">

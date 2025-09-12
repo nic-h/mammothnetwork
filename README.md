@@ -176,6 +176,8 @@ Visual Encoding Table
 | Collection Health   | Status layering                  | —                     | Blue=frozen, Gray=dormant, Green | Transaction edges, subdued ownership |                          |
 ```
 
+Image version: `public/assets/visual-encoding-table.svg`
+
 Notes
 - PIXI v7 UMD build is served at `/lib/pixi.min.js`; the app uses `new PIXI.Application({ ... })` and `app.view`
 - Images: served at `/images`; thumbnails at `/thumbnails` (nodes never load images)

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="220" viewBox="0 0 880 220">
+  <style>
+    .bg { fill: #000 }
+    .grid { stroke: rgba(0,255,102,.25); stroke-width:1; }
+    .th { fill: #00ff66; font: 12px monospace; text-transform: uppercase; }
+    .td { fill: #e6ffe6; font: 12px monospace; }
+    .dim { fill: #9eecb9; font: 11px monospace; }
+  </style>
+  <rect class="bg" x="0" y="0" width="880" height="220" />
+  <!-- columns -->
+  <line class="grid" x1="0" y1="34" x2="880" y2="34"/>
+  <line class="grid" x1="160" y1="0" x2="160" y2="220"/>
+  <line class="grid" x1="320" y1="0" x2="320" y2="220"/>
+  <line class="grid" x1="480" y1="0" x2="480" y2="220"/>
+  <line class="grid" x1="680" y1="0" x2="680" y2="220"/>
+  <!-- headers -->
+  <text class="th" x="12" y="22">VIEW</text>
+  <text class="th" x="172" y="22">POSITION</text>
+  <text class="th" x="332" y="22">SIZE</text>
+  <text class="th" x="492" y="22">COLOR</text>
+  <text class="th" x="692" y="22">EDGES / EXTRAS</text>
+
+  <!-- rows (5) -->
+  <g transform="translate(0,48)">
+    <text class="td" x="12" y="0">Ownership</text>
+    <text class="td" x="172" y="0">Owner clusters; whales centered</text>
+    <text class="td" x="332" y="0">Hold-days / holdings</text>
+    <text class="td" x="492" y="0">Wallet type</text>
+    <text class="td" x="692" y="0">Green curves; cluster layout</text>
+  </g>
+  <g transform="translate(0,82)">
+    <text class="td" x="12" y="0">Trading</text>
+    <text class="td" x="172" y="0">Last sale recency (X); count (Y)</text>
+    <text class="td" x="332" y="0">Last sale price</text>
+    <text class="td" x="492" y="0">Heat by activity</text>
+    <text class="td" x="692" y="0">Red arrows; dashed transfers</text>
+  </g>
+  <g transform="translate(0,116)">
+    <text class="td" x="12" y="0">Traits</text>
+    <text class="td" x="172" y="0">Spiral constellation</text>
+    <text class="td" x="332" y="0">Last sale price</text>
+    <text class="td" x="492" y="0">Active rares</text>
+    <text class="td" x="692" y="0">Traits pane open</text>
+  </g>
+  <g transform="translate(0,150)">
+    <text class="td" x="12" y="0">Whales</text>
+    <text class="td" x="172" y="0">Distance to high-volume wallets</text>
+    <text class="td" x="332" y="0">Volume (buy+sell)</text>
+    <text class="td" x="492" y="0">Whale types</text>
+    <text class="td" x="692" y="0">Ownership + volume relations</text>
+  </g>
+  <g transform="translate(0,184)">
+    <text class="td" x="12" y="0">Health</text>
+    <text class="td" x="172" y="0">Status layering</text>
+    <text class="td" x="332" y="0">—</text>
+    <text class="td" x="492" y="0">Blue=frozen Gray=dormant</text>
+    <text class="td" x="692" y="0">Subdued ownership</text>
+  </g>
+</svg>
