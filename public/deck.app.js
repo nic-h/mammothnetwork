@@ -77,6 +77,8 @@
     try { const usp = new URLSearchParams(location.search); const t = parseInt(usp.get('token')||'',10); if (t>0) selectedId = t; } catch {}
     await loadMode('holders', edgeCount);
     if (selectedId>0) focusSelect(selectedId);
+    // Build traits UI for deck engine
+    try { buildTraitsUI(); } catch {}
   }
 
   function bindViewControls(){
@@ -283,8 +285,12 @@
   }
 
   function animateHolders(t){
-    // advance orbital angle; re-render will recompute positions in layer getPosition
-    for (const d of nodes){ d.orbit = (d.orbit || 0) + 0.007; }
+    // advance orbital angle; speed scales by owner holdings for a smoother look
+    for (const d of nodes){
+      const h = (ownerHoldings?.[d.ownerIndex]||1);
+      const speed = 0.010 / Math.max(1, Math.sqrt(h));
+      d.orbit = (d.orbit || 0) + speed;
+    }
     render(nodes, edges, currentMode);
   }
   function animateTraits(t){
@@ -372,6 +378,8 @@
       const peak = story?.peak_price!=null? (Math.round(story.peak_price*100)/100 + ' TIA') : '--';
       const ethos = (walletMeta && typeof walletMeta.ethos_score==='number') ? Math.round(walletMeta.ethos_score) : (t?.ethos?.score!=null? Math.round(t.ethos.score): null);
       const realized = walletMeta?.realized_pnl_tia != null ? Math.round(walletMeta.realized_pnl_tia*100)/100 : null;
+      const buyVol = walletMeta?.buy_volume_tia != null ? Math.round(walletMeta.buy_volume_tia*100)/100 : null;
+      const sellVol = walletMeta?.sell_volume_tia != null ? Math.round(walletMeta.sell_volume_tia*100)/100 : null;
       const lastBuy = (t?.last_buy_price!=null) ? (Math.round(Number(t.last_buy_price)*100)/100 + ' TIA') : '--';
       const lastSale = (t?.last_sale_price!=null) ? (Math.round(Number(t.last_sale_price)*100)/100 + ' TIA') : '--';
       const holdDays = t.hold_days!=null ? Math.round(Number(t.hold_days)) : '--';
@@ -398,6 +406,10 @@
         <div class='card2'>
           <div class='card'><div class='label'>REALIZED PNL</div><div class='big-number'>${realized!=null? (realized+' TIA') : '--'}</div></div>
           <div class='card'><div class='label'>TRADES</div><div class='big-number'>${walletMeta?.trade_count ?? '--'}</div></div>
+        </div>
+        <div class='card2'>
+          <div class='card'><div class='label'>SPEND</div><div class='big-number'>${buyVol!=null? (buyVol+' TIA') : '--'}</div></div>
+          <div class='card'><div class='label'>REVENUE</div><div class='big-number'>${sellVol!=null? (sellVol+' TIA') : '--'}</div></div>
         </div>
         <div class='card2'>
           <div class='card'><div class='label'>LAST BUY</div><div class='big-number'>${lastBuy}</div></div>
@@ -460,7 +472,13 @@
       }
       ownerCenters = centers;
       // Attach owner center + orbit params to nodes (for holders view)
-      nodeList.forEach(n=>{ const ownerIdx = n.ownerIndex; const c = centers[ownerIdx] || [0,0,0]; n.ownerX=c[0]; n.ownerY=c[1]; n.orbit = (n.id%360) * Math.PI/180; n.orbitRadius = 40 + (counts[ownerIdx]||1)*0.9; });
+      nodeList.forEach(n=>{
+        const ownerIdx = n.ownerIndex; const c = centers[ownerIdx] || [0,0,0];
+        const h = (counts[ownerIdx]||1);
+        n.ownerX=c[0]; n.ownerY=c[1];
+        n.orbit = (n.id%360) * Math.PI/180;
+        n.orbitRadius = 28 + Math.sqrt(h)*8; // larger holdings → larger orbit ring
+      });
     } catch {}
   }
 
@@ -497,8 +515,8 @@
       });
       // 3) Ownership connections (owner center -> orbiting token)
       const hasArc = typeof ArcLayer === 'function';
-      const arcsData = nodes.slice(0, Math.min(nodes.length, 5000)).map(d=>({ s: [d.ownerX, d.ownerY, 0], t: [ d.ownerX + Math.cos(d.orbit)*d.orbitRadius, d.ownerY + Math.sin(d.orbit)*d.orbitRadius, 0 ] }));
-      const arcs = hasArc ? new ArcLayer({ id:'ownership-links', data: arcsData, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getSourceColor:[0,255,102,255], getTargetColor:[0,255,102,0], getWidth:1 }) : null;
+      const arcsData = nodes.slice(0, Math.min(nodes.length, 6000)).map(d=>({ s: [d.ownerX, d.ownerY, 0], t: [ d.ownerX + Math.cos(d.orbit)*d.orbitRadius, d.ownerY + Math.sin(d.orbit)*d.orbitRadius, 0 ] }));
+      const arcs = hasArc ? new ArcLayer({ id:'ownership-links', data: arcsData, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getSourceColor:[0,255,102,180], getTargetColor:[0,255,102,10], getWidth:1 }) : null;
       return [ density, tokens, arcs, ...base.filter(Boolean) ];
     } catch { return base; }
   }
@@ -553,6 +571,40 @@
     } catch {}
   }
 
+  // Build Traits UI (left panel) and wire to deck highlight
+  async function buildTraitsUI(){
+    const container = document.getElementById('traits-container');
+    if (!container) return;
+    container.innerHTML = '';
+    const r = await fetch(`/api/traits?v=${Date.now()}`).catch(()=>null);
+    if (!r || !r.ok) return;
+    const j = await r.json(); const groups = j.traits || [];
+    for (const g of groups){
+      const wrap = document.createElement('div'); wrap.className='trait-group';
+      const header = document.createElement('div'); header.className='trait-header'; header.innerHTML = `<span class="twist">▶</span> ${g.type}`;
+      const values = document.createElement('div'); values.className='trait-values';
+      for (const v of g.values || []){
+        const val = document.createElement('div'); val.className='trait-value'; val.textContent = `${v.value} (${v.count})`;
+        val.dataset.type = g.type; val.dataset.value = v.value;
+        val.addEventListener('click', onTraitClick);
+        values.appendChild(val);
+      }
+      header.addEventListener('click', ()=>{ const open = values.style.display!=='block'; values.style.display=open?'block':'none'; header.querySelector('.twist').textContent = open?'▼':'▶'; });
+      wrap.appendChild(header); wrap.appendChild(values); container.appendChild(wrap);
+    }
+  }
+
+  async function onTraitClick(e){
+    const el = e.currentTarget; const type = el.dataset.type; const value = el.dataset.value;
+    if (!type || !value) return;
+    try {
+      const r = await fetch(`/api/trait-tokens?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`).then(x=>x.json());
+      const ids = new Set((r.tokens||[]).map(Number));
+      highlightSet = ids;
+      render(nodes, edges, currentMode);
+    } catch {}
+  }
+
   // Transfers view helpers
   function makeTransfersLayers(base){
     const add = [];
@@ -565,7 +617,7 @@
   }
 
   function makeTripsLayer(){
-    const TripsLayer = window.deck.TripsLayer;
+    const TripsLayer = (window.deck && (window.deck.TripsLayer || window.deck?.GeoLayers?.TripsLayer)) || window.TripsLayer || null;
     let cached = null;
     return new TripsLayer({
       id:'transfer-flows',
