@@ -196,6 +196,11 @@
     const graph = await fetch(`${API.graph}?${params}`, { cache:'default' }).then(r=>r.json()).catch(()=>({nodes:[],edges:[]}));
     const pdata = presetData || {};
     nodes = buildNodes(graph.nodes||[], pdata);
+    // Client-side fallback if API yields zero nodes
+    if (!nodes || nodes.length===0){
+      const N = 1000; const arr=[]; for(let i=0;i<N;i++){ arr.push({ id:i+1, color:[0,255,102,180], frozen:false, dormant:false }); }
+      nodes = buildNodes(arr, pdata);
+    }
     edges = buildEdges(graph.edges||[], nodes);
     computeOwnerMetrics(pdata, nodes);
     applyLayout(nodes, mode, pdata);

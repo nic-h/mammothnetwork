@@ -7,7 +7,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-te
 .view-tip, .view-tip .tip-text, .view-tip .btn { display: none !important; }
 .logo { font-weight:700; }
 .header-controls { display:grid; align-items:center; gap:12px 16px; min-width:0; flex:1; grid-template-columns: auto 1fr auto var(--col-right); }
-.header-controls .mode-chips { grid-column: 1; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.header-controls .mode-chips { grid-column: 1; display:none; }
 .header-controls .preset-bar { grid-column: 2; flex: 1 1 auto; min-width: 320px; overflow-x:auto; }
 .header-controls .more { grid-column: 3; justify-self:end; }
 .header-controls .search-wrapper { grid-column: 4; display:flex; align-items:center; gap:6px; margin-left:0; width: var(--col-right); }
