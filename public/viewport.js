@@ -10,10 +10,11 @@
 
     app.stage.sortableChildren = true;
     world.sortableChildren = true;
-    // start centered with slight zoom-in
+    // start centered with slight zoom-in (anchor on center)
     const w = app.renderer.width, h = app.renderer.height;
-    world.position.set((1-1.2)*w*0.5, (1-1.2)*h*0.5);
-    world.scale.set(1.2);
+    const s0 = 1.2; world.scale.set(s0);
+    const cx = w/2, cy = h/2;
+    world.position.set((1-s0)*cx, (1-s0)*cy);
 
     let dragging=false; let startX=0, startY=0, startPX=0, startPY=0;
     const view = app.view;
@@ -67,4 +68,3 @@
     }};
   };
 })();
-

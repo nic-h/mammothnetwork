@@ -36,16 +36,7 @@
           <button class="menu-item" role="menuitem" tabindex="-1" data-action="ambient">AMBIENT EDGES</button>
         </div>
       </div>
-      <div class="view-selector" aria-label="Views">
-        <label for="view">VIEW</label>
-        <select id="view" aria-label="Views">
-          <option value="ownership">OWNERSHIP NETWORK</option>
-          <option value="trading">TRADING ACTIVITY</option>
-          <option value="traits">TRAIT EXPLORER</option>
-          <option value="whales">WHALE WATCH</option>
-          <option value="health">COLLECTION HEALTH</option>
-        </select>
-      </div>
+      <!-- View selector moved to left panel -->
       <div class="search-wrapper">
         <input id="search" type="search" placeholder="TOKEN ID OR ADDRESS" class="header-search">
         <button id="clear-search" class="btn btn--clear clear-btn tooltipped" title="Clear (ESC)" data-tooltip="CLEAR">✕</button>
@@ -55,6 +46,23 @@
   <div class="main-container">
     <aside class="left-panel">
       <div class="controls-section">
+        <div class="view-selector panel-view" aria-label="Views">
+          <label for="view" class="panel-title">VIEW</label>
+          <div class="view-tabs" role="tablist" aria-label="Views">
+            <button class="tab-btn" data-view="ownership" role="tab">OWNERSHIP</button>
+            <button class="tab-btn" data-view="trading" role="tab">TRADING</button>
+            <button class="tab-btn" data-view="traits" role="tab">TRAITS</button>
+            <button class="tab-btn" data-view="whales" role="tab">WHALES</button>
+            <button class="tab-btn" data-view="health" role="tab">HEALTH</button>
+          </div>
+          <select id="view" aria-label="Views" class="sr-only" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;">
+            <option value="ownership">OWNERSHIP NETWORK</option>
+            <option value="trading">TRADING ACTIVITY</option>
+            <option value="traits">TRAIT EXPLORER</option>
+            <option value="whales">WHALE WATCH</option>
+            <option value="health">COLLECTION HEALTH</option>
+          </select>
+        </div>
         <div class="mode-selector">
           <label for="mode">MODE</label>
           <select id="mode">
@@ -72,6 +80,9 @@
         <div class="layer-toggles" style="margin-top: var(--pad-12);">
           <h4>DISPLAY</h4>
           <div class="layer-toggle"><label>Ambient Edges</label><input type="checkbox" id="ambient-edges" checked></div>
+          <div class="layer-toggle"><label>Whale Bubbles</label><input type="checkbox" id="layer-bubbles" checked></div>
+          <div class="layer-toggle"><label>Wash Watch</label><input type="checkbox" id="layer-wash"></div>
+          <div class="layer-toggle"><label>Desire Paths</label><input type="checkbox" id="layer-desire"></div>
         </div>
         <!-- Focus removed -->
         <div class="legend" id="legend">Color by owner; same-owner links.</div>
@@ -114,8 +125,9 @@
       <div id="details">Select a node…</div>
     </aside>
   </div>
-  <script src="/lib/pixi.min.js?v=20250912-1"></script>
+  <!-- Deck.gl UMD (only used when engine=deck) -->
+  <script src="https://unpkg.com/deck.gl@8.9.24/dist.min.js"></script>
   <script src="/viewport.js?v=20250912-1"></script>
-  <script src="/main.js?v=20250912-1"></script>
+  <script src="/engine.js?v=20250912-1"></script>
 </body>
 </html>

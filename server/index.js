@@ -530,6 +530,62 @@ app.get('/api/heatmap', (req, res) => {
   }
 });
 
+// Lightweight transfers feed for animated flows
+// Params: limit (<=5000), since (unix sec, optional)
+app.get('/api/transfers', (req, res) => {
+  if (!haveDb || !db) return res.json({ transfers: [] });
+  const limit = clamp(parseInt(req.query.limit || '1000', 10), 1, 5000);
+  const since = parseInt(req.query.since || '0', 10) || 0;
+  try {
+    const rows = since > 0
+      ? db.prepare('SELECT token_id, from_addr, to_addr, timestamp, price FROM transfers WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT ?').all(since, limit)
+      : db.prepare('SELECT token_id, from_addr, to_addr, timestamp, price FROM transfers ORDER BY timestamp ASC LIMIT ?').all(limit);
+    const out = rows.map(r => ({ token_id: r.token_id, from: (r.from_addr||'').toLowerCase(), to: (r.to_addr||'').toLowerCase(), timestamp: r.timestamp||0, price: r.price==null?null:Number(r.price) }));
+    res.setHeader('Cache-Control', 'public, max-age=30');
+    res.json({ transfers: out });
+  } catch (e) { res.status(500).json({ transfers: [] }); }
+});
+
+// Token story (lifecycle snapshot)
+app.get('/api/token/:id/story', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  const id = parseInt(req.params.id, 10);
+  try {
+    const row = db.prepare(`SELECT * FROM token_story WHERE id=?`).get(id);
+    if (!row) return res.status(404).json({ error: 'not-found' });
+    return res.json(row);
+  } catch (e) { return res.status(500).json({ error: 'db-error' }); }
+});
+
+// Mint event details
+app.get('/api/mint/:id', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  const id = parseInt(req.params.id, 10);
+  try {
+    const row = db.prepare(`SELECT * FROM mint_events WHERE token_id=?`).get(id);
+    return res.json(row || null);
+  } catch (e) { return res.status(500).json({ error: 'db-error' }); }
+});
+
+// Wallet relationships
+app.get('/api/wallet-relationships', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  const minTrades = Math.max(1, parseInt(req.query.min_trades || '3', 10));
+  try {
+    const rows = db.prepare(`SELECT * FROM wallet_relationships WHERE trade_count>=? ORDER BY trade_count DESC LIMIT 500`).all(minTrades);
+    return res.json({ relationships: rows });
+  } catch (e) { return res.status(500).json({ error: 'db-error' }); }
+});
+
+// Suspicious trades tokens summary
+app.get('/api/suspicious-trades', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  try {
+    const rows = db.prepare(`SELECT token_id, COUNT(1) AS hits FROM suspicious_trades GROUP BY token_id ORDER BY hits DESC LIMIT 500`).all();
+    return res.json({ tokens: rows });
+  } catch (e) { return res.status(500).json({ error: 'db-error' }); }
+});
+
 // API: Preset data for layouts (compact arrays for performance)
 app.get('/api/preset-data', (req, res) => {
   if (!haveDb || !db) return res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], tokenSaleCount: [], tokenLastSaleTs: [], tokenLastSalePrice: [], tokenHoldDays: [], ownerWalletType: [], ownerPnl: [], ownerBuyVol: [], ownerSellVol: [], ownerAvgHoldDays: [], ownerFlipRatio: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
@@ -567,6 +623,7 @@ app.get('/api/preset-data', (req, res) => {
     const tokenSaleCount = rows.map(r => r.sale_count ?? 0);
     const tokenLastSaleTs = rows.map(r => r.last_sale_ts ?? null);
     const tokenLastSalePrice = rows.map(r => r.last_sale_price ?? null);
+    const tokenLastBuyPrice = rows.map(r => r.last_buy_price ?? null);
     const tokenHoldDays = rows.map(r => r.hold_days ?? null);
 
     // trait frequencies and token dominant traitKey
@@ -625,9 +682,9 @@ app.get('/api/preset-data', (req, res) => {
       ownerFlipRatio[i] = m.flip_ratio ?? null;
     }
 
-    res.json({ owners, ownerIndex, ownerEthos, tokenLastActivity, tokenPrice, tokenSaleCount, tokenLastSaleTs, tokenLastSalePrice, tokenHoldDays, ownerWalletType, ownerPnl, ownerBuyVol, ownerSellVol, ownerAvgHoldDays, ownerFlipRatio, traitKeys, tokenTraitKey, rarity });
+    res.json({ owners, ownerIndex, ownerEthos, tokenLastActivity, tokenPrice, tokenSaleCount, tokenLastSaleTs, tokenLastSalePrice, tokenLastBuyPrice, tokenHoldDays, ownerWalletType, ownerPnl, ownerBuyVol, ownerSellVol, ownerAvgHoldDays, ownerFlipRatio, traitKeys, tokenTraitKey, rarity });
   } catch (e) {
-    res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], tokenSaleCount: [], tokenLastSaleTs: [], tokenLastSalePrice: [], tokenHoldDays: [], ownerWalletType: [], ownerPnl: [], ownerBuyVol: [], ownerSellVol: [], ownerAvgHoldDays: [], ownerFlipRatio: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
+    res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], tokenSaleCount: [], tokenLastSaleTs: [], tokenLastSalePrice: [], tokenLastBuyPrice: [], tokenHoldDays: [], ownerWalletType: [], ownerPnl: [], ownerBuyVol: [], ownerSellVol: [], ownerAvgHoldDays: [], ownerFlipRatio: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
   }
 });
 
@@ -884,6 +941,24 @@ app.get('/api/wallet/:address/meta', (req, res) => {
     }).catch(()=>{
       return res.json({ address: addr, ens_name: meta?.ens_name ?? null, ethos_score: null, ethos_credibility: null, social_verified: null, total_holdings: holdings, first_acquired: first, last_activity: last, trade_count: trades, buy_count: buyCount, sell_count: sellCount, buy_volume_tia: buyVol, sell_volume_tia: sellVol, realized_pnl_tia: (meta?.realized_pnl_tia ?? null), unrealized_pnl_tia: (meta?.unrealized_pnl_tia ?? null), avg_buy_tia: avgBuy, avg_sell_tia: avgSell, last_buy_ts: lastBuy ?? null, last_sell_ts: lastSell ?? null });
     });
+  } catch (e) {
+    return res.status(500).json({ error: 'db-error' });
+  }
+});
+
+// ENS/metadata resolution helper
+// GET /api/resolve?q=alextaa.eth -> { address }
+// Also accepts hex addresses and returns them unchanged for convenience
+app.get('/api/resolve', (req, res) => {
+  const q = (req.query.q || '').toString().trim();
+  if (!q) return res.status(400).json({ error: 'missing-q' });
+  const hex = /^0x[a-fA-F0-9]{40}$/.test(q);
+  if (hex) return res.json({ address: q.toLowerCase() });
+  if (!haveDb || !db) return res.status(404).json({ error: 'no-db' });
+  try {
+    const row = db.prepare('SELECT address FROM wallet_metadata WHERE LOWER(ens_name)=? OR ens_name=? LIMIT 1').get(q.toLowerCase(), q);
+    if (!row || !row.address) return res.status(404).json({ error: 'not-found' });
+    return res.json({ address: (row.address||'').toLowerCase() });
   } catch (e) {
     return res.status(500).json({ error: 'db-error' });
   }

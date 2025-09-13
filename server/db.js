@@ -125,8 +125,36 @@ export function runMigrations(db) {
       { name: 'price', ddl: 'ALTER TABLE transfers ADD COLUMN price REAL' },
       { name: 'tx_hash', ddl: 'ALTER TABLE transfers ADD COLUMN tx_hash TEXT' },
       { name: 'event_type', ddl: 'ALTER TABLE transfers ADD COLUMN event_type TEXT' },
+      { name: 'price_tia', ddl: 'ALTER TABLE transfers ADD COLUMN price_tia REAL' },
+      { name: 'price_usd', ddl: 'ALTER TABLE transfers ADD COLUMN price_usd REAL' },
+      { name: 'price_eth', ddl: 'ALTER TABLE transfers ADD COLUMN price_eth REAL' },
     ];
     for (const c of want) if (!cols.includes(c.name)) db.exec(c.ddl);
+  } catch {}
+
+  // New event tables: mint_events, token_events
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mint_events (
+        token_id INTEGER PRIMARY KEY,
+        minter_address TEXT,
+        mint_price REAL,
+        mint_timestamp INTEGER,
+        mint_type TEXT,
+        tx_hash TEXT,
+        gas_fee REAL
+      );
+      CREATE TABLE IF NOT EXISTS token_events (
+        token_id INTEGER,
+        event_type TEXT,
+        timestamp INTEGER,
+        reason TEXT,
+        tx_hash TEXT,
+        metadata TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_token_events_token ON token_events(token_id);
+      CREATE INDEX IF NOT EXISTS idx_token_events_type ON token_events(event_type);
+    `);
   } catch {}
 
   // Conditional columns for wallet_metadata links/social
@@ -166,7 +194,88 @@ export function runMigrations(db) {
       { name: 'last_acquired_ts', ddl: 'ALTER TABLE tokens ADD COLUMN last_acquired_ts INTEGER' },
       { name: 'last_buy_price', ddl: 'ALTER TABLE tokens ADD COLUMN last_buy_price REAL' },
       { name: 'hold_days', ddl: 'ALTER TABLE tokens ADD COLUMN hold_days REAL' },
+      { name: 'velocity', ddl: 'ALTER TABLE tokens ADD COLUMN velocity REAL' }
     ];
     for (const c of wantT) if (!colsT.includes(c.name)) db.exec(c.ddl);
+  } catch {}
+
+  // Listings fidelity columns
+  try {
+    const colsL = db.prepare(`PRAGMA table_info(listings)`).all().map(c => c.name);
+    const wantL = [
+      { name: 'failure_reason', ddl: 'ALTER TABLE listings ADD COLUMN failure_reason TEXT' },
+      { name: 'days_listed', ddl: 'ALTER TABLE listings ADD COLUMN days_listed INTEGER' },
+      { name: 'relist_count', ddl: 'ALTER TABLE listings ADD COLUMN relist_count INTEGER' }
+    ];
+    for (const c of wantL) if (!colsL.includes(c.name)) db.exec(c.ddl);
+  } catch {}
+
+  // Relationships + snapshots
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS wallet_relationships (
+        wallet_a TEXT,
+        wallet_b TEXT,
+        trade_count INTEGER,
+        total_volume REAL,
+        relationship_type TEXT,
+        PRIMARY KEY (wallet_a, wallet_b)
+      );
+      CREATE TABLE IF NOT EXISTS collection_snapshots (
+        timestamp INTEGER PRIMARY KEY,
+        floor_price REAL,
+        listed_count INTEGER,
+        unique_holders INTEGER,
+        volume_24h REAL,
+        sentiment_score REAL
+      );
+    `);
+  } catch {}
+
+  // Optional story view for quick aggregation
+  try {
+    db.exec(`
+      CREATE VIEW IF NOT EXISTS token_story AS
+      SELECT 
+        t.id,
+        t.name,
+        (SELECT mint_timestamp FROM mint_events m WHERE m.token_id=t.id) AS birth_date,
+        (SELECT mint_price FROM mint_events m WHERE m.token_id=t.id) AS birth_price,
+        (SELECT COUNT(DISTINCT from_addr) FROM transfers tr WHERE tr.token_id=t.id) AS total_owners,
+        (SELECT MAX(price) FROM transfers tr WHERE tr.token_id=t.id AND price IS NOT NULL) AS peak_price,
+        (SELECT MIN(price) FROM transfers tr WHERE tr.token_id=t.id AND price IS NOT NULL) AS lowest_price,
+        t.owner AS current_owner,
+        (SELECT wallet_type FROM wallet_metadata w WHERE LOWER(w.address)=LOWER(t.owner)) AS wallet_type,
+        (SELECT realized_pnl_tia FROM wallet_metadata w WHERE LOWER(w.address)=LOWER(t.owner)) AS realized_pnl_tia,
+        t.frozen, t.dormant,
+        CASE 
+          WHEN t.frozen=1 THEN 'FROZEN'
+          WHEN t.dormant=1 THEN 'DORMANT'
+          WHEN COALESCE(t.velocity,0) > 10 THEN 'HOT'
+          WHEN COALESCE(t.hold_days,0) > 365 THEN 'DIAMOND_HANDED'
+          ELSE 'NORMAL'
+        END AS status
+      FROM tokens t;
+    `);
+  } catch {}
+
+  // Suspicious trades (wash trades) view
+  try {
+    db.exec(`
+      CREATE VIEW IF NOT EXISTS suspicious_trades AS
+      SELECT 
+        t1.token_id,
+        t1.from_addr,
+        t1.to_addr,
+        COUNT(*) AS round_trips
+      FROM transfers t1
+      JOIN transfers t2
+        ON t1.token_id = t2.token_id
+       AND t1.to_addr = t2.from_addr
+       AND t1.from_addr = t2.to_addr
+       AND ABS(t1.timestamp - t2.timestamp) < 86400*7
+      GROUP BY t1.token_id, t1.from_addr, t1.to_addr
+      HAVING round_trips > 1;
+    `);
   } catch {}
 }

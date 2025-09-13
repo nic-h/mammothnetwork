@@ -22,7 +22,7 @@ const sidebar = document.getElementById('sidebar');
 const thumbEl = document.getElementById('thumb');
 const detailsEl = document.getElementById('details');
 
-let app, world, nodeContainer, circleTexture, edgesGfx, hullGfx, selectGfx;
+let app, world, nodeContainer, circleTexture, edgesGfx, hullGfx, selectGfx, fxGfx;
 let sprites = []; // PIXI.Sprite
 let nodes = [];   // server nodes
 let edgesData = [];
@@ -32,10 +32,18 @@ let preset = null;
 let presetData = null;
 let lastGraph = null;
 let lastSelectedWalletMeta = null;
+let rarityConstEdges = null; // cached constellation edges for traits view
 const PRESET_MODE = { ownership: 'holders', trading: 'transfers', whales: 'wallets', frozen: 'holders', rarity: null, social: 'holders' };
 let ethosMin = 0, ethosMax = 1;
 let ownerCounts = null;
 let highlightSet = null; // Set of ids currently highlighted by filter
+let washSet = null; // suspicious wash trade tokens
+let desireSet = null; // desire paths tokens
+// Spatial index
+let spatial = null; // { cell, map }
+// Layout transition helpers
+let layoutCapture = false; // when true, placeNode() collects into targetPositions instead of mutating sprites
+let targetPositions = null; // captured positions for transition
 // Centralized brand palette for colors
 const BRAND = {
   GREEN: 0x00ff66,
@@ -47,18 +55,18 @@ const BRAND = {
 };
 // Edge style mapping (lightweight, perf-friendly)
 const EDGE_STYLES = {
-  OWNERSHIP:      { kind:'solid',  width:1.0, color:BRAND.GREEN, opacity:0.9 },
-  RECENT_TRADE:   { kind:'solid',  width:0.8, color:0x00ffaa, opacity:0.8 },
-  OLD_TRADE:      { kind:'dashed', width:0.6, color:BRAND.GRAY, opacity:0.4 },
-  RARE_TRAIT:     { kind:'dotted', width:0.6, color:0xffaa00, opacity:0.7 },
-  HIGH_VALUE:     { kind:'solid',  width:1.0, color:BRAND.GOLD, opacity:1.0 },
-  SAME_WHALE:     { kind:'double', width:0.8, color:0x00ccff, opacity:0.7 },
-  // Transaction styles
-  SALE:           { kind:'arrow',  width:0.8, color:0xff3b3b, opacity:0.95 },
-  PURCHASE:       { kind:'arrow',  width:0.8, color:BRAND.GREEN, opacity:0.95 },
-  TRANSFER:       { kind:'dashed', width:0.6, color:0x00aaff, opacity:0.9 },
-  MINT:           { kind:'dotted', width:0.6, color:BRAND.WHITE, opacity:0.95 },
-  MULTI:          { kind:'solid',  width:1.0, color:BRAND.GOLD, opacity:0.95 },
+  OWNERSHIP:      { kind:'solid',  width:1.0,  color:BRAND.GREEN, opacity:0.9 },
+  RECENT_TRADE:   { kind:'solid',  width:1.0,  color:0xff3333,   opacity:0.95 }, // aligns to SALE recent
+  OLD_TRADE:      { kind:'dashed', width:0.6,  color:BRAND.GRAY, opacity:0.4 },
+  RARE_TRAIT:     { kind:'dotted', width:0.6,  color:0xffaa00,   opacity:0.8 },
+  HIGH_VALUE:     { kind:'solid',  width:1.5,  color:BRAND.GOLD, opacity:1.0 },
+  SAME_WHALE:     { kind:'double', width:0.8,  color:0x00ccff,   opacity:0.8 }, // ETHOS_LINK like
+  // Transaction styles (standardized)
+  SALE:           { kind:'arrow',  width:1.0,  color:0xff3333,   opacity:0.95 },
+  PURCHASE:       { kind:'arrow',  width:1.0,  color:BRAND.GREEN,opacity:0.95 },
+  TRANSFER:       { kind:'dashed', width:0.8,  color:0xffcc00,   opacity:0.9 },
+  MINT:           { kind:'dotted', width:0.6,  color:BRAND.WHITE,opacity:0.95 },
+  MULTI:          { kind:'solid',  width:1.0,  color:BRAND.GOLD, opacity:0.95 },
 };
 
 // Utils
@@ -93,6 +101,10 @@ async function init() {
   app.stage.addChildAt(gridGfx, 0);
   selectGfx = new PIXI.Graphics();
   world.addChild(selectGfx);
+  fxGfx = new PIXI.Graphics();
+  world.addChild(fxGfx);
+  fxGfx = new PIXI.Graphics();
+  world.addChild(fxGfx);
   circleTexture = makeCircleTexture(app.renderer, 4, BRAND.GREEN);
 
   // Resize to grid cell
@@ -114,6 +126,14 @@ async function init() {
     new ResizeObserver(()=>{ try { drawGrid(); drawEdges(); clampWorldToContent(40); } catch {} }).observe(obsEl);
   } catch {}
   drawGrid();
+  // Animation ticker for trading dashed offsets and FX
+  try {
+    let acc=0; app.ticker.add((dt)=>{
+      acc += dt/60; if (acc>0.12){ acc=0; if (preset==='trading' && (ambientEdgesEl?.checked??true) && (world?.scale?.x||1) >= 0.35 && selectedIndex<0){ drawEdges(); } }
+      updateFx(dt);
+    });
+  } catch {}
+  // (removed duplicate ticker)
 
   // Load data and start (prefer ownership hierarchy by default)
   modeEl.value = 'holders';
@@ -126,7 +146,7 @@ async function init() {
   modeEl.addEventListener('change', ()=> load(modeEl.value, Number(edgesEl?.value||200)));
   // Layer toggles -> redraw edges and overlay
   try {
-    const ids = ['layer-ownership','layer-trades','layer-traits','layer-value','layer-sales','layer-transfers','layer-mints'];
+    const ids = ['layer-ownership','layer-trades','layer-traits','layer-value','layer-sales','layer-transfers','layer-mints','layer-bubbles','layer-wash','layer-desire'];
     ids.forEach(id=>{
       const el = document.getElementById(id);
       if (el){
@@ -136,6 +156,8 @@ async function init() {
           el.dataset.bound='1';
           el.addEventListener('change', ()=>{
             const r = el.closest('.layer-toggle'); if (r) r.classList.toggle('active', !!el.checked);
+            if (el.id==='layer-wash' && el.checked && !washSet) fetchWash();
+            if (el.id==='layer-desire' && el.checked && !desireSet) fetchDesire();
             drawEdges(); updateSelectionOverlay();
           });
         }
@@ -175,6 +197,22 @@ async function init() {
     if(e.key!=='Enter') return;
     const val = searchEl.value.trim();
     searchEl.value='';
+    // ENS resolution
+    if(/\.eth$/i.test(val)){
+      try {
+        const r = await fetch(`/api/resolve?q=${encodeURIComponent(val)}`).then(x=>x.json());
+        if (r && r.address){
+          const rr = await fetch(`/api/wallet/${r.address}`).then(x=>x.json());
+          const ids = new Set((rr.tokens||[]).map(Number));
+          for(let i=0;i<sprites.length;i++){
+            const tid = sprites[i].__tokenId;
+            const show = ids.has(Number(tid));
+            sprites[i].alpha = show?0.95:0.08;
+          }
+          return;
+        }
+      } catch {}
+    }
     if(/^0x[a-fA-F0-9]{40}$/.test(val)){
       try {
         const r = await fetch(`/api/wallet/${val}`).then(x=>x.json());
@@ -227,12 +265,12 @@ async function init() {
       });
     });
   } catch {}
-  // Default view: OWNERSHIP with cluster layout
+  // Default view: OWNERSHIP with solar layout
   try { document.querySelector('.preset-btn[data-preset="ownership"]').classList.add('active'); } catch {}
   preset = 'ownership';
   await ensurePresetData();
   applyPreset('ownership');
-  layoutClusters();
+  layoutOwnershipSolar();
   if (legendEl) legendEl.textContent = 'Whale clusters center • Size = holdings • Green=profit • Red=loss • Cyan=high reputation';
   resetAlpha();
   resetView();
@@ -248,6 +286,13 @@ async function init() {
   const viewEl = document.getElementById('view');
   if (viewEl && !viewEl.dataset.bound) {
     viewEl.dataset.bound = '1';
+    // Tab buttons sync
+    try {
+      const tabs = Array.from(document.querySelectorAll('.tab-btn'));
+      const setActive = (val)=>{ tabs.forEach(b=> b.classList.toggle('active', b.dataset.view===val)); };
+      setActive(viewEl.value);
+      tabs.forEach(btn=> btn.addEventListener('click', ()=>{ const v=btn.dataset.view; if (!v) return; setActive(v); viewEl.value=v; viewEl.dispatchEvent(new Event('change')); }));
+    } catch {}
     viewEl.addEventListener('change', async ()=>{
       const v = viewEl.value;
       const edges = Number(edgesEl?.value||200);
@@ -261,7 +306,10 @@ async function init() {
         preset = 'ownership';
         await ensurePresetData();
         applyPreset('ownership');
-        layoutClusters();
+        // Transition to ownership layout
+        layoutCapture = true; targetPositions = new Array(sprites.length);
+        layoutOwnershipSolar();
+        layoutCapture = false; enforceSeparationPositions(targetPositions, 10, 1); animateToTargets(300);
         setLegend('ownership');
         rel?.classList.add('open'); trx?.classList.remove('open'); anal?.classList.remove('open');
       } else if (v === 'trading') {
@@ -270,17 +318,23 @@ async function init() {
         preset = 'trading';
         await ensurePresetData();
         applyPreset('trading');
+        layoutCapture = true; targetPositions = new Array(sprites.length);
         layoutPreset('trading');
+        layoutCapture = false; enforceSeparationPositions(targetPositions, 9, 1); animateToTargets(300);
         setLegend('trading');
         rel?.classList.remove('open'); trx?.classList.add('open'); anal?.classList.remove('open');
+        rarityConstEdges = null;
       } else if (v === 'traits') {
         modeEl.value = 'traits';
         await load('traits', edges);
         preset = 'rarity';
         await ensurePresetData();
         applyPreset('rarity');
+        layoutCapture = true; targetPositions = new Array(sprites.length);
         layoutPreset('rarity');
+        layoutCapture = false; enforceSeparationPositions(targetPositions, 8, 1); animateToTargets(300);
         setLegend('rarity');
+        try { rarityConstEdges = computeConstellationEdges(300); } catch { rarityConstEdges = null; }
         rel?.classList.add('open'); trx?.classList.remove('open'); anal?.classList.add('open');
         document.querySelector('.traits-section')?.classList.add('open');
       } else if (v === 'whales') {
@@ -289,7 +343,9 @@ async function init() {
         preset = 'whales';
         await ensurePresetData();
         applyPreset('whales');
+        layoutCapture = true; targetPositions = new Array(sprites.length);
         layoutPreset('whales');
+        layoutCapture = false; enforceSeparationPositions(targetPositions, 10, 1); animateToTargets(300);
         setLegend('whales');
         rel?.classList.add('open'); trx?.classList.add('open'); anal?.classList.remove('open');
         document.querySelector('.traits-section')?.classList.remove('open');
@@ -299,7 +355,9 @@ async function init() {
         preset = 'frozen';
         await ensurePresetData();
         applyPreset('frozen');
+        layoutCapture = true; targetPositions = new Array(sprites.length);
         layoutPreset('frozen');
+        layoutCapture = false; enforceSeparationPositions(targetPositions, 9, 1); animateToTargets(300);
         setLegend('frozen');
         rel?.classList.add('open'); trx?.classList.add('open'); anal?.classList.add('open');
         document.querySelector('.traits-section')?.classList.remove('open');
@@ -308,6 +366,8 @@ async function init() {
       resetView();
     });
   }
+
+  // Tab buttons sync
 
   // Click handlers for collapsibles (traits and edge groups) and view tip
   try {
@@ -390,12 +450,39 @@ async function init() {
       });
     }
   } catch {}
+
+  // Compute constellation edges once when entering traits view
+  function computeConstellationEdges(maxEdges=300){
+    const tk = presetData?.tokenTraitKey || [];
+    if (!tk.length) return [];
+    // frequency
+    const freq = new Map(); for (let i=0;i<tk.length;i++){ const k=tk[i]; if (k>=0) freq.set(k,(freq.get(k)||0)+1); }
+    const groups = new Map();
+    for (let i=0;i<tk.length;i++){ const k=tk[i]; if (k<0) continue; const f=freq.get(k)||0; if (f>=3 && f<=30){ if (!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); } }
+    const edges = [];
+    for (const [k, list] of groups){
+      if (list.length<3) continue;
+      // centroid
+      let sx=0, sy=0; for (const i of list){ sx+=sprites[i].x; sy+=sprites[i].y; }
+      const cx=sx/list.length, cy=sy/list.length;
+      // sort by angle and connect ring
+      const ordered = list.map(i=>({i, ang: Math.atan2(sprites[i].y-cy, sprites[i].x-cx)})).sort((a,b)=>a.ang-b.ang).map(o=>o.i);
+      for (let j=0;j<ordered.length && edges.length<maxEdges; j++){
+        const a = ordered[j], b = ordered[(j+1)%ordered.length];
+        edges.push([a,b]);
+        if (edges.length>=maxEdges) break;
+      }
+      if (edges.length>=maxEdges) break;
+    }
+    return edges;
+  }
 }
 
 async function load(mode, edges){
   const data = await fetchGraph(mode, edges).catch(()=> lastGraph || {nodes:[],edges:[]});
   nodes = data.nodes||[]; edgesData = data.edges||[];
   buildSprites(nodes.map(n=>n.color||BRAND.GREEN));
+  rebuildSpatial();
   if (mode === 'transfers') {
   try {
     const det = await fetch(`/api/transfer-edges?limit=${encodeURIComponent(edges||200)}&nodes=10000`, { cache:'no-store' }).then(r=>r.json());
@@ -419,6 +506,7 @@ async function load(mode, edges){
   }
   // No physics: static grid layout
   layoutGrid();
+  rebuildSpatial();
   resetView();
   // Traits list (build groups)
   await loadTraits();
@@ -427,11 +515,12 @@ async function load(mode, edges){
     await ensurePresetData();
     applyPreset(preset);
   }
+  rebuildSpatial();
 }
 
 async function fetchGraph(mode, edges){
-  const q = new URLSearchParams({ mode, edges:String(edges), nodes:'10000', v: String(Date.now()) });
-  const r = await fetch(`/api/graph?${q}`, { cache: 'no-store' }).catch(()=>null);
+  const q = new URLSearchParams({ mode, edges:String(edges), nodes:'10000' });
+  const r = await fetch(`/api/graph?${q}`, { cache: 'default' }).catch(()=>null);
   if(!r) throw new Error('graph fetch failed');
   if (r.status === 304) { if (!lastGraph) throw new Error('not-modified'); return lastGraph; }
   if(!r.ok) throw new Error('graph fetch failed');
@@ -472,66 +561,129 @@ function layoutGrid(){
   const ox = -w/2, oy = -h/2;
   for (let i=0;i<n;i++){
     const c = i % cols; const r = Math.floor(i / cols);
-    sprites[i].x = ox + c*gap + app.renderer.width/2;
-    sprites[i].y = oy + r*gap + app.renderer.height/2;
+    placeNode(i, ox + c*gap + app.renderer.width/2, oy + r*gap + app.renderer.height/2);
   }
+  enforceSeparation(Math.max(8, gap*0.9));
   drawEdges();
   clearSelectionOverlay();
 }
 
-// Organic ownership clusters (hierarchical hubs)
-function layoutClusters(){
+// Lightweight non-overlap relaxer using spatial hashing (grid-based)
+function enforceSeparation(minDist=10, passes=2){
+  try{
+    const cell = Math.max(6, Math.floor(minDist));
+    for (let p=0; p<passes; p++){
+      const map = new Map();
+      for (let i=0;i<sprites.length;i++){
+        const s = sprites[i];
+        const gx = Math.floor(s.x / cell), gy = Math.floor(s.y / cell);
+        const key = gx+','+gy;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(i);
+      }
+      for (const [key, list] of map){
+        const [gx,gy] = key.split(',').map(Number);
+        // neighbor cells including self
+        for (let dx=-1; dx<=1; dx++) for (let dy=-1; dy<=1; dy++){
+          const nb = map.get((gx+dx)+","+(gy+dy)); if (!nb) continue;
+          for (let a of list){ for (let b of nb){ if (b<=a) continue; const sa=sprites[a], sb=sprites[b]; const dx2=sb.x-sa.x, dy2=sb.y-sa.y; const d2=dx2*dx2+dy2*dy2; if (d2>0 && d2 < minDist*minDist){ const d=Math.sqrt(d2); const push=(minDist-d)/2; const ux=dx2/d, uy=dy2/d; sa.x-=ux*push; sa.y-=uy*push; sb.x+=ux*push; sb.y+=uy*push; } } }
+        }
+      }
+    }
+  } catch {}
+}
+
+// Assign or capture a node position (used by transitions)
+function placeNode(i, x, y){
+  if (layoutCapture){ if (!targetPositions) targetPositions = new Array(sprites.length); targetPositions[i] = {x,y}; }
+  else { const s = sprites[i]; s.x = x; s.y = y; }
+}
+
+function enforceSeparationPositions(pos, minDist=10, passes=1){
+  try{
+    const cell = Math.max(6, Math.floor(minDist));
+    for (let p=0;p<passes;p++){
+      const map = new Map();
+      for (let i=0;i<pos.length;i++){ const pt=pos[i]; if (!pt) continue; const gx=Math.floor(pt.x/cell), gy=Math.floor(pt.y/cell); const key=gx+','+gy; if (!map.has(key)) map.set(key,[]); map.get(key).push(i); }
+      for (const [key, list] of map){ const [gx,gy]=key.split(',').map(Number); for (let dx=-1;dx<=1;dx++) for (let dy=-1;dy<=1;dy++){ const nb=map.get((gx+dx)+','+(gy+dy)); if (!nb) continue; for (const a of list){ for (const b of nb){ if (b<=a) continue; const pa=pos[a], pb=pos[b]; if (!pa||!pb) continue; const dx2=pb.x-pa.x, dy2=pb.y-pa.y; const d2=dx2*dx2+dy2*dy2; if (d2>0 && d2<minDist*minDist){ const d=Math.sqrt(d2); const push=(minDist-d)/2; const ux=dx2/d, uy=dy2/d; pa.x-=ux*push; pa.y-=uy*push; pb.x+=ux*push; pb.y+=uy*push; } } } }
+      }
+    }
+  } catch {}
+}
+
+function animateToTargets(duration=300){
+  if (!targetPositions) return;
+  const starts = sprites.map(s=>({x:s.x,y:s.y}));
+  const t0 = performance.now ? performance.now() : Date.now();
+  const ease = t=> t<0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
+  const tick = ()=>{
+    const now = performance.now ? performance.now() : Date.now();
+    const u = Math.min(1, (now - t0)/duration);
+    const e = ease(u);
+    for (let i=0;i<sprites.length;i++){ const to=targetPositions[i]; if (!to) continue; const st=starts[i]; sprites[i].x = st.x + (to.x - st.x)*e; sprites[i].y = st.y + (to.y - st.y)*e; }
+    drawEdges();
+    if (u<1) requestAnimationFrame(tick); else { targetPositions=null; }
+  };
+  requestAnimationFrame(tick);
+}
+
+function rebuildSpatial(cell=24){
+  try {
+    spatial = { cell, map: new Map() };
+    for (let i=0;i<sprites.length;i++){
+      const s = sprites[i]; const gx=Math.floor(s.x/cell), gy=Math.floor(s.y/cell); const key=gx+','+gy;
+      if (!spatial.map.has(key)) spatial.map.set(key, []);
+      spatial.map.get(key).push(i);
+    }
+  } catch {}
+}
+function querySpatial(x, y, radius){
+  if (!spatial || !spatial.map) return [...Array(sprites.length).keys()];
+  const cell = spatial.cell; const gx=Math.floor(x/cell), gy=Math.floor(y/cell); const r=Math.ceil(radius/cell);
+  const out=[]; for (let dx=-r; dx<=r; dx++) for (let dy=-r; dy<=r; dy++){ const key=(gx+dx)+','+(gy+dy); const a=spatial.map.get(key); if (a) out.push(...a); }
+  return out;
+}
+
+// Ownership solar layout defined below (replaces old clusters)
+function layoutOwnershipSolar(){
   const n = sprites.length; if (!n) return;
   const ownerIdxArr = presetData?.ownerIndex || [];
-  const ownerMap = new Map();
-  for (let i=0;i<n;i++){
-    const oi = ownerIdxArr[i] ?? -1;
-    if (oi>=0){ if (!ownerMap.has(oi)) ownerMap.set(oi, []); ownerMap.get(oi).push(i); }
-  }
-  const owners = Array.from(ownerMap.entries()).sort((a,b)=> (b[1].length - a[1].length));
+  const byOwner = new Map();
+  for (let i=0;i<n;i++){ const oi = ownerIdxArr[i] ?? -1; if (oi>=0){ if (!byOwner.has(oi)) byOwner.set(oi, []); byOwner.get(oi).push(i); } }
+  const owners = Array.from(byOwner.entries()).sort((a,b)=> (b[1].length - a[1].length));
   const cx = app.renderer.width/2, cy = app.renderer.height/2;
-  owners.forEach(([oi, tokens], ownerIdx)=>{
-    const holdings = tokens.length;
-    const isWhale = holdings > 20;
-    const isMedium = holdings > 5;
-    let hubX, hubY;
-    if (ownerIdx < 5 && isWhale){
-      const angle = (ownerIdx / 5) * Math.PI * 2;
-      hubX = cx + Math.cos(angle) * 150;
-      hubY = cy + Math.sin(angle) * 150;
-    } else if (ownerIdx < 20 && isMedium){
-      const angle = (ownerIdx / 20) * Math.PI * 2;
-      hubX = cx + Math.cos(angle) * 350;
-      hubY = cy + Math.sin(angle) * 350;
+  const whaleCount = Math.min(5, owners.length);
+  const hubs = new Map();
+  for (let k=0; k<owners.length; k++){
+    const [oi, idxs] = owners[k]; const hold = idxs.length;
+    let hx, hy;
+    if (k < whaleCount && hold > 20){
+      const ang = (k / whaleCount) * Math.PI*2 - Math.PI/2;
+      hx = cx + Math.cos(ang) * 180; hy = cy + Math.sin(ang) * 160;
+    } else if (hold > 5){
+      const ang = (k / Math.max(8, owners.length)) * Math.PI*2;
+      hx = cx + Math.cos(ang) * 380; hy = cy + Math.sin(ang) * 320;
     } else {
-      const angle = (ownerIdx / Math.max(1, owners.length)) * Math.PI * 2;
-      const radius = 500 + (ownerIdx % 3) * 100;
-      hubX = cx + Math.cos(angle) * radius;
-      hubY = cy + Math.sin(angle) * radius;
+      const ang = (k / Math.max(12, owners.length)) * Math.PI*2;
+      const r  = 520 + (k%5)*60; hx = cx + Math.cos(ang) * r; hy = cy + Math.sin(ang) * r;
     }
-    // Arrange tokens around hub
-    tokens.forEach((ti, i) => {
-      const sp = sprites[ti];
-      if (!sp) return;
-      if (i === 0){
-        sp.x = hubX; sp.y = hubY; sp.scale.set(isWhale?2.0:(isMedium?1.5:1.0));
-      } else {
-        const level = Math.floor(Math.log2(i + 1));
-        const levelAngle = (i / Math.max(1, tokens.length)) * Math.PI * 2;
-        const branchRadius = 30 + level * 25;
-        sp.x = hubX + Math.cos(levelAngle) * branchRadius;
-        sp.y = hubY + Math.sin(levelAngle) * branchRadius;
-        sp.scale.set(0.8);
+    hubs.set(oi, {x:hx,y:hy,hold});
+  }
+  for (const [oi, idxs] of owners){
+    const hub = hubs.get(oi); if (!hub) continue; const hold = idxs.length;
+    let orbitBase = hold>20? 26 : hold>5? 18 : 12;
+    for (let i=0;i<idxs.length;i++){
+      const sp = sprites[idxs[i]]; if (!sp) continue;
+      if (i===0){ placeNode(idxs[i], hub.x, hub.y); sp.scale.set(hold>50?3.0:(hold>20?2.2:(hold>5?1.5:1.0))); }
+      else {
+        const level = Math.floor(Math.log2(i+1)); const ang = ((i*0.618)%1) * Math.PI*2; const rad = orbitBase + level * (hold>20? 20:14);
+        placeNode(idxs[i], hub.x + Math.cos(ang) * rad, hub.y + Math.sin(ang) * rad); sp.scale.set(0.8);
       }
-      // Color by wallet metrics
-      const ethos = presetData?.ownerEthos?.[oi] ?? null;
-      const pnl = presetData?.ownerPnl?.[oi] ?? 0;
-      if (pnl > 0) sp.tint = 0x00ff66;
-      else if (pnl < 0) sp.tint = 0xff6644;
-      else if (ethos && ethos > 1500) sp.tint = 0x66ddff;
-      else sp.tint = 0x888888;
-    });
-  });
+      const ethos = presetData?.ownerEthos?.[oi] ?? null; const pnl = presetData?.ownerPnl?.[oi] ?? 0;
+      if (pnl > 0) sp.tint = 0x00ff66; else if (pnl < 0) sp.tint = 0xff6644; else if (ethos && ethos > 1500) sp.tint = 0x66ddff; else sp.tint = 0x227744;
+    }
+  }
+  enforceSeparation(10);
   drawEdges();
 }
 
@@ -540,6 +692,7 @@ function drawEdges(){
     const maxDraw = 500;
     edgesGfx.clear();
     try { hullGfx.clear(); } catch {}
+    try { if (fxGfx) fxGfx.clear(); } catch {}
     const s = world?.scale?.x || 1;
     // LOD: keep edges visible more often; only skip when very far out
     if (s < 0.35) return;
@@ -548,6 +701,48 @@ function drawEdges(){
     // Ambient toggle: when off, skip drawing ambient edges
     if (ambientEdgesEl && !ambientEdgesEl.checked) return;
     const mode = modeEl?.value || 'holders';
+    // Draw trading heat bands in hull layer for readability
+    if (preset === 'trading'){
+      try {
+        const pad = 80; const bands = 5;
+        // compute world-space rect covering the viewport
+        const w = app.renderer.width, h = app.renderer.height;
+        const x1 = (pad - world.position.x) / s;
+        const x2 = ((w - pad) - world.position.x) / s;
+        const y1 = (pad - world.position.y) / s;
+        const y2 = ((h - pad) - world.position.y) / s;
+        const bh = (y2 - y1) / bands;
+        for (let i=0;i<bands;i++){
+          const yb = y1 + i*bh;
+          const alpha = 0.04 + (i%2?0.02:0);
+          hullGfx.beginFill(0x00ff66, alpha);
+          hullGfx.drawRect(x1, yb, (x2-x1), bh*0.9);
+          hullGfx.endFill();
+        }
+      } catch {}
+    }
+    // Constellation lines in traits mode (precomputed pairs)
+    if (preset === 'rarity' && Array.isArray(rarityConstEdges) && rarityConstEdges.length){
+      try {
+        for (let k=0;k<rarityConstEdges.length;k++){
+          const [i,j] = rarityConstEdges[k];
+          const x1 = sprites[i].x, y1 = sprites[i].y; const x2 = sprites[j].x, y2 = sprites[j].y;
+          lineDashed(hullGfx, x1, y1, x2, y2, { width:0.8, color:0xffd700, opacity:0.6 }, 4, 4, 0);
+        }
+      } catch {}
+    }
+    // Overlay markers: wash trades (red ring) and desire paths (gold star)
+    try {
+      const showWash = !!document.getElementById('layer-wash')?.checked;
+      const showDesire = !!document.getElementById('layer-desire')?.checked;
+      if (fxGfx && (showWash || showDesire)){
+        for (let i=0;i<sprites.length;i++){
+          const tid = sprites[i].__tokenId;
+          if (showWash && washSet && washSet.has(Number(tid))){ fxGfx.lineStyle({ width:1.5, color:0xff3333, alpha:0.95 }); fxGfx.drawCircle(sprites[i].x, sprites[i].y, 11); }
+          if (showDesire && desireSet && desireSet.has(Number(tid))){ drawStar(fxGfx, sprites[i].x+10, sprites[i].y-10, 5, BRAND.GOLD); }
+        }
+      }
+    } catch {}
     // Ownership: draw optional hulls (desktop-only, ambient-gated), then hub→child tree edges
     if (mode === 'holders'){
       // Hulls: only on desktop (hover:fine) and when ambient edges are enabled, and when no selection
@@ -603,6 +798,42 @@ function drawEdges(){
         strokeEdge(edgesGfx, x1, y1, x2, y2, style);
       }
     }
+  } catch {}
+}
+
+// FX: simple bubbles for whales tier (recent activity)
+let bubbles = [];
+function updateFx(dt){
+  try {
+    if (!fxGfx) return;
+    fxGfx.clear();
+    if (preset !== 'whales') return;
+    const bubblesOn = !!document.getElementById('layer-bubbles')?.checked;
+    if (!bubblesOn) return;
+    // Spawn lightly
+    if (Math.random() < 0.12) spawnBubble();
+    // Update
+    const toKeep = [];
+    for (let i=0;i<bubbles.length;i++){
+      const b = bubbles[i]; b.y -= b.vy; b.alpha -= 0.005; b.r += 0.02; if (b.alpha>0.02){ toKeep.push(b); }
+      fxGfx.lineStyle({ width:1, color:0x66ddff, alpha:Math.max(0, b.alpha) });
+      fxGfx.drawCircle(b.x, b.y, b.r);
+    }
+    bubbles = toKeep.slice(0, 100);
+  } catch {}
+}
+function spawnBubble(){
+  try {
+    const ownerIndex = presetData?.ownerIndex || []; const tokenLast = presetData?.tokenLastActivity || [];
+    const counts = ownerCounts || [];
+    const whales = [];
+    const vols = {}; // owner volume weighting
+    const buy = presetData?.ownerBuyVol || []; const sell = presetData?.ownerSellVol || [];
+    for (let i=0;i<ownerIndex.length;i++){ const oi=ownerIndex[i]; if (oi>=0 && (counts[oi]||0)>50){ const last=tokenLast[i]||0; const days = last? ((Date.now()/1000 - last)/86400) : 999; if (days<30){ whales.push(i); const v=(buy[oi]||0)+(sell[oi]||0); vols[oi]=v; } } }
+    if (!whales.length) return;
+    const pick = whales[Math.floor(Math.random()*whales.length)]; const s = sprites[pick]; if (!s) return;
+    const oi = ownerIndex[pick]; const weight = Math.min(1, ((vols[oi]||0)/Math.max(1, Math.max(...Object.values(vols)||[1]))));
+    bubbles.push({ x:s.x + (Math.random()-0.5)*6, y:s.y - 6, vy: 0.6+Math.random()*0.8*weight, r: 2+Math.random()*2, alpha: 0.4+0.5*weight });
   } catch {}
 }
 
@@ -670,8 +901,10 @@ function strokeEdge(g, x1, y1, x2, y2, st){
     lineSolid(g, x1+ox, y1+oy, x2+ox, y2+oy, s);
     return;
   }
-  if (s.kind === 'dashed') return lineDashed(g, x1, y1, x2, y2, { ...s, width: baseW }, 8, 6);
-  if (s.kind === 'dotted') return lineDashed(g, x1, y1, x2, y2, { ...s, width: baseW }, 2, 4);
+  const t = (performance.now? performance.now(): Date.now()) * 0.001;
+  const offset = (preset==='trading') ? (t*40) : 0;
+  if (s.kind === 'dashed') return lineDashed(g, x1, y1, x2, y2, { ...s, width: baseW }, 8, 6, offset);
+  if (s.kind === 'dotted') return lineDashed(g, x1, y1, x2, y2, { ...s, width: baseW }, 2, 4, offset);
   if (s.kind === 'arrow')  return lineArrow(g, x1, y1, x2, y2, { ...s, width: baseW });
   return lineSolid(g, x1, y1, x2, y2, { ...s, width: baseW });
 }
@@ -681,7 +914,7 @@ function lineSolid(g, x1, y1, x2, y2, s){
   g.moveTo(x1, y1); g.lineTo(x2, y2);
 }
 
-function lineDashed(g, x1, y1, x2, y2, s, dash=6, gap=4){
+function lineDashed(g, x1, y1, x2, y2, s, dash=6, gap=4, offset=0){
   const dx = x2-x1, dy = y2-y1; const len = Math.hypot(dx,dy);
   const ux = dx/len, uy = dy/len;
   // Keep dash pattern legible across zoom levels
@@ -689,7 +922,9 @@ function lineDashed(g, x1, y1, x2, y2, s, dash=6, gap=4){
   const d = Math.max(4, dash * (1/z));
   const gsz = Math.max(3, gap * (1/z));
   g.lineStyle({ width:s.width||0.8, color:s.color||BRAND.GRAY, alpha:s.opacity??0.7, cap:'butt' });
-  let dist = 0; let on=true; let cx=x1, cy=y1;
+  let dist = ((offset % (d+gsz)) + (d+gsz)) % (d+gsz);
+  let cx = x1 + ux*dist, cy = y1 + uy*dist;
+  let on=true;
   while (dist < len){
     const step = on? d : gsz; const nx = cx + ux*step; const ny = cy + uy*step;
     if (on){ g.moveTo(cx, cy); g.lineTo(Math.min(nx, x2), Math.min(ny, y2)); }
@@ -710,6 +945,14 @@ function lineArrow(g, x1, y1, x2, y2, s){
   g.lineStyle({ width:w, color:s.color||BRAND.RED, alpha:s.opacity??0.95, join:'miter' });
   g.moveTo(x2, y2); g.lineTo(bx + nx*(size*0.4), by + ny*(size*0.4));
   g.moveTo(x2, y2); g.lineTo(bx - nx*(size*0.4), by - ny*(size*0.4));
+  // Pulse overlay for trading view
+  try {
+    if (preset==='trading'){
+      const t = (performance.now? performance.now(): Date.now()) * 0.001;
+      const offset = (t*80) % Math.max(8, len*0.2);
+      lineDashed(g, x1, y1, x2, y2, { width: Math.max(0.6, w*0.6), color: 0xffaa66, opacity: 0.9 }, 6, 10, offset);
+    }
+  } catch {}
 }
 
 function clearSelectionOverlay(){ selectGfx?.clear?.(); }
@@ -938,10 +1181,34 @@ async function selectNode(index){
       <div class='label'>Similar by Traits</div>
       <div class='chip-row' id='chips-sim-adv'>${advChips||''}</div>
     `;
-    // chip events
-    detailsEl.querySelectorAll('.chip').forEach(el=> el.addEventListener('click', ()=>{ const tok = Number(el.dataset.token); const idx = idToIndex.get(tok); if (idx!=null) selectNode(idx); }));
-    const closeBtn = document.getElementById('close-detail'); if (closeBtn) closeBtn.onclick = ()=>{ selectedIndex=-1; clearSelectionOverlay(); detailsEl.innerHTML='Select a node…'; thumbEl.style.display='none'; resetAlpha(); };
-    // No background ETHOS injection; details already gated to real profiles
+  // chip events
+  detailsEl.querySelectorAll('.chip').forEach(el=> el.addEventListener('click', ()=>{ const tok = Number(el.dataset.token); const idx = idToIndex.get(tok); if (idx!=null) selectNode(idx); }));
+  const closeBtn = document.getElementById('close-detail'); if (closeBtn) closeBtn.onclick = ()=>{ selectedIndex=-1; clearSelectionOverlay(); detailsEl.innerHTML='Select a node…'; thumbEl.style.display='none'; resetAlpha(); };
+  // No background ETHOS injection; details already gated to real profiles
+    // Append STORY card
+    try {
+      const story = await fetch(`/api/token/${id}/story`).then(r=>r.ok?r.json():null).catch(()=>null);
+      if (story){
+        const birth = story.birth_date ? (timeAgo(Number(story.birth_date)*1000)+' ago') : '--';
+        const owners = story.total_owners ?? '--';
+        const peak = story.peak_price!=null? fmtAmt(Number(story.peak_price)) : '--';
+        const low  = story.lowest_price!=null? fmtAmt(Number(story.lowest_price)) : '--';
+        const status = story.status || '';
+        const html = `
+          <div class='section-label'>STORY</div>
+          <div class='card2'>
+            <div class='card'><div class='label'>BIRTH</div><div class='big-number'>${birth}</div><div class='small-meta'>Mint</div></div>
+            <div class='card'><div class='label'>OWNERS</div><div class='big-number'>${owners}</div><div class='small-meta'>Distinct holders</div></div>
+          </div>
+          <div class='card2'>
+            <div class='card'><div class='label'>PEAK</div><div class='big-number'>${peak}</div></div>
+            <div class='card'><div class='label'>LOW</div><div class='big-number'>${low}</div></div>
+          </div>
+          <div class='card'><div class='label'>STATUS</div><div class='big-number'>${status}</div></div>
+        `;
+        detailsEl.insertAdjacentHTML('beforeend', html);
+      }
+    } catch {}
   } catch (e) {
     try {
       // Minimal, never-fail fallback details rendering
@@ -965,18 +1232,20 @@ function updateSelectionOverlay(){
   selectGfx.clear();
   const idx = selectedIndex; if (idx<0 || idx>=sprites.length) return;
   const s = sprites[idx];
-  // ring with subtle glow
+  // Wide, fine selection target ring + inner glow
+  selectGfx.lineStyle({ width: 1, color: BRAND.WHITE, alpha: 0.9, cap: 'round', join: 'round' });
+  selectGfx.drawCircle(s.x, s.y, 18);
   selectGfx.lineStyle({ width: 2, color: BRAND.GREEN, alpha: 1, cap: 'round', join: 'round' });
-  selectGfx.drawCircle(s.x, s.y, 8);
-  selectGfx.lineStyle({ width: 6, color: BRAND.GREEN, alpha: 0.15 });
-  selectGfx.drawCircle(s.x, s.y, 10);
+  selectGfx.drawCircle(s.x, s.y, 9);
+  selectGfx.lineStyle({ width: 6, color: BRAND.GREEN, alpha: 0.12 });
+  selectGfx.drawCircle(s.x, s.y, 11);
   // node indicators: ethos ring (gold) if high ethos; whale ring (cyan dashed) if large holdings
   const i = idx;
   try {
     const oi = presetData?.ownerIndex?.[i] ?? -1;
     const ethos = (oi>=0)? (presetData?.ownerEthos?.[oi] ?? null) : null;
     const high = (typeof ethos==='number' && ethos > (ethosMin + (ethosMax-ethosMin)*0.8));
-  if (high){ selectGfx.lineStyle({ width:2, color:BRAND.GOLD, alpha:1 }); selectGfx.drawCircle(s.x, s.y, 12); }
+  if (high){ selectGfx.lineStyle({ width:2, color:BRAND.GOLD, alpha:1 }); selectGfx.drawCircle(s.x, s.y, 14); }
     if (ownerCounts && oi>=0){
       const hold = ownerCounts[oi] || 0; const maxHold = Math.max(...ownerCounts);
       if (hold >= Math.max(5, maxHold*0.5)){
@@ -1231,6 +1500,11 @@ function applyPreset(p){
       default:
         sprites[i].tint = nodes[i]?.color||BRAND.GREEN;
     }
+    // Status override: frozen -> blue, dormant -> gray, active -> existing tint
+    try {
+      const n = nodes[i]||{};
+      if (n.frozen) sprites[i].tint = BRAND.BLUE; else if (n.dormant) sprites[i].tint = BRAND.GRAY;
+    } catch {}
   }
 }
 
@@ -1244,6 +1518,14 @@ function hslToRgb(h, s, l){
 
 function prng(i){ // simple deterministic jitter
   let x = (i+1) * 1103515245 + 12345; x = (x>>>0) / 4294967296; return x - Math.floor(x);
+}
+
+// Lightweight value noise for layout shaping
+function noise2(x, y){
+  const n1 = Math.sin(x*2.3 + y*1.7)*0.5 + 0.5;
+  const n2 = Math.sin(x*5.1 - y*3.7)*0.5 + 0.5;
+  const n3 = Math.sin(x*11.7 + y*9.1)*0.5 + 0.5;
+  return (n1*0.5 + n2*0.35 + n3*0.15);
 }
 
 function layoutPreset(p){
@@ -1276,7 +1558,7 @@ function layoutPreset(p){
     for (let i=0;i<ownerIndex.length;i++){ const oi=ownerIndex[i]; if (oi>=0) ownerCounts[oi] = (ownerCounts[oi]||0)+1; }
   }
 
-  const place = (i, x, y)=>{ const s = sprites[i]; s.x = x; s.y = y; };
+  const place = placeNode;
 
   switch(p){
     case 'ownership': {
@@ -1307,58 +1589,60 @@ function layoutPreset(p){
       const hasLastTs     = (Array.isArray(tokenLastSaleTs) && tokenLastSaleTs.some(v=>v!=null && Number(v)>0)) ||
                             (Array.isArray(tokenLast) && tokenLast.some(v=>v!=null && Number(v)>0));
       if (!hasSaleCounts && !hasLastTs) { layoutGrid(); break; }
-      // Scatter: X = recency of last sale (recent -> right); Y = turnover (sale count, log); size = last sale price; color by heat
+      const tiers = { bigProfit: [], profit: [], breakeven: [], loss: [], bigLoss: [] };
       for (let i=0;i<n;i++){
-        const lastTs = Number(tokenLastSaleTs[i] || tokenLast[i] || 0);
-        const daysSince = lastTs ? ((Date.now()/1000 - lastTs)/86400) : 365;
-        const xn = Math.max(0, Math.min(1, 1 - Math.min(365, daysSince)/365));
-        const x = 80 + xn * (cw-160);
-        const sc = Number(tokenSaleCount[i] || 0);
-        const vol = Math.log1p(sc);
-        const y = 100 + Math.min(ch-200, vol*140) + (prng(i)-0.5)*10;
-        const lastPrice = Number(tokenLastSalePrice[i] || tokenPrice[i] || 0);
-        const sz = lastPrice>0 ? (0.7 + Math.min(2.2, lastPrice/10)) : 0.7;
-        sprites[i].scale.set(sz, sz);
-        sprites[i].alpha = 0.96;
-        // Heat coloring
-        let color = 0x444444;
-        if (sc>10) color = 0xff3333; else if (sc>5) color = 0xff9933; else if (sc>2) color = 0xffcc33; else if (daysSince<30) color = BRAND.GREEN; else color = 0x22aa66;
-        sprites[i].tint = color;
-        place(i, x, y);
+        const lastPrice = Number(tokenLastSalePrice?.[i] ?? tokenPrice?.[i] ?? 0);
+        const buyPrice  = Number((presetData?.tokenLastBuyPrice||[])[i] ?? lastPrice);
+        const profit = lastPrice - buyPrice;
+        if (profit > 5) tiers.bigProfit.push(i);
+        else if (profit > 0) tiers.profit.push(i);
+        else if (profit > -0.5) tiers.breakeven.push(i);
+        else if (profit > -5) tiers.loss.push(i);
+        else tiers.bigLoss.push(i);
       }
-      // If bounding box looks degenerate (no spread), fall back to grid
-      try {
-        const b = computeContentBounds();
-        if (b && ((b.maxx-b.minx) < 10 || (b.maxy-b.miny) < 10)) { layoutGrid(); }
-      } catch {}
-      // Ensure we zoom to the occupied area for visibility
-      try { fitToVisible(); } catch {}
+      const order = ['bigProfit','profit','breakeven','loss','bigLoss'];
+      const tierH = Math.max(100, ch/5); const cx2 = cw/2;
+      let curY = 70;
+      for (const key of order){
+        const arr = tiers[key]; const poolW = Math.min(arr.length*3 + 200, cw - 160);
+        for (let j=0;j<arr.length;j++){
+          const i = arr[j]; const s = sprites[i]; const col = j % 50; const row = Math.floor(j/50);
+          const x = cx2 - poolW/2 + (col+0.5) * (poolW/50);
+          const y = curY + row*18 + Math.sin(((performance.now?performance.now():Date.now())*0.001) + j*0.1) * 4;
+          place(i, x, y);
+          s.tint = key==='bigProfit'?0x00ff00: key==='profit'?0x00ff66: key==='breakeven'?0xffff66: key==='loss'?0xff6666:0xff0000;
+          const lastTs = Number(tokenLastSaleTs[i] || tokenLast[i] || 0);
+          const days = lastTs ? ((Date.now()/1000 - lastTs)/86400) : 999;
+          s.scale.set(days < 7 ? 1.5 : days < 30 ? 1.0 : 0.5);
+          s.alpha = Math.max(0.3, 1.0 - days/100);
+        }
+        curY += tierH;
+      }
+      enforceSeparation(8,1); try { fitToVisible(); } catch {}
       break;
     }
     case 'rarity': {
-      // Phyllotaxis spiral (fills area better than a ring), size/color by rarity
-      const pad = 40;
-      const maxR = Math.min(cx, cy) - pad;
-      const c = maxR / Math.sqrt(Math.max(1, n)); // step
-      const golden = Math.PI * (3 - Math.sqrt(5)); // ~2.39996 rad
-      for (let i=0;i<n;i++){
-        const rs = Math.max(0, Math.min(1, rarity[i]||0));
-        const r = c * Math.sqrt(i+1);
-        const ang = i * golden;
-        const x = cx + Math.cos(ang) * r;
-        const y = cy + Math.sin(ang) * r;
-        // Size primarily by rarity (keeps circles readable)
-        let sz = 0.5 + rs*0.9; // 0.5 .. 1.4
-        sprites[i].scale.set(sz, sz);
-        // Slight transparency for dense areas
-        sprites[i].alpha = 0.90 - (rs*0.15);
-        // Color scale: rare -> brighter yellow-green (with slight red lift)
-        const g = 0x60 + Math.floor(rs * 0x9F);
-        const rcol = Math.floor(rs * 0x44);
-        sprites[i].tint = (rcol<<16) | (g<<8) | 0x22;
-        place(i, x, y);
+      const tk = tokenTraitKey || [];
+      const freq = new Map(); for (let i=0;i<tk.length;i++){ const k=tk[i]; if (k>=0) freq.set(k, (freq.get(k)||0)+1); }
+      const keys = Array.from(freq.keys()).sort((a,b)=> (freq.get(a)-freq.get(b)));
+      const centers = new Map();
+      for (let i=0;i<keys.length;i++){
+        const k = keys[i]; const f = freq.get(k)||1; const ang = (i*0.618)%1 * Math.PI*2;
+        const rad = Math.min(cx,cy) * Math.max(0.15, Math.min(0.9, 0.08 + Math.sqrt(Math.min(1, f/200))));
+        centers.set(k, { x: cx + Math.cos(ang)*rad, y: cy + Math.sin(ang)*rad });
       }
-      try { fitToVisible(); } catch {}
+      for (let i=0;i<n;i++){
+        const k = tk[i]; const c0 = (k>=0 && centers.has(k)) ? centers.get(k) : {x: cx + (prng(i)-0.5)*cx*1.4, y: cy + (prng(i*7)-0.5)*cy*1.4};
+        const rs = Math.max(0, Math.min(1, rarity[i]||0));
+        const jitterR = 12 + (1-rs)*40; const ang = (i*1.77)% (Math.PI*2);
+        const x = c0.x + Math.cos(ang)*jitterR*(prng(i*11));
+        const y = c0.y + Math.sin(ang)*jitterR*(prng(i*13));
+        let sz = Math.min(2.5, 0.5 + rs*2.5); sprites[i].scale.set(sz, sz);
+        const alpha = 0.2 + rs*0.8; sprites[i].alpha = alpha;
+        let col = 0x447744; if (rs > 0.9) col = 0xfffacd; else if (rs > 0.7) col = 0xffff66; else if (rs > 0.4) col = 0xffaa00;
+        sprites[i].tint = col; place(i, x, y);
+      }
+      enforceSeparation(8, 1); try { fitToVisible(); } catch {}
       break;
     }
     case 'social': {
@@ -1382,30 +1666,26 @@ function layoutPreset(p){
       break;
     }
     case 'whales': {
-      // Scatter: X = wallet volume (buy+sell, log normalized); Y = realized PnL (normalized); size by holdings; color by wallet type
       const owners = Math.max(1, (ownerCounts?.length||12));
-      const padX = 80, padY = 100;
-      const maxVol = Math.max(1e-6, ...(ownerBuyVol||[]).map((v,i)=> (v||0) + (ownerSellVol?.[i]||0)));
+      const ownerVol = new Array(owners).fill(0);
+      for (let oi=0; oi<owners; oi++){ ownerVol[oi] = (ownerBuyVol[oi]||0) + (ownerSellVol[oi]||0); }
+      const maxVol = Math.max(1e-6, ...ownerVol);
       const maxHold = ownerCounts && ownerCounts.length ? Math.max(...ownerCounts) : 0;
-      let maxAbsPnl = 0; for (let i=0;i<(ownerPnl?.length||0);i++){ maxAbsPnl = Math.max(maxAbsPnl, Math.abs(ownerPnl[i]||0)); }
-      maxAbsPnl = Math.max(1, maxAbsPnl);
+      const bandH = ch/3; const padX=80; const innerW=cw-padX*2;
       for (let i=0;i<n;i++){
-        const oi = ownerIndex[i] ?? -1;
-        const vol = (oi>=0) ? ((ownerBuyVol[oi]||0) + (ownerSellVol[oi]||0)) : 0;
-        const voln = Math.log1p(Math.max(0, vol)) / Math.log1p(Math.max(1, maxVol));
-        const pnl = (oi>=0) ? (ownerPnl[oi]||0) : 0;
-        const pnln = Math.max(-1, Math.min(1, pnl / maxAbsPnl));
-        const x = padX + voln * (cw - padX*2);
-        const y = cy - pnln * (ch/2 - padY);
-        const holds = (oi>=0 && ownerCounts) ? (ownerCounts[oi]||0) : 0;
-        const scl = 0.7 + (maxHold? Math.min(2.2, holds / maxHold * 2.0) : 0.8);
-        sprites[i].scale.set(scl, scl);
-        const wtype = (oi>=0) ? (ownerWalletType[oi] || 'casual') : 'casual';
-        const typeColors = { whale_trader: 0x00ccff, flipper: 0xff6600, accumulator: 0xffcc00, holder: 0x66ff66, collector: 0x99ccff };
-        sprites[i].tint = typeColors[wtype] || BRAND.GREEN;
+        const oi = ownerIndex[i] ?? -1; const hold = (oi>=0 && ownerCounts)? (ownerCounts[oi]||0) : 0;
+        let tier=0; if (hold>50) tier=2; else if (hold>=5) tier=1; else tier=0;
+        const voln = (oi>=0)? Math.max(0, Math.min(1, ownerVol[oi]/maxVol)) : 0;
+        const x = padX + voln * innerW + (prng(i)-0.5)*12;
+        const y = tier*bandH + bandH*0.5 + (prng(i*7)-0.5)* (bandH*0.6);
+        const scl = tier===2? 3.0 : tier===1? 1.5 : 0.5; const a = tier===2? 1.0 : tier===1? 0.8 : 0.5;
+        sprites[i].scale.set(scl, scl); sprites[i].alpha = a;
+        const wtype = (oi>=0) ? (ownerWalletType[oi] || 'holder') : 'holder';
+        const typeColors = { diamond_hands: 0x0066ff, flipper: 0xff6600, accumulator: 0xffcc00, profit: 0x00ff00, loss: 0x990000 };
+        sprites[i].tint = typeColors[wtype] || 0x66ff66;
         place(i, x, y);
       }
-      try { fitToVisible(); } catch {}
+      enforceSeparation(10, 2);
       break;
     }
     case 'frozen': {

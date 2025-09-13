@@ -3,10 +3,10 @@
 Status: living specification for the repo. This doc tracks intent (spec) and implementation status to avoid drift while we iterate.
 
 ## Summary
-Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. Built with PIXI.js v7 for 60fps rendering, SQLite for cached data, and deterministic layouts (grid by default, preset-specific layouts).
+Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas runs on Deck.gl (GPU‑accelerated layers, smooth transitions, additive glow); PIXI remains available as a fallback engine. Data is served by a SQLite backend with cached endpoints and compact “preset‑data” arrays.
 
 ## Alignment Snapshot
-- Rendering: PIXI v7 UMD, ParticleContainer for 10k nodes — Implemented
+- Rendering: Deck.gl primary (Scatterplot/Line/Polygon/Heatmap layers); PIXI v7 kept as fallback — Implemented
 - Nodes: colored circles only (no per-node images) — Implemented
 - Modes: holders, transfers, traits, wallets — Implemented
 - Presets: ownership, trading, rarity, social, whales, frozen — Implemented (6/10)
@@ -32,12 +32,16 @@ Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownershi
 - `/api/ethos/profile` — v2 proxy; 24h cache
 - `/api/activity`, `/api/heatmap`, `/api/traits`, `/api/stats`, `/api/health`
 - `/api/transfer-edges?limit=500&nodes=10000` — aggregated wallet→wallet edges with `{ a, b, type, count, sales, transfers, mints }`; maps wallets to representative token IDs for display.
+- `/api/token/:id/story` — unified token lifecycle snapshot (view `token_story`)
+- `/api/suspicious-trades` — tokens with suspected wash trading (view `suspicious_trades`)
+- `/api/wallet-relationships?min_trades=3` — frequent trading pairs
 - `/api/top-traded-tokens?limit=50` — tokens ordered by total transfers (with sales count, last trade ts)
 - `/api/longest-held-tokens?limit=50` — currently held tokens ordered by `hold_days`
 - `/api/trait-sale-stats?min_sales=3&limit=200` — sale stats per trait value (avg/min/max)
 
 ## Data Model (SQLite)
 Tables: `tokens`, `attributes`, `transfers`, `graph_cache`, `wallet_metadata`, `collection_stats`, `ethos_profiles`.
+New in v2: `mint_events`, `token_events`, `wallet_relationships`, `collection_snapshots`.
 
 ### Table definitions (current)
 
@@ -78,6 +82,9 @@ CREATE TABLE transfers (
   to_addr TEXT,
   timestamp INTEGER,
   price REAL,
+  price_tia REAL,
+  price_usd REAL,
+  price_eth REAL,
   tx_hash TEXT,
   event_type TEXT
 );
@@ -193,6 +200,7 @@ Usage: prefer variables in new styles; existing rules can be updated opportunist
   - `tokenSaleCount` — sale count per token
   - `tokenLastSaleTs` — last sale timestamp per token (nullable)
   - `tokenLastSalePrice` — last sale price per token (nullable)
+  - `tokenLastBuyPrice` — last buy price per token (nullable)
   - `tokenHoldDays` — days since last acquisition (nullable)
   - `tokenTraitKey` — index of rarest trait (or -1)
   - `rarity` — 0..1 rarity score
@@ -209,7 +217,29 @@ These arrays are computed server-side from SQLite and cached in‑memory per req
 
 
 # Changelog
+- v2.1 — Center engine moved to Deck.gl, PIXI kept as fallback; new views (holders hulls, trading waterfalls/flows, traits constellations); DB migrations (mint/token events, relationships, snapshots); endpoints (`/api/token/:id/story`, `/api/suspicious-trades`).
 - v2.0 — Spec aligned to current implementation; added tokens proposal; clarified decisions.
+
+---
+
+# Engine & Rendering (Deck.gl)
+
+## Engine selection
+- Engine is selected by `public/engine.js` using `?engine=deck|pixi` or `localStorage.engine`. Deck.gl is the default.
+- Left and right panels (HTML/CSS) are unchanged; only the center canvas swaps engines.
+
+## Deck.gl layers by view
+- Holders: PolygonLayer (owner hulls), Scatterplot (nodes + glow), Line (optional ownership edges).
+- Trading: Line/Arc (flow highways) + animated particles; Scatterplot (tier pools).
+- Traits: Line (constellation rings), Text (trait labels on zoom), Scatterplot (nodes) + glow.
+- Whales: Line (branch edges), Scatterplot (nodes) + glow (generational trees).
+- Health: Heatmap (activity buckets), Scatterplot (pulses), decorative layers for frozen/dormant.
+
+## Interactions & shortcuts
+- Click → right panel details (`/api/token/:id` + `/api/token/:id/story`)
+- Hover → autoHighlight
+- Keyboard: `1–5` switch views, `R` reset zoom, `F` (planned focus), `/` quick search
+
 
 ---
 
