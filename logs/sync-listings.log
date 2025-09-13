@@ -1,0 +1,15 @@
+Syncing listings from Modularium...
+
+Page 1 failed: database is locked
+
+file:///Users/nicholashamilton/Desktop/mammothnetwork/jobs/sync-listings.js:62
+  `).run(Math.floor(Date.now()/1000), Math.floor(Date.now()/1000) - 30*86400);
+     ^
+SqliteError: database is locked
+    at main (file:///Users/nicholashamilton/Desktop/mammothnetwork/jobs/sync-listings.js:62:6)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async file:///Users/nicholashamilton/Desktop/mammothnetwork/jobs/sync-listings.js:77:7 {
+  code: 'SQLITE_BUSY'
+}
+
+Node.js v20.19.4

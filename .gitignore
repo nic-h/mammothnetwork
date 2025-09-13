@@ -1,14 +1,4 @@
+.DS_Store
 node_modules/
-.next/
-dist/
-out/
-*.DS_Store
-images/
-thumbnails/
-data/images/
-data/thumbnails/
-data/*.db
-data/*.db-wal
-data/*.db-shm
-data/.checkpoints/
-logs/
+server.log
+artifacts/ui/*.tmp

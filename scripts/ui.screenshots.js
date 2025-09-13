@@ -61,8 +61,14 @@ async function main(){
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
+  page.on('console', msg => { try { console.log('[page]', msg.text()); } catch {} });
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await waitForIdle(page);
+  try {
+    await page.waitForLoadState('load', { timeout: 10000 });
+    const info = await page.evaluate(() => ({ t: typeof window.deck, scripts: Array.from(document.querySelectorAll('script')).map(s=>s.src).filter(s=>/deck\.gl|geo-layers/.test(s)).length }));
+    console.log('deck ns:', info.t, 'scripts:', info.scripts);
+  } catch {}
 
   // Views to exercise
   const views = ['ownership', 'trading', 'traits', 'whales', 'health'];

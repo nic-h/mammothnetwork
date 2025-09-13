@@ -1,0 +1,15 @@
+
+file:///Users/nicholashamilton/Desktop/mammothnetwork/jobs/enrich-wallets.js:55
+    upMeta.run(a, holdings, first, last, trades);
+           ^
+SqliteError: database is locked
+    at file:///Users/nicholashamilton/Desktop/mammothnetwork/jobs/enrich-wallets.js:55:12
+    at sqliteTransaction (/Users/nicholashamilton/Desktop/mammothnetwork/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)
+    at file:///Users/nicholashamilton/Desktop/mammothnetwork/jobs/enrich-wallets.js:58:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:263:25)
+    at async ModuleLoader.import (node:internal/modules/esm/loader:540:24)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+  code: 'SQLITE_BUSY'
+}
+
+Node.js v20.19.4

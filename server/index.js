@@ -20,7 +20,9 @@ app.use(morgan('tiny'));
 app.use(zlibCompression());
 app.use(express.json({ limit: '2mb' }));
 
-// Serve frontend static assets (deck-only; no vendor route needed)
+// Serve frontend static assets
+// Provide local access to deck.gl UMDs under /lib
+app.use('/lib', express.static(path.join(ROOT, 'node_modules')));
 // Serve images + thumbnails if present (local data folder or mounted disk)
 const localImages = path.join(ROOT, 'data', 'images');
 const diskImages = '/data/images';

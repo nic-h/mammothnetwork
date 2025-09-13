@@ -52,6 +52,8 @@
   let collapseOwner = -1;    // owner collapse animation
   let collapsePhase = 0;     // 0..1..0 ease
   let timelineLimits = null; // {t0,t1}
+  // UI loading indicator counter
+  let loadCount = 0;
 
   // UI toggles reflect left panel checkboxes
   const ui = {
@@ -470,7 +472,6 @@
   }
 
   // UI loading bar helpers
-  let loadCount = 0;
   function startUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount++; el.hidden=false; }
   function stopUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount=Math.max(0,loadCount-1); if(loadCount===0) el.hidden=true; }
 
