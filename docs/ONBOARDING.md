@@ -7,17 +7,16 @@ This is the fastest path to get productive on the project. It assumes Node 20+, 
 2. Migrate DB: `npm run db:migrate`
 3. Backfill data (normalize/metrics): `node scripts/db.backfill.js`
 4. Start server: `npm run dev` (defaults to `PORT=3000`)
-5. Open deck engine: `http://localhost:3000/?engine=deck`
-   - Left/right UI stay the same. Only the center canvas is deck.gl.
+5. Open: `http://localhost:3000`
+   - Left/right UI stay the same. The center canvas is Deck.gl.
    - Keyboard: `1–5` switch views, `R` reset zoom.
 
 If port 3000 is in use: `PORT=3001 npm run dev` or kill: `lsof -i :3000 | awk 'NR>1{print $2}' | xargs kill -9`
 
 ## Repo Map
-- `public/` — client assets and engines
-  - `engine.js` — chooses PIXI or Deck via `?engine=deck|pixi`
-  - `deck.app.js` — deck.gl center renderer (Scatterplot/Line/Polygon/Glow)
-  - `main.js` — PIXI fallback engine (center canvas)
+- `public/` — client assets
+  - `engine.js` — boots Deck.gl
+  - `deck.app.js` — Deck.gl center renderer (Scatterplot/Line/Polygon/Glow)
   - `client/styles/tokens.css` — brand tokens (colors, spacing, font)
 - `server/` — Express + SQLite
   - `index.js` — API routes (graph, preset-data, token, listings, traits, story, suspicious)
@@ -60,10 +59,8 @@ Where DB is used
   - `/api/token/:id`, `/api/token/:id/story` — right-panel details + STORY card
   - `/api/transfer-edges`, `/api/suspicious-trades`, `/api/wallet-relationships` — overlays
 
-## Engines
-- Deck.gl (default): `http://localhost:3000/?engine=deck`
-- PIXI fallback: `http://localhost:3000/?engine=pixi`
-- The left and right panels do not change. Only the center canvas swaps engine.
+## Engine
+Deck.gl only (no PIXI). The left and right panels do not change; only the center canvas renders the scene.
 
 ## Views (deck)
 - Holders — gravitational clusters with owner hull rings and glow.
@@ -80,7 +77,6 @@ npm run test:ui
 - Output: `artifacts/ui/*.png`.
 
 ## Common Issues
-- Red banner “Failed to initialize”: engine loader tried PIXI without pixi.js. Use deck (`?engine=deck`) or make sure `/lib/pixi.min.js` loads before `main.js` (the loader handles this).
 - Port already in use: see TL;DR. 
 - Empty graph: run migrations/backfill, then hit `/api/health` and `/api/preset-data` to confirm payload.
 
@@ -99,4 +95,3 @@ curl -s 'http://localhost:3000/api/preset-data?nodes=500' | jq 'keys'
 curl -s 'http://localhost:3000/api/token/1/story' | jq .
 curl -s 'http://localhost:3000/api/wallet-relationships?min_trades=3' | jq .
 ```
-

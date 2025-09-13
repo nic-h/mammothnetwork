@@ -4,18 +4,18 @@ Mammoths Network Visualization
 WebGL network for the Mammoths NFT collection.
 
 New here? Start with Onboarding:
-- docs/ONBOARDING.md — quick start, engines, DB, commands
+- docs/ONBOARDING.md — quick start, engine, DB, commands
 - docs/TECH_SPEC.md — deeper spec for views/data/engine
 
 At‑a‑Glance System Overview
-- Frontend: Deck.gl (center canvas) with additive glow & smooth transitions. PIXI remains available as fallback.
+- Frontend: Deck.gl (center canvas) with additive glow & smooth transitions.
 - Backend: Express + SQLite (better-sqlite3). `/api/graph` delivers nodes/edges; `/api/preset-data` provides compact arrays for fast view encoding; ETag + TTL cache.
 - Data sources: Modularium API (holders, activity/transfers, listings), Ethos API (scores/users). Jobs fetch and cache into SQLite; UI reads only from DB.
 - Storage: images/thumbnails on disk (optional); no per-node images in the graph, only in the sidebar.
 - Deployment: Render.com with persistent disk; weekly cron refreshes data (see `jobs/run-all.js`).
 
 Current Status
-- Deck.gl (Scatterplot/Line/Polygon/Heatmap); fallback PIXI available via `?engine=pixi`
+- Deck.gl (Scatterplot/Line/Polygon/Heatmap)
 - Deterministic layouts (grid default + preset-specific)
 - Modes: `holders`, `transfers`, `traits`, `wallets`
 - Presets (6): Ownership, Trading, Rarity, Social, Whales, Frozen
@@ -39,7 +39,7 @@ Local setup
    - Optional: `export DOWNLOAD_IMAGES=1`
    - `npm run jobs:all`
 4. `npm run dev` → http://localhost:3000
-5. Open deck engine: `http://localhost:3000/?engine=deck`
+5. Open: `http://localhost:3000` (Deck.gl)
 
 Environment
 - Required: `CONTRACT_ADDRESS`, `MODULARIUM_API`, `ETHOS_API`
@@ -185,15 +185,14 @@ Visual Encoding Table
 Image version: `public/assets/visual-encoding-table.svg`
 
 Notes
-- Deck.gl center canvas with left/right panels preserved. PIXI kept as fallback only.
+- Deck.gl center canvas with left/right panels preserved.
 - Images: served at `/images`; thumbnails at `/thumbnails` (nodes never load images)
 - If better‑sqlite3 native errors: `npm rebuild better-sqlite3 --build-from-source`
 
 Preview & Dev
 - Start: `npm run dev` (default `PORT=3000`)
 - If the port is busy: `PORT=3001 npm run dev` or kill the existing process (`lsof -i :3000 | awk 'NR>1{print $2}' | xargs kill -9` on macOS)
-- Open: `http://localhost:3000` (deck.gl center by default)
-- Swap engine (center only): `?engine=deck` or `?engine=pixi`
+- Open: `http://localhost:3000` (Deck.gl)
 - Optional: preselect a token with `?token=5000`
 
 Screenshots
@@ -201,8 +200,8 @@ Screenshots
 - Configure variants: `PREVIEW_IDS=5000,3333,2500 PREVIEW_VARIANTS=3 npm run test:ui`
 - Images are saved to `artifacts/ui/`
 
-Engine
-- The center rendering engine is selected by `public/engine.js`. By default we run deck.gl (`public/deck.app.js`). PIXI (`public/main.js`) remains available as a fallback for comparison.
+- Engine
+- The center rendering engine is Deck.gl (`public/deck.app.js`).
 - Left and right panels remain unchanged (brand CSS tokens at `public/client/styles/tokens.css`).
 
 UI tweaks

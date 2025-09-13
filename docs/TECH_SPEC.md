@@ -3,10 +3,10 @@
 Status: living specification for the repo. This doc tracks intent (spec) and implementation status to avoid drift while we iterate.
 
 ## Summary
-Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas runs on Deck.gl (GPU‑accelerated layers, smooth transitions, additive glow); PIXI remains available as a fallback engine. Data is served by a SQLite backend with cached endpoints and compact “preset‑data” arrays.
+Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas runs on Deck.gl (GPU‑accelerated layers, smooth transitions, additive glow). Data is served by a SQLite backend with cached endpoints and compact “preset‑data” arrays.
 
 ## Alignment Snapshot
-- Rendering: Deck.gl primary (Scatterplot/Line/Polygon/Heatmap layers); PIXI v7 kept as fallback — Implemented
+- Rendering: Deck.gl primary (Scatterplot/Line/Polygon/Heatmap layers) — Implemented
 - Nodes: colored circles only (no per-node images) — Implemented
 - Modes: holders, transfers, traits, wallets — Implemented
 - Presets: ownership, trading, rarity, social, whales, frozen — Implemented (6/10)
@@ -225,7 +225,7 @@ These arrays are computed server-side from SQLite and cached in‑memory per req
 # Engine & Rendering (Deck.gl)
 
 ## Engine selection
-- Engine is selected by `public/engine.js` using `?engine=deck|pixi` or `localStorage.engine`. Deck.gl is the default.
+- Engine bootstrapped by `public/engine.js` (Deck.gl only).
 - Left and right panels (HTML/CSS) are unchanged; only the center canvas swaps engines.
 
 ## Deck.gl layers by view
@@ -286,4 +286,4 @@ sqlite3 -json ./data/mammoths.db "SELECT (SELECT COUNT(*) FROM tokens) AS tokens
 ```
 
 ## Assets
-- PIXI is served from `/lib` (node_modules). A minimal `public/lib/pixi.min.js` copy is kept only for a simple file presence check; you can instead curl the served route.
+- No PIXI assets are shipped.

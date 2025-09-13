@@ -42,6 +42,7 @@
   let edgeCount = 200; // default UI slider value
   let ownerCenters = null; // computed per owner
   let ownerHoldings = null;
+  const ownerLabels = new Map(); // addr -> label (ENS or short address)
   let hasFittedOnce = false; // fit view after first render
   let currentZoom = 0;       // updated on view changes
   const timeline = { start: null, end: null, value: null, playing: true };
@@ -527,9 +528,16 @@ function buildFlowParticles(limit=600){
     const detailsEl = document.getElementById('details'); const thumb = document.getElementById('thumb');
     if(!info?.object){ detailsEl.innerHTML='Select a node…'; if(thumb) thumb.style.display='none'; return; }
     const id = info.object.id; selectedId = id;
+    // Always try a basic thumbnail so demo mode still shows something
+    if (thumb){ thumb.style.display='block'; thumb.onerror=()=>{ try{ thumb.style.display='none'; }catch{} }; thumb.src = `/thumbnails/${id}.jpg`; }
     try {
-      const t = await fetch(API.token(id)+'?v='+Date.now()).then(r=>r.json());
-      if (thumb){ thumb.style.display='block'; thumb.src = `/${t.thumbnail_local||t.image_local||('thumbnails/'+id+'.jpg')}`; }
+      const resp = await fetch(API.token(id)+'?v='+Date.now());
+      let t = null;
+      if (resp && resp.ok){
+        try { t = await resp.json(); } catch { t = null; }
+      }
+      // If we have richer local paths from DB, prefer them
+      try { if (t && (t.thumbnail_local || t.image_local) && thumb){ thumb.style.display='block'; thumb.src = `/${t.thumbnail_local||t.image_local}`; } } catch {}
       // Pull story + listings + wallet meta
       const [story, listings, walletMeta] = await Promise.all([
         fetch(API.story(id)).then(r=>r.ok?r.json():null).catch(()=>null),
@@ -561,7 +569,7 @@ function buildFlowParticles(limit=600){
       detailsEl.innerHTML = `
         <div class='token-title'>MAMMOTH #${String(id).padStart(4,'0')}</div>
         <div class='section-label'>OWNER</div>
-        <div class='address'>${(t.owner||'').slice(0,6)}...${(t.owner||'').slice(-4)}</div>
+        <div class='address'>${(t?.owner||'').slice(0,6)}...${(t?.owner||'').slice(-4)}</div>
         <div class='card2'>
           ${ethosCard}
           <div class='card'><div class='label'>HOLDINGS</div><div class='big-number'>${walletMeta?.total_holdings ?? '--'}</div></div>
@@ -593,7 +601,18 @@ function buildFlowParticles(limit=600){
         <div class='traits-table'>${traitsRows}</div>
       `;
       render(nodes, edges, currentMode);
-    } catch { detailsEl.innerHTML='Select a node…'; }
+    } catch {
+      // Minimal, no-DB fallback so the panel is still useful in demo mode
+      try {
+        detailsEl.innerHTML = `
+          <div class='token-title'>MAMMOTH #${String(id).padStart(4,'0')}</div>
+          <div class='section-label'>OWNER</div>
+          <div class='address'>--</div>
+          <div class='section-label'>TRAITS</div>
+          <div class='traits-table'><div class='label'>No data</div><div class='value'>Demo mode</div></div>
+        `;
+      } catch { detailsEl.innerHTML='Select a node…'; }
+    }
   }
 
   function timeAgo(ms){

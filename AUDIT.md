@@ -2,10 +2,10 @@ Mammoths Network Integration Audit
 =================================
 
 Scope
-- Integrate PIXI v7 network renderer + worker physics into existing repo
+- Integrate Deck.gl network renderer into existing repo
 - Use existing SQLite cache (tokens, attributes, images) without data loss
 - Add jobs for holders/activity/edges/enrichment
-- Add API with ETag + 5-min memory cache
+- Add API with ETag + 5‑min memory cache
 - Prepare Render deploy with persistent disk and cron guidance
 
 Findings (repo state)
@@ -38,12 +38,11 @@ API
 - `GET /api/activity`: lightweight stub.
 - `GET /api/health`: status and DB path.
 
-Frontend (PIXI v7)
-- Local module served at `/lib/pixi.min.mjs` (no external CDN).
-- Renders 10k nodes via `PIXI.ParticleContainer(10000)` with a single circle texture.
-- Force-directed physics in a Web Worker with uniform grid neighbors.
-- Edge pass drawn with `PIXI.Graphics` when edges <= 500.
-- Viewport culling for nodes; devicePixelRatio capped at 2.
+Frontend (Deck.gl)
+- UMD via unpkg in `public/index.html`.
+- Scatterplot/Line/Polygon/Text layers for nodes/edges/hulls/labels; additive glow implemented with layered scatter.
+- Optional Trips layer for transfer flows; ScreenGrid/Hexagon for ownership density.
+- LOD tuning: ambient edges hidden when zoomed out.
 
 Performance alignment
 - Initial load: fast path uses cached `graph_cache` and Brotli/gzip compression (shrink-ray-current).
@@ -63,10 +62,9 @@ Pre-merge checklist
 - [x] Memory cache (5 min) + ETag.
 - [x] Brotli/gzip enabled.
 - [x] Degree caps and rarity threshold in edge builders.
-- [x] PIXI v7 only; ParticleContainer and worker physics.
+- [x] Deck.gl only
 
 Open items / optional
 - Hook Modularium client or RPC to fill holders/transfers offline.
 - Optionally precompute multiple graphs (modes) for instant switching.
 - If DB is still absent, run `npm run db:init` then populate using your existing scripts or the reference repo procedures.
-

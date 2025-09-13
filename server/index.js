@@ -20,10 +20,7 @@ app.use(morgan('tiny'));
 app.use(zlibCompression());
 app.use(express.json({ limit: '2mb' }));
 
-// Serve frontend and vendor modules
-// Static
-app.use('/vendor', express.static(path.join(ROOT, 'node_modules')));
-app.use('/lib', express.static(path.join(ROOT, 'node_modules', 'pixi.js', 'dist')));
+// Serve frontend static assets (deck-only; no vendor route needed)
 // Serve images + thumbnails if present (local data folder or mounted disk)
 const localImages = path.join(ROOT, 'data', 'images');
 const diskImages = '/data/images';

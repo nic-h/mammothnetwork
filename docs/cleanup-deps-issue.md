@@ -9,11 +9,11 @@ Command: `npx depcheck --json`
 Raw output:
 
 ```
-{"dependencies":["pixi.js"],"devDependencies":[],"missing":{},"using":{"better-sqlite3":["server/db.js","scripts/db.init.js"],"dotenv":["server/index.js"],"express":["server/index.js"],"morgan":["server/index.js"],"compression":["server/index.js"],"sharp":["jobs/sync-metadata.js"]},"invalidFiles":{},"invalidDirs":{}}
+{"dependencies":[],"devDependencies":[],"missing":{},"using":{"better-sqlite3":["server/db.js","scripts/db.init.js"],"dotenv":["server/index.js"],"express":["server/index.js"],"morgan":["server/index.js"],"compression":["server/index.js"],"sharp":["jobs/sync-metadata.js"]},"invalidFiles":{},"invalidDirs":{}}
 ```
 
 Notes:
-- `pixi.js` appears as unused to depcheck because we don’t import it in JS; we serve it statically from `node_modules` via Express (`/lib/pixi.min.js`). This is intentional and should not be removed unless we switch to ESM imports in the client.
+- PIXI has been removed; deck.gl is the single engine. If `depcheck` surfaces PIXI again, remove it.
 - `sharp` is loaded dynamically in `jobs/sync-metadata.js` (optional dependency); depcheck marks it as used.
 
 ## ts-prune
@@ -29,7 +29,7 @@ No tsconfig.json found
 We are a JS/ESM codebase at the moment; ts-prune is not applicable without TS sources and a tsconfig.
 
 ## Suggestions
-- Keep `pixi.js` (it provides `/lib/pixi.min.js` from `node_modules/pixi.js/dist`). Ensure we do NOT also ship a duplicate UMD in `public/lib` (we don’t).
+- Ensure no dormant PIXI artifacts remain. We deleted `public/main.js`, `public/viewport.js`, and `public/lib/pixi.min.js`.
 - Consider consolidating styles: we now have `public/client/styles/layout.css` and `public/style.css`. Some selectors in `style.css` (e.g., `.shell`, `.main-container`, older panel classes) may be dead after the new layout; safe to prune after a quick pass.
 - No Next/React remnants detected (no `react`/`next` deps, no `pages/` structure).
 
