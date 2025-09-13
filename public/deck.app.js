@@ -68,6 +68,7 @@
   init().catch(console.error);
 
   async function init(){
+    startUILoad();
     presetData = await fetch(API.preset).then(r=>r.json()).catch(()=>null);
     const w = center.clientWidth||800, h = center.clientHeight||600;
     deckInst = new Deck({
@@ -89,6 +90,7 @@
     if (selectedId>0) focusSelect(selectedId);
     // Build traits UI for deck engine
     try { buildTraitsUI(); } catch {}
+    stopUILoad();
   }
 
   function bindViewControls(){
@@ -186,6 +188,7 @@
   async function loadMode(mode, edgesWanted){
     currentMode = mode;
     const params = new URLSearchParams({ mode, nodes:'10000', edges:String(edgesWanted ?? edgeCount) });
+    startUILoad();
     const graph = await fetch(`${API.graph}?${params}`, { cache:'default' }).then(r=>r.json()).catch(()=>({nodes:[],edges:[]}));
     const pdata = presetData || {};
     nodes = buildNodes(graph.nodes||[], pdata);
@@ -209,6 +212,7 @@
       animReq = requestAnimationFrame(tick);
     };
     animReq = requestAnimationFrame(tick);
+    stopUILoad();
   }
 
   function buildNodes(apiNodes, pdata){
@@ -305,7 +309,9 @@
       // Wash/desire overlays
       (ui.wash && washSet && washSet.size) && new ScatterplotLayer({ id:'wash', data:nodes.filter(n=>washSet.has(n.id)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(8, (d.radius||4)+6), getFillColor:[0,0,0,0], getLineColor:[255,0,102,220], lineWidthMinPixels:1.5, stroked:true, filled:false, radiusUnits:'pixels' }),
       (ui.desire && desireSet && desireSet.size) && new ScatterplotLayer({ id:'desire', data:nodes.filter(n=>desireSet.has(n.id)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(7, (d.radius||4)+4), getFillColor:[0,0,0,0], getLineColor:[255,215,0,200], lineWidthMinPixels:1, stroked:true, filled:false, radiusUnits:'pixels' }),
-      new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>d.radius*3.5, getFillColor:d=>[d.color[0],d.color[1],d.color[2], 20], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
+      new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>d.radius*3.0, getFillColor:d=>[d.color[0],d.color[1],d.color[2], 12], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
+      // Neighbor edges on click
+      (selectedId>0) && new LineLayer({ id:'click-edges', data: buildClickEdges(selectedId), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,180], getWidth:1.2, widthUnits:'pixels', parameters:{ depthTest:false } }),
       new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=>d.radius||4, getFillColor:d=>d.color, radiusUnits:'pixels', onClick: handleClick }),
       // Subtle pulse rings for recently active tokens
       new ScatterplotLayer({ id:'pulses', data: nodes.filter(n=>recentActive(n)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> (d.radius||4) * (1.6 + 0.4*Math.sin(pulseT*2 + (d.id||0))), getLineColor:[0,255,102,140], lineWidthMinPixels:1, radiusUnits:'pixels', updateTriggers:{ getRadius: [pulseT] }, parameters:{ depthTest:false } }),
@@ -419,6 +425,11 @@
     } catch { return null; }
   }
 
+  // UI loading bar helpers
+  let loadCount = 0;
+  function startUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount++; el.hidden=false; }
+  function stopUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount=Math.max(0,loadCount-1); if(loadCount===0) el.hidden=true; }
+
   function computeConstellationPaths(nodes, pdata){
     const tk = pdata?.tokenTraitKey||[]; const freq = new Map(); tk.forEach(k=>{ if (k>=0) freq.set(k,(freq.get(k)||0)+1); });
     const groups = new Map(); nodes.forEach(n=>{ const k=tk[n.tokenId]; const f=freq.get(k)||0; if (k>=0 && f>=3 && f<=30){ if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(n); } });
@@ -429,6 +440,22 @@
       for (let i=0;i<ordered.length;i++){ const a=ordered[i], b=ordered[(i+1)%ordered.length]; out.push({ s:a.position, t:b.position }); if (out.length>800) break; }
     });
     return out;
+  }
+
+  function buildClickEdges(id){
+    try {
+      const idx = id-1;
+      const segs = [];
+      for (const e of edges){
+        const a = e.sourceIndex, b = e.targetIndex;
+        if (a===idx || b===idx){
+          const pa = nodes[a]?.position, pb = nodes[b]?.position; if (!pa||!pb) continue;
+          segs.push({ s: pa, t: pb });
+        }
+        if (segs.length>800) break;
+      }
+      return segs;
+    } catch { return []; }
   }
 
   async function handleClick(info){
@@ -482,6 +509,7 @@
           <div class='card'><div class='label'>SPEND</div><div class='big-number'>${buyVol!=null? (buyVol+' TIA') : '--'}</div></div>
           <div class='card'><div class='label'>REVENUE</div><div class='big-number'>${sellVol!=null? (sellVol+' TIA') : '--'}</div></div>
         </div>
+        <div class='section-label'>STORY</div>
         <div class='card2'>
           <div class='card'><div class='label'>LAST BUY</div><div class='big-number'>${lastBuy}</div></div>
           <div class='card'><div class='label'>LAST SALE</div><div class='big-number'>${lastSale}</div></div>
