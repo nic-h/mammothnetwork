@@ -42,6 +42,9 @@
   let edgeCount = 200; // default UI slider value
   let ownerCenters = null; // computed per owner
   let ownerHoldings = null;
+  let hasFittedOnce = false; // fit view after first render
+  let currentZoom = 0;       // updated on view changes
+  const timeline = { start: null, end: null, value: null, playing: true };
 
   // UI toggles reflect left panel checkboxes
   const ui = {
@@ -65,7 +68,12 @@
   async function init(){
     presetData = await fetch(API.preset).then(r=>r.json()).catch(()=>null);
     const w = center.clientWidth||800, h = center.clientHeight||600;
-    deckInst = new Deck({ canvas: 'deck-canvas', width:w, height:h, controller:true, views:[ new (OrthographicView||window.deck.OrthographicView)({ id:'ortho' }) ], initialViewState:{ target:[0,0,0], zoom:0 } });
+    deckInst = new Deck({
+      canvas: 'deck-canvas', width:w, height:h, controller:true,
+      views:[ new (OrthographicView||window.deck.OrthographicView)({ id:'ortho' }) ],
+      initialViewState:{ target:[0,0,0], zoom:0 },
+      onViewStateChange: ({viewState}) => { currentZoom = viewState.zoom; }
+    });
     // Wire tabs/select and inputs
     bindViewControls();
     bindInputs();
@@ -112,6 +120,32 @@
     if (edgesEl && !edgesEl.dataset.deckBound){
       edgesEl.dataset.deckBound = '1';
       edgesEl.addEventListener('input', ()=>{ edgeCount = parseInt(edgesEl.value||'200',10); if (edgeCountEl) edgeCountEl.textContent = String(edgeCount); loadMode(currentMode, edgeCount); });
+    }
+    // Time slider controls for trading flows
+    const timeEl = document.getElementById('time-slider');
+    const timeLabel = document.getElementById('time-label');
+    const fmtDate = ts => { try{ const d=new Date((ts||0)*1000); return d.toISOString().slice(0,10);}catch{return ''} };
+    if (timeEl && !timeEl.dataset.deckBound){
+      timeEl.dataset.deckBound='1';
+      const updateLabel = ()=>{ if (timeLabel) timeLabel.textContent = timeline.value!=null? fmtDate(timeline.value): '' };
+      timeEl.addEventListener('input', ()=>{
+        if (timeline.start!=null && timeline.end!=null){
+          const p = Math.max(0, Math.min(100, parseInt(timeEl.value||'0',10)))/100;
+          timeline.value = Math.round(timeline.start + (timeline.end - timeline.start)*p);
+          timeline.playing = false;
+          if (currentMode==='transfers') render(nodes, edges, currentMode);
+          updateLabel();
+        }
+      });
+      timeEl.addEventListener('change', ()=>{ timeline.playing = true; });
+      setInterval(()=>{
+        if (!timeline.playing || timeline.start==null || timeline.end==null) return;
+        const p = ((parseInt(timeEl.value||'0',10)+1)%101);
+        timeEl.value = String(p);
+        const frac=p/100; timeline.value = Math.round(timeline.start + (timeline.end - timeline.start)*frac);
+        if (currentMode==='transfers') render(nodes, edges, currentMode);
+        updateLabel();
+      }, 2000);
     }
     // Layer toggles -> re-render
     const ids = ['ambient-edges','layer-ownership','layer-traits','layer-trades','layer-sales','layer-transfers','layer-mints','layer-bubbles','layer-wash','layer-desire'];
@@ -234,6 +268,7 @@
       // Default grid
       const grid=100; nodes.forEach((d,i)=>{ d.position=[(i%grid)*20-1000, Math.floor(i/grid)*20-1000, 0]; }); basePositions = nodes.map(d=>d.position.slice());
     }
+    hasFittedOnce = false; // trigger fit on next render
   }
 
   function colorFor(n, ethos, lastAct){
@@ -281,7 +316,11 @@
       const paths = computeConstellationPaths(nodes, presetData);
       if (paths.length) layers.unshift(new LineLayer({ id:'trait-constellations', data:paths, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[255,215,0,160], getWidth:0.8, widthUnits:'pixels', opacity:0.6 }));
     }
+    // LOD: hide ambient edges when zoomed out
+    const lod = (function(z){ if (z < -0.5) return { showEdges:false }; return { showEdges:true }; })(currentZoom);
+    if (!lod.showEdges) layers = layers.filter(l=> l && l.id!=='edges');
     deckInst.setProps({ layers });
+    if (!hasFittedOnce) { try { fitViewToNodes(nodes); hasFittedOnce = true; } catch {} }
   }
 
   function animateHolders(t){
@@ -491,11 +530,11 @@
         id: 'ownership-density',
         data: layerData,
         getPosition: d => d.clusterCenter,
-        radius: 100,
-        coverage: 0.8,
+        radius: 120,
+        coverage: 0.7,
         elevationScale: 0,
         getColorWeight: d => d.tokenCount,
-        colorRange: [[0,0,0,0],[0,255,102,100],[0,255,102,255]]
+        colorRange: [[0,0,0,0],[0,255,102,60],[0,255,102,140]]
       });
       // 2) Tokens with orbital motion around owner center
       const tokens = new ScatterplotLayer({
@@ -605,13 +644,32 @@
     } catch {}
   }
 
+  // Price color ramp for flows: green → gold → red
+  function priceColor(p){
+    const v = Math.max(0, Math.min(1, (Number(p||0) / 2.0)));
+    if (v < 0.5){ const t=v/0.5; return [0, Math.round(255*(0.6+0.4*t)), 102]; }
+    const t=(v-0.5)/0.5; return [Math.round(255*t), 215, 0];
+  }
+
+  function fitViewToNodes(list){
+    if (!list || !list.length) return;
+    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+    for (const n of list){ const p=n.position; if (!p) continue; if (p[0]<minX) minX=p[0]; if (p[1]<minY) minY=p[1]; if (p[0]>maxX) maxX=p[0]; if (p[1]>maxY) maxY=p[1]; }
+    const w = center.clientWidth||1200, h=center.clientHeight||800; const pad = 120;
+    const contentW = Math.max(1, maxX-minX), contentH = Math.max(1, maxY-minY);
+    const scale = Math.min((w-pad*2)/contentW, (h-pad*2)/contentH);
+    const zoom = Math.log2(scale);
+    const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+    deckInst.setProps({ initialViewState: { target:[cx,cy,0], zoom } });
+  }
+
   // Transfers view helpers
   function makeTransfersLayers(base){
     const add = [];
     if (flowEdges && flowEdges.length){
-      add.push(new LineLayer({ id:'transfer-volume', data:flowEdges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, widthUnits:'pixels', getSourcePosition:e=>nodes[e.a]?.position, getTargetPosition:e=>nodes[e.b]?.position, getColor:[0,255,102,140], getWidth:e=>Math.max(1, Math.log1p(e.count)), opacity:0.45 }));
+      add.push(new LineLayer({ id:'transfer-volume', data:flowEdges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, widthUnits:'pixels', getSourcePosition:e=>nodes[e.a]?.position, getTargetPosition:e=>nodes[e.b]?.position, getColor:[0,255,102,120], getWidth:e=>Math.max(1, Math.log1p(e.count)), opacity:0.35 }));
     }
-    const TripsLayer = window.deck && window.deck.TripsLayer;
+    const TripsLayer = (window.deck && (window.deck.TripsLayer || window.deck?.GeoLayers?.TripsLayer)) || window.TripsLayer || null;
     if (TripsLayer) add.unshift(makeTripsLayer());
     return [ ...add, ...base ];
   }
@@ -628,6 +686,9 @@
         const walletCenters = new Map();
         const owners = presetData?.owners || [];
         for (let i=0;i<owners.length;i++){ const c = ownerCenters?.[i]; if (c) walletCenters.set(owners[i], c); }
+        if (transfers.length){
+          const ts = transfers.map(t=>t.timestamp||0); timeline.start = Math.min(...ts); timeline.end = Math.max(...ts); timeline.value = timeline.end; try{ const s=document.getElementById('time-slider'); if(s) s.value='100'; }catch{}
+        }
         cached = transfers.map(tr=>{
           const s = walletCenters.get(tr.from) || [0,0,0];
           const t = walletCenters.get(tr.to) || [0,0,0];
@@ -635,14 +696,14 @@
         });
         return cached;
       },
-      currentTime: (Date.now()/1000)% (24*3600),
+      currentTime: timeline.value || (Date.now()/1000),
       getPath: d=>d.path,
       getTimestamps: d=>d.timestamps,
-      trailLength: 3600*2,
+      trailLength: 3600*6,
       fadeTrail: true,
       widthMinPixels: 2,
       getWidth: d=> Math.max(2, Math.sqrt(Math.max(0.01, d.price)) * 3),
-      getColor: d=> d.price>1 ? [255,215,0] : [0,255,102],
+      getColor: d=> priceColor(d.price),
       capRounded: true,
       jointRounded: true,
       opacity: 0.8,
