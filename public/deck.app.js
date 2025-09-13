@@ -460,7 +460,7 @@
   function startUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount++; el.hidden=false; }
   function stopUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount=Math.max(0,loadCount-1); if(loadCount===0) el.hidden=true; }
 
-  function computeConstellationPaths(nodes, pdata){
+function computeConstellationPaths(nodes, pdata){
     const tk = pdata?.tokenTraitKey||[]; const freq = new Map(); tk.forEach(k=>{ if (k>=0) freq.set(k,(freq.get(k)||0)+1); });
     const groups = new Map(); nodes.forEach(n=>{ const k=tk[n.tokenId]; const f=freq.get(k)||0; if (k>=0 && f>=3 && f<=30){ if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(n); } });
     const out = [];
@@ -470,7 +470,29 @@
       for (let i=0;i<ordered.length;i++){ const a=ordered[i], b=ordered[(i+1)%ordered.length]; out.push({ s:a.position, t:b.position }); if (out.length>800) break; }
     });
     return out;
+}
+
+// Timeline flow particles
+function buildFlowParticles(limit=600){
+  if (!transfersCache || !timelineLimits) return [];
+  const dots = [];
+  const t0 = timelineLimits.t0 || 0, t1 = timelineLimits.t1 || (t0+1);
+  const W = 86400 * 14; // focus 14 days around current time
+  const tv = timeline.value || t1;
+  const width = (center.clientWidth||1200), height=(center.clientHeight||800);
+  const lx = (t)=> (t - t0)/(t1 - t0) * (width-160) + 80;
+  const parr = presetData?.tokenLastSalePrice || [];
+  const maxP = Math.max(1, Math.max(...parr.filter(x=>x!=null)) || 1);
+  const ly = (p)=>{ const v=Math.log1p(Math.max(0,p||0)); const vmax=Math.log1p(maxP)||1; return (1 - v/(vmax)) * (height-160) + 80; };
+  for (let i=0;i<transfersCache.length && dots.length<limit;i++){
+    const tr = transfersCache[i]; const ts = tr.timestamp||tv; const dt = tv - ts;
+    if (dt<0 || dt>W) continue;
+    const x = lx(ts);
+    const y = ly(tr.price||0) + Math.sin((pulseT*2) + i*0.07) * 6;
+    dots.push({ p:[x,y,0], price: tr.price||0 });
   }
+  return dots;
+}
 
   function buildClickEdges(id){
     try {

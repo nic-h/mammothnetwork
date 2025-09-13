@@ -84,6 +84,7 @@ select {
 .left-panel::-webkit-scrollbar-thumb, .right-panel::-webkit-scrollbar-thumb { background: rgba(var(--green-rgb), .35); border: 1px solid rgba(0,0,0,.5); }
 .left-panel::-webkit-scrollbar-track, .right-panel::-webkit-scrollbar-track { background: rgba(var(--green-rgb), .08); }
 .panel-title { color:rgba(var(--green-rgb),.6); margin: var(--pad-12) 0 var(--pad-6); }
+.view-selector .panel-title { cursor: default; border: none; background: transparent; }
 #traits-container { display:block; }
 .trait-group { margin-bottom: var(--pad-6); border-bottom:1px solid rgba(var(--green-rgb),.05); }
 .trait-header { color: var(--fg); font-weight:700; padding:2px 0; font-size: var(--fs-10); cursor:pointer; display:flex; align-items:center; gap:6px; }
@@ -319,3 +320,6 @@ body.view-selector-enabled .preset-bar { display: none; }
   /* Stronger active feedback for icon-only buttons on touch */
   .btn:active { background: rgba(var(--green-rgb), .15); }
 }
+.tab-btn { border: var(--border); background: var(--bg); color: var(--fg); padding: 4px 6px; cursor:pointer; }
+.tab-btn:hover { background: var(--fg); color:#000; box-shadow: 0 0 12px rgba(var(--green-rgb), .45); }
+.tab-btn:active { transform: translateY(1px) scale(0.985); box-shadow: 0 0 0 1px rgba(var(--green-rgb), .35), 0 0 8px rgba(var(--green-rgb), .25) inset; }
