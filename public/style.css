@@ -4,7 +4,11 @@ body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-te
 .header { display:flex; align-items:center; gap: var(--pad-12); padding: var(--pad-4) var(--pad-16); border-bottom:1px solid rgba(var(--green-rgb),.3); position: sticky; top: 0; z-index: 100; background: var(--bg); min-height: 40px; }
 .view-tip, .view-tip .tip-text, .view-tip .btn { display: none !important; }
 .logo { font-weight:700; }
-.header-controls { display:flex; align-items:center; gap:12px 16px; min-width:0; flex:1; flex-wrap: nowrap; justify-content: flex-end; }
+.header-controls { display:grid; align-items:center; gap:12px 16px; min-width:0; flex:1; grid-template-columns: auto 1fr auto var(--col-right); }
+.header-controls .mode-chips { grid-column: 1; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.header-controls .preset-bar { grid-column: 2; flex: 1 1 auto; min-width: 320px; overflow-x:auto; }
+.header-controls .more { grid-column: 3; justify-self:end; }
+.header-controls .search-wrapper { grid-column: 4; display:flex; align-items:center; gap:6px; margin-left:0; width: var(--col-right); }
 .preset-bar { display:flex; align-items:center; gap: var(--pad-8); overflow-x:auto; padding: var(--pad-4) 0; min-width:0; }
 .header-controls .mode-chips { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; order: 1; }
 .header-controls .preset-bar { order: 2; flex: 1 1 auto; min-width: 160px; }
@@ -15,7 +19,9 @@ body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-te
 .header select,
 .header input[type="search"],
 .header .clear-btn { height: var(--ctl-h); line-height: var(--ctl-h); }
-.preset-btn i { font-size: 14px; margin-right: 6px; vertical-align: -2px; }
+.preset-btn { display:inline-flex; align-items:center; gap:6px; }
+.preset-btn i { font-size: 14px; margin-right: 0; vertical-align: -2px; }
+.preset-btn .preset-label { display:inline !important; }
 .clear-btn { background: var(--bg); color: var(--fg); border: 1px solid rgba(var(--green-rgb),.2); padding: 0 var(--pad-8); cursor: pointer; }
 .main-container {
   display: grid;
@@ -25,6 +31,11 @@ body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-te
 /* When header wraps to multiple rows, avoid clipping content by allowing extra height */
 @media (max-width: 1200px){
   .main-container { height: auto; min-height: calc(100dvh - 40px); }
+  .header-controls { grid-template-columns: 1fr auto; }
+  .header-controls .mode-chips { grid-column: 1 / span 2; }
+  .header-controls .preset-bar { grid-column: 1 / span 2; min-width: 0; }
+  .header-controls .more { grid-column: 2; }
+  .header-controls .search-wrapper { grid-column: 1; width: 100%; }
 }
 .controls-min { display:flex; align-items:center; gap: var(--pad-16); flex:1; }
 .controls-min label { margin-right: var(--pad-12); color: var(--fg); }
@@ -47,11 +58,11 @@ select {
 @media (min-width: 901px){ .mode-selector { display:none; } }
 .header-search { background: var(--bg); color: var(--fg); border: var(--border); padding:6px 12px; outline:none; width:100%; }
 .header-search::placeholder { color: rgba(var(--green-rgb),.6); font-size: var(--fs-10); }
-.presets { display:flex; gap: var(--pad-8); }
-.preset-btn { background: var(--bg); color: var(--fg); border: var(--border); padding:4px 8px; cursor:pointer; font-size: var(--fs-10); }
+.presets { display:flex; gap: var(--pad-6); }
+.preset-btn { background: transparent; color: var(--fg); border: 1px solid rgba(var(--green-rgb),.35); padding:2px 10px; cursor:pointer; font-size: var(--fs-10); border-radius: 999px; opacity:.9; }
 .preset-btn i { font-size:12px; vertical-align:middle; }
-.preset-btn:hover { background: rgba(var(--green-rgb),.1); }
-.preset-btn.active { background: var(--fg); color:#000; }
+.preset-btn:hover { background: rgba(var(--green-rgb),.1); opacity:1; }
+.preset-btn.active { background: var(--fg); color:#000; border-color: var(--fg); }
 .shell { display:grid; grid-template-columns: 280px 1fr 420px; height:100%; overflow:hidden; }
 .left-panel { border-right:1px solid rgba(var(--green-rgb),.2); padding: var(--pad-16); overflow:auto; width:var(--col-left); }
 .left-panel, .right-panel { scrollbar-width: thin; scrollbar-color: rgba(var(--green-rgb), .4) rgba(var(--green-rgb), .08); }

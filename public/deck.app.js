@@ -6,7 +6,7 @@
   if (stage) stage.style.display = 'none';
   if (!center) return;
 
-  const {Deck, ScatterplotLayer, LineLayer, TextLayer, PolygonLayer, ArcLayer, ScreenGridLayer, HexagonLayer, HeatmapLayer, PathLayer, OrthographicView, COORDINATE_SYSTEM} = window.deck || {};
+  const {Deck, ScatterplotLayer, LineLayer, TextLayer, PolygonLayer, ArcLayer, ScreenGridLayer, HexagonLayer, HeatmapLayer, PathLayer, PointCloudLayer, OrthographicView, COORDINATE_SYSTEM, BrushingExtension} = window.deck || {};
   if (!Deck) { console.error('Deck.gl UMD not found'); return; }
 
   const API = {
@@ -45,6 +45,8 @@
   let hasFittedOnce = false; // fit view after first render
   let currentZoom = 0;       // updated on view changes
   const timeline = { start: null, end: null, value: null, playing: true };
+  let transfersCache = null; // reuse transfers for flows/heat/shockwaves
+  let pulseT = 0;            // animation time for pulses
 
   // UI toggles reflect left panel checkboxes
   const ui = {
@@ -198,9 +200,12 @@
     if (animReq) cancelAnimationFrame(animReq);
     const start = performance.now? performance.now(): Date.now();
     const tick = ()=>{
-      const t = ((performance.now? performance.now(): Date.now()) - start)/1000;
+      const now = (performance.now? performance.now(): Date.now());
+      const t = (now - start)/1000;
+      pulseT = t; // global pulse time
       if (currentMode==='holders') animateHolders(t);
       else if (currentMode==='traits') animateTraits(t);
+      else if (currentMode==='transfers') { if (timeline.playing) render(nodes, edges, currentMode); }
       animReq = requestAnimationFrame(tick);
     };
     animReq = requestAnimationFrame(tick);
@@ -293,6 +298,8 @@
       new LineLayer({ id:'grid', data:grid, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,25], getWidth:1, widthUnits:'pixels' }),
       // Ownership hull rings (soft fill + stroke)
       holdersHulls.length && new PolygonLayer({ id:'hulls', data:holdersHulls, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPolygon:d=>d.path, stroked:true, filled:true, getFillColor:[0,255,102,10], getLineColor:[0,255,102,45], getLineWidth:1, lineWidthUnits:'pixels' }),
+      // Fancy ownership multi-rings (top owners)
+      (mode==='holders' && ui.bubbles) && new PolygonLayer({ id:'owner-rings', data: buildOwnerRings(), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, stroked:true, filled:false, getPolygon:d=>d.path, getLineColor:d=>d.color, getLineWidth:d=>d.width, lineWidthUnits:'pixels', parameters:{ depthTest:false } }),
       // Ambient ownership edges
       (ui.ownership && ui.ambient) && new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0], getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0], getColor:d=>d.color, getWidth:d=>d.width, widthUnits:'pixels', opacity:0.35 }),
       // Wash/desire overlays
@@ -300,6 +307,8 @@
       (ui.desire && desireSet && desireSet.size) && new ScatterplotLayer({ id:'desire', data:nodes.filter(n=>desireSet.has(n.id)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(7, (d.radius||4)+4), getFillColor:[0,0,0,0], getLineColor:[255,215,0,200], lineWidthMinPixels:1, stroked:true, filled:false, radiusUnits:'pixels' }),
       new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>d.radius*3.5, getFillColor:d=>[d.color[0],d.color[1],d.color[2], 20], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
       new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=>d.radius||4, getFillColor:d=>d.color, radiusUnits:'pixels', onClick: handleClick }),
+      // Subtle pulse rings for recently active tokens
+      new ScatterplotLayer({ id:'pulses', data: nodes.filter(n=>recentActive(n)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> (d.radius||4) * (1.6 + 0.4*Math.sin(pulseT*2 + (d.id||0))), getLineColor:[0,255,102,140], lineWidthMinPixels:1, radiusUnits:'pixels', updateTriggers:{ getRadius: [pulseT] }, parameters:{ depthTest:false } }),
       (selObj) && new ScatterplotLayer({ id:'selection-ring', data:[selObj], coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(10,(d.radius||4)+8), getFillColor:[0,0,0,0], getLineColor:[0,255,102,220], lineWidthMinPixels:2, stroked:true, filled:false, radiusUnits:'pixels' })
     ];
     // View-specific adds
@@ -355,6 +364,11 @@
     return data;
   }
 
+  function recentActive(n){
+    const last = Number(n.lastActivity||0); if (!last) return false;
+    const days = (Date.now()/1000 - last) / 86400; return days < 7; // last week
+  }
+
   function computeHulls(nodes, pdata){
     try {
       const byOwner = new Map();
@@ -371,6 +385,22 @@
         out.push({ path });
       }
       return out;
+    } catch { return []; }
+  }
+
+  function buildOwnerRings(){
+    try {
+      if (!ownerCenters || !ownerHoldings) return [];
+      const owners = ownerCenters.map((c,i)=>({ i, c, h: ownerHoldings[i]||0 })).filter(o=>o.c).sort((a,b)=>b.h-a.h).slice(0,12);
+      const rings = [];
+      for (const o of owners){
+        const base = 60 + Math.sqrt(o.h||1)*10;
+        for (let k=0;k<3;k++){
+          const r = base + k*18;
+          rings.push({ path: circlePath(o.c[0], o.c[1], r, 64), color:[0,255,102, 40 + k*30], width: 1.2 });
+        }
+      }
+      return rings;
     } catch { return []; }
   }
 
@@ -565,15 +595,14 @@
     const traitKeys = presetData?.traitKeys || [];
     const groups = new Map();
     nodes.forEach(n=>{ const k=tk[n.tokenId]; if (k>=0){ if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(n); }});
-    // Cluster positions on spiral
     const keys = Array.from(groups.keys());
     const clusterPos = new Map();
-    const step = 220; keys.forEach((k,i)=>{ const ang=i*0.6; const r=200 + Math.sqrt(i)*step; clusterPos.set(k, [Math.cos(ang)*r, Math.sin(ang)*r, 0]); });
-    nodes.forEach(n=>{ const k=tk[n.tokenId]; const c = clusterPos.get(k) || [0,0,0]; n.position = [ c[0] + ((n.tokenId%20)-10)*10, c[1] + (Math.floor(n.tokenId/20)%10 -5)*10, 0]; n.radius = (n.rarity>0.9)?8:4; });
-    const points = new ScatterplotLayer({ id:'trait-clusters', data:nodes, getPosition:d=>d.position, getRadius:d=>d.radius, getFillColor:d=> d.rarity>0.95 ? [255,0,255,200] : d.color, radiusUnits:'pixels', pickable:true, onClick:handleClick });
+    const step = 220; keys.forEach((k,i)=>{ const ang=i*0.6; const r=220 + Math.sqrt(i)*step; clusterPos.set(k, [Math.cos(ang)*r, Math.sin(ang)*r, 0]); });
+    nodes.forEach(n=>{ const k=tk[n.tokenId]; const c = clusterPos.get(k) || [0,0,0]; const z=(n.rarity||0)*50; n.position = [ c[0] + ((n.tokenId%20)-10)*12, c[1] + (Math.floor(n.tokenId/20)%10 -5)*12, z]; n.radius = (n.rarity>0.9)?8:4; });
+    const points = (typeof PointCloudLayer==='function') ? new PointCloudLayer({ id:'trait-clusters', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getNormal:[0,0,1], getColor:d=> d.rarity>0.95 ? [255,0,255,220] : d.color, pointSize:3, material:{ ambient:0.5, diffuse:1, shininess:30, specularColor:[0,255,102] }, pickable:true, onClick:handleClick }) : new ScatterplotLayer({ id:'trait-clusters', data:nodes, getPosition:d=>[d.position[0],d.position[1],0], getRadius:d=>d.radius, getFillColor:d=> d.rarity>0.95 ? [255,0,255,200] : d.color, radiusUnits:'pixels', pickable:true, onClick:handleClick });
     const helix = typeof PathLayer==='function' ? new PathLayer({ id:'trait-dna', data: Array.from(groups.values()).map(list=> helixPath(list)), getPath:d=>d, getColor:[0,255,102,100], getWidth:2, widthMinPixels:1, parameters:{ depthTest:false } }) : null;
     const labels = new TextLayer({ id:'trait-labels', data: keys.map(k=>({ k, center: clusterPos.get(k)||[0,0,0] })), getPosition:d=>d.center, getText:d=> traitKeys[d.k]||('Trait '+d.k), getSize:14, getColor:[0,255,102,200], fontFamily:'IBM Plex Mono', getPixelOffset:[0,-20] });
-    return [ points, helix, labels, ...base.filter(Boolean) ];
+    return [ points, helix, labels, ...base ];
   }
 
   function helixPath(list){
@@ -587,7 +616,7 @@
   function makeWalletsLayers(base){
     const owners = (presetData?.owners||[]).map((addr,i)=>({ address: addr, position: ownerCenters?.[i] || [0,0,0], ethos: presetData?.ownerEthos?.[i] || 0, holdings: ownerHoldings?.[i] || 0 }));
     const glow = new ScatterplotLayer({ id:'wallet-glow', data: owners, getPosition:d=>d.position, getRadius:d=>Math.max(6, Math.sqrt(d.ethos||100)), getFillColor:d=>[0, Math.min(255,(d.ethos||0)/4), 102, 25], radiusUnits:'pixels' });
-    const nodesL = new ScatterplotLayer({ id:'wallet-nodes', data: owners, pickable:true, autoHighlight:true, onClick: async (info)=>{ if(info?.object){ await openWallet(info.object.address);} }, getPosition:d=>d.position, getRadius:d=> Math.max(3, Math.sqrt(d.ethos||100)), getFillColor:d=>[0, Math.min(255,(d.ethos||0)/4), 102, 200], getLineColor:d=>[255,255,255, d.ethos>800?255:0], lineWidthMinPixels: d=> d.ethos>800?2:0, stroked:true, radiusUnits:'pixels' });
+    const nodesL = new ScatterplotLayer({ id:'wallet-nodes', data: owners, pickable:true, autoHighlight:true, onClick: async (info)=>{ if(info?.object){ await openWallet(info.object.address);} }, getPosition:d=>d.position, getRadius:d=> Math.max(3, Math.sqrt(d.ethos||100)), getFillColor:d=>[0, Math.min(255,(d.ethos||0)/4), 102, 200], getLineColor:d=>[255,255,255, d.ethos>800?255:0], lineWidthMinPixels: d=> d.ethos>800?2:0, stroked:true, radiusUnits:'pixels', extensions: (typeof BrushingExtension==='function') ? [new BrushingExtension()] : undefined, brushingRadius: 120, brushingEnabled: true });
     return [ glow, nodesL, ...base ];
   }
 
@@ -671,6 +700,32 @@
     }
     const TripsLayer = (window.deck && (window.deck.TripsLayer || window.deck?.GeoLayers?.TripsLayer)) || window.TripsLayer || null;
     if (TripsLayer) add.unshift(makeTripsLayer());
+    // Heat overlay using transfer timestamps and price
+    try {
+      if (transfersCache && transfersCache.length && typeof HeatmapLayer==='function'){
+        const t0 = timeline.start || Math.min(...transfersCache.map(t=>t.timestamp||0));
+        const dt = (timeline.end|| (t0+1)) - t0 || 1;
+        const pts = transfersCache.map(tr=>({ position: [ (tr.timestamp - t0)/dt * 2000 - 1000, Math.log1p(Math.max(0,tr.price||0))*200 - 200, 0 ], w: 1 }));
+        add.push(new HeatmapLayer({ id:'activity-heat', data: pts, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getWeight:d=>d.w, radiusPixels:24, intensity:1, threshold:0.05, colorRange:[[0,0,0,0],[0,128,51,128],[0,255,102,255]] }));
+      }
+    } catch {}
+    // Price spikes shockwaves (approx)
+    try {
+      if (transfersCache && timeline.value!=null){
+        const now = timeline.value;
+        const events = transfersCache.filter(tr=> (tr.price||0) > 2 && (now - tr.timestamp) < 3600*12); // 12h ripple window
+        const waves = [];
+        for (const e of events){
+          const center = ownerCenters?.[ (presetData?.owners||[]).indexOf((e.to||'').toLowerCase()) ] || [0,0,0];
+          const age = Math.max(0, now - (e.timestamp||now));
+          const r = 50 + age * 5; // wave expands over time
+          waves.push({ c:center, r });
+        }
+        if (waves.length){
+          add.unshift(new PolygonLayer({ id:'price-spikes', data:waves, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, stroked:true, filled:false, getPolygon:d=> circlePath(d.c[0], d.c[1], d.r, 64), getLineColor:[255,0,102,100], getLineWidth:2, lineWidthUnits:'pixels', parameters:{ depthTest:false } }));
+        }
+      }
+    } catch {}
     return [ ...add, ...base ];
   }
 
@@ -689,6 +744,7 @@
         if (transfers.length){
           const ts = transfers.map(t=>t.timestamp||0); timeline.start = Math.min(...ts); timeline.end = Math.max(...ts); timeline.value = timeline.end; try{ const s=document.getElementById('time-slider'); if(s) s.value='100'; }catch{}
         }
+        transfersCache = transfers;
         cached = transfers.map(tr=>{
           const s = walletCenters.get(tr.from) || [0,0,0];
           const t = walletCenters.get(tr.to) || [0,0,0];
