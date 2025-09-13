@@ -16,14 +16,7 @@
     <div class="logo">MAMMOTH.NETWORK</div>
     <div class="header-controls">
       <div class="mode-chips" aria-label="Modes" style="display:none"></div>
-      <div class="presets preset-bar" aria-label="Presets">
-        <button class="btn btn--preset preset-btn" data-preset="ownership" title="Ownership"><i class="ri-links-line"></i><span class="preset-label"> OWNERSHIP</span></button>
-        <button class="btn btn--preset preset-btn" data-preset="trading" title="Trading"><i class="ri-line-chart-line"></i><span class="preset-label"> TRADING</span></button>
-        <button class="btn btn--preset preset-btn" data-preset="rarity" title="Rarity"><i class="ri-star-line"></i><span class="preset-label"> RARITY</span></button>
-        <button class="btn btn--preset preset-btn" data-preset="social" title="Social"><i class="ri-user-3-line"></i><span class="preset-label"> SOCIAL</span></button>
-        <button class="btn btn--preset preset-btn" data-preset="whales" title="Whales"><i class="ri-team-line"></i><span class="preset-label"> WHALES</span></button>
-        <button class="btn btn--preset preset-btn" data-preset="frozen" title="Frozen"><i class="ri-snowflake-line"></i><span class="preset-label"> FROZEN</span></button>
-      </div>
+      <!-- preset buttons removed (views live in left panel) -->
       <div class="more">
         <button id="more-btn" class="btn btn--chip tooltipped" title="More" data-tooltip="MORE" aria-haspopup="menu" aria-expanded="false" aria-controls="more-panel"><i class="ri-more-2-fill"></i></button>
         <div id="more-panel" class="more-panel" role="menu" hidden>
@@ -35,7 +28,9 @@
       <!-- View selector moved to left panel -->
       <div class="search-wrapper">
         <input id="search" type="search" placeholder="TOKEN ID OR ADDRESS" class="header-search">
-        <button id="clear-search" class="btn btn--clear clear-btn tooltipped" title="Clear (ESC)" data-tooltip="CLEAR">✕</button>
+        <button id="clear-search" class="btn btn--clear clear-btn tooltipped" title="Clear (ESC)" data-tooltip="CLEAR">
+          <i class="ri-close-line"></i>
+        </button>
       </div>
     </div>
   </header>
@@ -80,13 +75,12 @@
         </div>
         <div class="layer-toggles" style="margin-top: var(--pad-12);">
           <h4>DISPLAY</h4>
-          <div class="layer-toggle"><label>Ambient Edges</label><input type="checkbox" id="ambient-edges" checked></div>
+          <div class="layer-toggle"><label>Ambient Edges</label><input type="checkbox" id="ambient-edges"></div>
           <div class="layer-toggle"><label>Whale Bubbles</label><input type="checkbox" id="layer-bubbles" checked></div>
-          <div class="layer-toggle"><label>Wash Watch</label><input type="checkbox" id="layer-wash"></div>
-          <div class="layer-toggle"><label>Desire Paths</label><input type="checkbox" id="layer-desire"></div>
+          <!-- Removed: Wash Watch / Desire Paths -->
         </div>
         <!-- Focus removed -->
-        <div class="legend" id="legend">Color by owner; same-owner links.</div>
+        <!-- legend removed (dynamic UI already conveys meaning) -->
         <div class="edge-groups">
           <div class="edge-group open" data-group="relationships">
             <div class="edge-group-header" role="button" tabindex="0" aria-expanded="true" aria-controls="relationships-body">RELATIONSHIPS <span class="twist">▶</span></div>

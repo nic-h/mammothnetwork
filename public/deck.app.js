@@ -600,6 +600,19 @@ function buildFlowParticles(limit=600){
         <div class='section-label'>TRAITS</div>
         <div class='traits-table'>${traitsRows}</div>
       `;
+      // HISTORY feed (compact) if story.events exists
+      try {
+        const feed = Array.isArray(story?.events) ? story.events.slice(0,10) : [];
+        if (feed.length) {
+          const items = feed.map(ev => {
+            const ts = ev.timestamp ? new Date(ev.timestamp*1000).toISOString().slice(0,10) : '--';
+            const txt = (ev.type||'EVENT').toString().toUpperCase();
+            const price = (ev.price!=null) ? `${Math.round(ev.price*100)/100} TIA` : '--';
+            return `<div class='label'>${ts} • ${txt}</div><div class='value'>${price}</div>`;
+          }).join('');
+          detailsEl.innerHTML += `<div class='section-label'>HISTORY</div><div class='traits-table'>${items}</div>`;
+        }
+      } catch {}
       render(nodes, edges, currentMode);
     } catch {
       // Minimal, no-DB fallback so the panel is still useful in demo mode
@@ -632,7 +645,7 @@ function buildFlowParticles(limit=600){
   async function fetchWash(){ try { const r = await fetch('/api/suspicious-trades').then(x=>x.json()); const s=new Set((r.tokens||[]).map(t=>Number(t.token_id||t.id))); return s; } catch { return null; } }
   async function fetchDesire(){ try { const r = await fetch('/api/desire-paths').then(x=>x.json()); const s=new Set((r.desire_paths||[]).map(t=>Number(t.token_id||t.id))); return s; } catch { return null; } }
   function focusSelect(id){ const obj = nodes.find(n=>n.id===id); if (!obj) return; selectedId=id; // center roughly by resetting viewState target
-    try { const vs = deckInst?.viewState || {}; deckInst?.setProps?.({ initialViewState: { target: [obj.position[0], obj.position[1], 0], zoom: 1.2 } }); } catch {}
+    try { const vs = deckInst?.viewState || {}; deckInst?.setProps?.({ viewState: { target: [obj.position[0], obj.position[1], 0], zoom: 1.2 } }); } catch {}
     handleClick({ object: obj }); }
 
   // ---------- View builders and helpers ----------
@@ -806,6 +819,29 @@ function buildFlowParticles(limit=600){
       const ids = new Set((r.tokens||[]).map(Number));
       highlightSet = ids;
       render(nodes, edges, currentMode);
+
+      // Trait summary → sidebar (floor + examples) using preset arrays already loaded
+      const prices = (presetData?.tokenPrice||[]);
+      let floor = null, count = 0;
+      const samples = [];
+      ids.forEach(id => {
+        const idx = (id-1)|0; const p = prices[idx];
+        if (p!=null) floor = (floor==null)? p : Math.min(floor, p);
+        if (count < 12) samples.push(id);
+        count++;
+      });
+      const detailsEl = document.getElementById('details');
+      const thumbs = samples.map(id=>`<img src="/thumbnails/${id}.jpg" alt="${id}" style="width:48px;height:48px;object-fit:cover;margin:2px;border:1px solid rgba(0,255,102,.2)">`).join('');
+      if (detailsEl){
+        detailsEl.innerHTML = `
+          <div class='token-title'>${type.toUpperCase()}: ${value}</div>
+          <div class='card2'>
+            <div class='card'><div class='label'>COUNT</div><div class='big-number'>${count}</div></div>
+            <div class='card'><div class='label'>FLOOR</div><div class='big-number'>${floor!=null? (Math.round(floor*100)/100 + ' TIA'):'--'}</div></div>
+          </div>
+          <div class='section-label'>EXAMPLES</div>
+          <div class='traits-table' style="display:flex;flex-wrap:wrap">${thumbs || '<div class="label">--</div><div class="value">--</div>'}</div>`;
+      }
     } catch {}
   }
 
@@ -825,7 +861,7 @@ function buildFlowParticles(limit=600){
     const scale = Math.min((w-pad*2)/contentW, (h-pad*2)/contentH);
     const zoom = Math.log2(scale);
     const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
-    deckInst.setProps({ initialViewState: { target:[cx,cy,0], zoom } });
+    deckInst.setProps({ viewState: { target:[cx,cy,0], zoom } });
   }
 
   // Transfers view helpers
