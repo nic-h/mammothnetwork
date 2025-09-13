@@ -217,6 +217,7 @@
     };
     animReq = requestAnimationFrame(tick);
     stopUILoad();
+    try { if ((!selectedId || selectedId<0) && nodes && nodes.length){ focusSelect(nodes[Math.floor(nodes.length*0.5)].id); } } catch {}
   }
 
   function buildNodes(apiNodes, pdata){
@@ -341,6 +342,13 @@
       if (mode==='traits' && ui.traits) layers = makeTraitsLayers(layers);
       if (mode==='wallets') layers = makeWalletsLayers(layers);
       if (mode==='transfers') layers = makeTransfersLayers(layers);
+      if (mode==='transfers' && timelineLimits){
+        // Scanning line at current time
+        const t0=timelineLimits.t0||0, t1=timelineLimits.t1||1; const w=center.clientWidth||1200; const h=center.clientHeight||800;
+        const x = (timeline.value||t1); const px = (x - t0)/(t1 - t0) * (w-160) + 80;
+        const scan = [{ s:[px,80,0], t:[px,h-80,0] }];
+        layers.unshift(new LineLayer({ id:'scanline', data:scan, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,120], getWidth:1.5, widthUnits:'pixels', parameters:{ depthTest:false }, updateTriggers:{ data: [timeline.value] } }));
+      }
       // Health/Activity view keys off select state while using holders data
       const ve = document.getElementById('view');
       if (ve && ve.value==='health' && mode==='holders') layers = makeActivityLayers(layers);
@@ -622,6 +630,8 @@ function buildFlowParticles(limit=600){
         centers[ranked[i].idx] = [Math.cos(ang)*r, Math.sin(ang)*r, 0];
       }
       ownerCenters = centers;
+      // Best-effort ENS fetch for top owners
+      try { fetchTopOwnerLabels(pdata, counts, centers); } catch {}
       // Attach owner center + orbit params to nodes (for holders view)
       nodeList.forEach(n=>{
         const ownerIdx = n.ownerIndex; const c = centers[ownerIdx] || [0,0,0];
@@ -631,6 +641,20 @@ function buildFlowParticles(limit=600){
         n.orbitRadius = 28 + Math.sqrt(h)*8; // larger holdings → larger orbit ring
       });
     } catch {}
+  }
+
+  async function fetchTopOwnerLabels(pdata, counts, centers){
+    const owners = pdata?.owners || [];
+    const ranked = owners.map((addr,i)=>({ addr:(addr||'').toLowerCase(), i, h: counts[i]||0, c: centers[i] })).filter(x=>x.c).sort((a,b)=>b.h-a.h).slice(0,40);
+    for (const r of ranked){
+      if (!r.addr || ownerLabels.has(r.addr)) continue;
+      try {
+        const meta = await fetch(`/api/wallet/${r.addr}/meta`).then(x=>x.ok?x.json():null).catch(()=>null);
+        const label = (meta?.ens_name && meta.ens_name.length>2) ? meta.ens_name : `${r.addr.slice(0,6)}...${r.addr.slice(-4)}`;
+        ownerLabels.set(r.addr, label);
+      } catch {}
+    }
+    if (currentMode==='holders') try { render(nodes, edges, currentMode); } catch {}
   }
 
   function makeHoldersLayers(base){
@@ -649,7 +673,7 @@ function buildFlowParticles(limit=600){
         colorRange: [[0,0,0,0],[0,255,102,60],[0,255,102,140]]
       });
       // 2) Owner cores (whale suns)
-      const cores = (function(){ const out=[]; if(!ownerCenters) return out; for (let i=0;i<ownerCenters.length;i++){ const c=ownerCenters[i]; if(!c) continue; const h=ownerHoldings?.[i]||0; const size = 4 + Math.sqrt(h)*1.2; out.push({ idx:i, position:c, size, label: (presetData?.owners?.[i]||'').slice(0,6)+'...'+(presetData?.owners?.[i]||'').slice(-4) }); } return out; })();
+      const cores = (function(){ const out=[]; if(!ownerCenters) return out; for (let i=0;i<ownerCenters.length;i++){ const c=ownerCenters[i]; if(!c) continue; const h=ownerHoldings?.[i]||0; const size = 4 + Math.sqrt(h)*1.2; const addr=(presetData?.owners?.[i]||'').toLowerCase(); const lab=(ownerLabels.get(addr)) || (addr? addr.slice(0,6)+'...'+addr.slice(-4) : ''); out.push({ idx:i, position:c, size, label: lab }); } return out; })();
       const coreLayer = new ScatterplotLayer({ id:'owner-cores', data: cores, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, onHover: info=>{ hoveredOwner = info?.object?.idx ?? -1; render(nodes,edges,currentMode); }, onClick: info=>{ if(info?.object){ collapseOwner = info.object.idx; collapsePhase=0; } }, getPosition:d=>d.position, getRadius:d=>d.size*3.5, getFillColor:[0,255,102,60], radiusUnits:'pixels' });
       const coreLabels = new TextLayer({ id:'owner-labels', data: cores.slice(0, Math.min(cores.length, 40)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>[d.position[0], d.position[1]-22, 0], getText:d=>d.label, getSize: 12, getColor:[0,255,102,200], fontFamily:'IBM Plex Mono', billboard:true });
       // 3) Tokens with orbital motion around owner center
