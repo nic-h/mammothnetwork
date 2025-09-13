@@ -47,6 +47,10 @@
   const timeline = { start: null, end: null, value: null, playing: true };
   let transfersCache = null; // reuse transfers for flows/heat/shockwaves
   let pulseT = 0;            // animation time for pulses
+  let hoveredOwner = -1;     // owner core hover state
+  let collapseOwner = -1;    // owner collapse animation
+  let collapsePhase = 0;     // 0..1..0 ease
+  let timelineLimits = null; // {t0,t1}
 
   // UI toggles reflect left panel checkboxes
   const ui = {
@@ -251,8 +255,22 @@
       const owners = Math.max(1, (pdata.owners?.length||12));
       const hubs = new Map();
       nodes.forEach((d,i)=>{ const oi=d.ownerIndex>=0?d.ownerIndex:(i%owners); if (!hubs.has(oi)){ const ang=(oi/owners)*Math.PI*2; hubs.set(oi, [cx+Math.cos(ang)*240, cy+Math.sin(ang)*220, 0]); } });
+      // Group tokens by owner to assign orbital rings by recency
+      const byOwner = new Map();
+      for (const d of nodes){ const oi=d.ownerIndex; if (oi==null||oi<0) continue; if(!byOwner.has(oi)) byOwner.set(oi, []); byOwner.get(oi).push(d); }
+      byOwner.forEach(list=>{ list.sort((a,b)=>(a.lastActivity||0)-(b.lastActivity||0)); /* oldest first */ });
+      const ringCount = 5; const ringSpacing = 14;
       basePositions = nodes.map((d,i)=>{
-        const hub = hubs.get(d.ownerIndex) || [cx,cy,0]; const idx=i%50; const level=Math.floor(Math.log2(idx+2)); const r=20 + level*16; const ang=(i*0.618)%1 * Math.PI*2; const pos=[hub[0]+Math.cos(ang)*r, hub[1]+Math.sin(ang)*r, 0]; d.position=pos; return pos.slice();
+        const hub = hubs.get(d.ownerIndex) || [cx,cy,0];
+        // ring index by quantiles within owner
+        const list = byOwner.get(d.ownerIndex) || [];
+        let ring = 0; if (list.length>0){ const idx = list.indexOf(d); const q = idx/(list.length-1||1); ring = Math.max(0, Math.min(ringCount-1, Math.floor(q*ringCount))); }
+        const baseR = 26 + ring*ringSpacing + Math.sqrt((ownerHoldings?.[d.ownerIndex]||1))*1.0;
+        d.orbitRadius = baseR; // base radius
+        // speed: newer trades faster
+        const recency = Math.max(0, Math.min(1, (Date.now()/1000 - (d.lastActivity||0)) / (86400*365)));
+        d.orbitSpeed = 0.010 / Math.max(1, Math.sqrt((ownerHoldings?.[d.ownerIndex]||1))) * (1.2 - 0.6*Math.min(1, recency));
+        const ang=(i*0.47)% (Math.PI*2); const pos=[hub[0]+Math.cos(ang)*baseR, hub[1]+Math.sin(ang)*baseR, 0]; d.position=pos; return pos.slice();
       });
     } else if (mode==='traits'){
       const tk = pdata.tokenTraitKey||[]; const freq=new Map(); tk.forEach(k=>{ if (k>=0) freq.set(k,(freq.get(k)||0)+1); }); const keys=[...freq.keys()].sort((a,b)=>freq.get(a)-freq.get(b));
@@ -266,13 +284,13 @@
       nodes.forEach((d,i)=>{ const hold = counts.get(d.ownerIndex)||1; const rad = hold>20? 200: hold>10? 400: hold>5? 600: 800; const ang=(i/10000)*Math.PI*2; d.position=[cx+Math.cos(ang)*rad, cy+Math.sin(ang)*rad, 0]; });
       basePositions = nodes.map(d=>d.position.slice());
     } else if (mode==='transfers'){
-      // Profit waterfalls (basic) using price vs buy info if present
-      const lastSale = pdata.tokenLastSalePrice||[]; const lastBuy=pdata.tokenLastBuyPrice||[]; const lastAct=pdata.tokenLastActivity||[];
-      const tiers={bigProfit:[],profit:[],breakeven:[],loss:[],bigLoss:[]};
-      nodes.forEach(d=>{ const i=d.tokenId; const lp=Number(lastSale[i]||0); const bp=Number(lastBuy[i]||lp); const p=lp-bp; if (p>5) tiers.bigProfit.push(d); else if (p>0) tiers.profit.push(d); else if (p>-0.5) tiers.breakeven.push(d); else if (p>-5) tiers.loss.push(d); else tiers.bigLoss.push(d); });
-      const order=['bigProfit','profit','breakeven','loss','bigLoss']; let curY=70; const tierH=Math.max(100,h/5);
-      order.forEach(key=>{ const arr=tiers[key]; const poolW=Math.min(arr.length*3+200, w-160); arr.forEach((d,j)=>{ const col=j%50; const row=Math.floor(j/50); const pos=[cx-poolW/2 + (col+0.5)*(poolW/50), curY + row*18, 0]; d.position=pos; const days=d.lastActivity? (Date.now()/1000-d.lastActivity)/86400:999; d.radius= days<7? 9: days<30? 6: 3; d.color = key==='bigProfit'?[0,255,0,200]: key==='profit'?[0,255,102,200]: key==='breakeven'?[255,255,102,200]: key==='loss'?[255,102,102,200]:[255,0,0,220]; }); curY+=tierH; });
-      basePositions = nodes.map(d=>d.position.slice());
+      // Timeline layout: X=time, Y=price (log)
+      const tarr = pdata.tokenLastActivity||[]; const parr = pdata.tokenLastSalePrice||[];
+      const t0 = Math.min(...tarr.filter(Boolean)), t1 = Math.max(...tarr.filter(Boolean));
+      timelineLimits = { t0: t0||0, t1: t1||1 };
+      const lx = (t)=>{ if(!t0||!t1||t0===t1) return cx; return (t - t0)/(t1 - t0) * (w-160) + 80; };
+      const ly = (p)=>{ const v=Math.log1p(Math.max(0, p||0)); const vmax = Math.log1p(Math.max(1, Math.max(...parr.filter(x=>x!=null))))||1; const y = (1 - v/(vmax||1))*(h-160) + 80; return y; };
+      basePositions = nodes.map(d=>{ const t=tarr[d.tokenId]||t0; const p=parr[d.tokenId]||0; const pos=[lx(t), ly(p), 0]; d.position=pos; d.radius=3+(p?Math.min(6,Math.sqrt(p)):2); return pos.slice(); });
     } else {
       // Default grid
       const grid=100; nodes.forEach((d,i)=>{ d.position=[(i%grid)*20-1000, Math.floor(i/grid)*20-1000, 0]; }); basePositions = nodes.map(d=>d.position.slice());
@@ -342,9 +360,21 @@
     // advance orbital angle; speed scales by owner holdings for a smoother look
     for (const d of nodes){
       const h = (ownerHoldings?.[d.ownerIndex]||1);
-      const speed = 0.010 / Math.max(1, Math.sqrt(h));
+      let speed = d.orbitSpeed || (0.010 / Math.max(1, Math.sqrt(h)));
+      if (hoveredOwner>=0 && d.ownerIndex===hoveredOwner) speed*=1.6;
       d.orbit = (d.orbit || 0) + speed;
+      // collapse animation
+      if (collapseOwner>=0 && d.ownerIndex===collapseOwner){
+        const k = (collapsePhase<0.5)? (1 - collapsePhase*2*0.6) : (1 - (1-collapsePhase)*2*0.6);
+        const r = d.orbitRadius * k;
+        const hub = ownerCenters?.[d.ownerIndex] || [0,0,0];
+        d.position = [ hub[0] + Math.cos(d.orbit||0)*r, hub[1] + Math.sin(d.orbit||0)*r, 0 ];
+      } else if (typeof d.orbitRadius === 'number'){
+        const hub = ownerCenters?.[d.ownerIndex] || [0,0,0];
+        d.position = [ hub[0] + Math.cos(d.orbit||0)*d.orbitRadius, hub[1] + Math.sin(d.orbit||0)*d.orbitRadius, 0 ];
+      }
     }
+    if (collapseOwner>=0){ collapsePhase += 0.02; if (collapsePhase>=1){ collapseOwner=-1; collapsePhase=0; } }
     render(nodes, edges, currentMode);
   }
   function animateTraits(t){
@@ -596,7 +626,11 @@
         getColorWeight: d => d.tokenCount,
         colorRange: [[0,0,0,0],[0,255,102,60],[0,255,102,140]]
       });
-      // 2) Tokens with orbital motion around owner center
+      // 2) Owner cores (whale suns)
+      const cores = (function(){ const out=[]; if(!ownerCenters) return out; for (let i=0;i<ownerCenters.length;i++){ const c=ownerCenters[i]; if(!c) continue; const h=ownerHoldings?.[i]||0; const size = 4 + Math.sqrt(h)*1.2; out.push({ idx:i, position:c, size, label: (presetData?.owners?.[i]||'').slice(0,6)+'...'+(presetData?.owners?.[i]||'').slice(-4) }); } return out; })();
+      const coreLayer = new ScatterplotLayer({ id:'owner-cores', data: cores, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, onHover: info=>{ hoveredOwner = info?.object?.idx ?? -1; render(nodes,edges,currentMode); }, onClick: info=>{ if(info?.object){ collapseOwner = info.object.idx; collapsePhase=0; } }, getPosition:d=>d.position, getRadius:d=>d.size*3.5, getFillColor:[0,255,102,60], radiusUnits:'pixels' });
+      const coreLabels = new TextLayer({ id:'owner-labels', data: cores.slice(0, Math.min(cores.length, 40)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>[d.position[0], d.position[1]-22, 0], getText:d=>d.label, getSize: 12, getColor:[0,255,102,200], fontFamily:'IBM Plex Mono', billboard:true });
+      // 3) Tokens with orbital motion around owner center
       const tokens = new ScatterplotLayer({
         id: 'token-orbits',
         data: nodes,
@@ -612,11 +646,11 @@
         radiusUnits:'pixels',
         onClick: handleClick
       });
-      // 3) Ownership connections (owner center -> orbiting token)
+      // 4) Ownership connections (owner center -> orbiting token)
       const hasArc = typeof ArcLayer === 'function';
       const arcsData = nodes.slice(0, Math.min(nodes.length, 6000)).map(d=>({ s: [d.ownerX, d.ownerY, 0], t: [ d.ownerX + Math.cos(d.orbit)*d.orbitRadius, d.ownerY + Math.sin(d.orbit)*d.orbitRadius, 0 ] }));
       const arcs = hasArc ? new ArcLayer({ id:'ownership-links', data: arcsData, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getSourceColor:[0,255,102,180], getTargetColor:[0,255,102,10], getWidth:1 }) : null;
-      return [ density, tokens, arcs, ...base.filter(Boolean) ];
+      return [ density, coreLayer, coreLabels, tokens, arcs, ...base.filter(Boolean) ];
     } catch { return base; }
   }
 
@@ -730,8 +764,8 @@
     if (flowEdges && flowEdges.length){
       add.push(new LineLayer({ id:'transfer-volume', data:flowEdges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, widthUnits:'pixels', getSourcePosition:e=>nodes[e.a]?.position, getTargetPosition:e=>nodes[e.b]?.position, getColor:[0,255,102,120], getWidth:e=>Math.max(1, Math.log1p(e.count)), opacity:0.35 }));
     }
-    const TripsLayer = (window.deck && (window.deck.TripsLayer || window.deck?.GeoLayers?.TripsLayer)) || window.TripsLayer || null;
-    if (TripsLayer) add.unshift(makeTripsLayer());
+    // Avoid wallet-positioned flows when using timeline layout; keep heat + particles
+    // (We can re-enable TripsLayer if we project to timeline coords later)
     // Flow particles gliding along current timeline
     try { const dots = buildFlowParticles(600); if (dots && dots.length) add.unshift(new ScatterplotLayer({ id:'flow-dots', data:dots, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.p, getRadius:2, getFillColor:d=> priceColor(d.price), radiusUnits:'pixels', pickable:false, updateTriggers:{ getPosition:[timeline.value] } })); } catch {}
     // Heat overlay using transfer timestamps and price
