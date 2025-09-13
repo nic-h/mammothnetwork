@@ -299,7 +299,7 @@
       // Ownership hull rings (soft fill + stroke)
       holdersHulls.length && new PolygonLayer({ id:'hulls', data:holdersHulls, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPolygon:d=>d.path, stroked:true, filled:true, getFillColor:[0,255,102,10], getLineColor:[0,255,102,45], getLineWidth:1, lineWidthUnits:'pixels' }),
       // Fancy ownership multi-rings (top owners)
-      (mode==='holders' && ui.bubbles) && new PolygonLayer({ id:'owner-rings', data: buildOwnerRings(), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, stroked:true, filled:false, getPolygon:d=>d.path, getLineColor:d=>d.color, getLineWidth:d=>d.width, lineWidthUnits:'pixels', parameters:{ depthTest:false } }),
+      (mode==='holders' && ui.bubbles) && new PolygonLayer({ id:'owner-rings', data: buildOwnerRings(), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, stroked:true, filled:false, getPolygon:d=>d.path, getLineColor:d=>d.color, getLineWidth:d=>d.width, lineWidthUnits:'pixels', parameters:{ depthTest:false }, updateTriggers:{ getLineColor: [pulseT] } }),
       // Ambient ownership edges
       (ui.ownership && ui.ambient) && new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0], getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0], getColor:d=>d.color, getWidth:d=>d.width, widthUnits:'pixels', opacity:0.35 }),
       // Wash/desire overlays
@@ -397,7 +397,9 @@
         const base = 60 + Math.sqrt(o.h||1)*10;
         for (let k=0;k<3;k++){
           const r = base + k*18;
-          rings.push({ path: circlePath(o.c[0], o.c[1], r, 64), color:[0,255,102, 40 + k*30], width: 1.2 });
+          // animated alpha sweep per ring
+          const a = Math.max(20, Math.min(200, Math.round(100 + 60*Math.sin(pulseT*1.2 + k*0.8 + o.i*0.2))));
+          rings.push({ path: circlePath(o.c[0], o.c[1], r, 128), color:[0,255,102, a], width: 1.2 });
         }
       }
       return rings;
@@ -602,7 +604,9 @@
     const points = (typeof PointCloudLayer==='function') ? new PointCloudLayer({ id:'trait-clusters', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getNormal:[0,0,1], getColor:d=> d.rarity>0.95 ? [255,0,255,220] : d.color, pointSize:3, material:{ ambient:0.5, diffuse:1, shininess:30, specularColor:[0,255,102] }, pickable:true, onClick:handleClick }) : new ScatterplotLayer({ id:'trait-clusters', data:nodes, getPosition:d=>[d.position[0],d.position[1],0], getRadius:d=>d.radius, getFillColor:d=> d.rarity>0.95 ? [255,0,255,200] : d.color, radiusUnits:'pixels', pickable:true, onClick:handleClick });
     const helix = typeof PathLayer==='function' ? new PathLayer({ id:'trait-dna', data: Array.from(groups.values()).map(list=> helixPath(list)), getPath:d=>d, getColor:[0,255,102,100], getWidth:2, widthMinPixels:1, parameters:{ depthTest:false } }) : null;
     const labels = new TextLayer({ id:'trait-labels', data: keys.map(k=>({ k, center: clusterPos.get(k)||[0,0,0] })), getPosition:d=>d.center, getText:d=> traitKeys[d.k]||('Trait '+d.k), getSize:14, getColor:[0,255,102,200], fontFamily:'IBM Plex Mono', getPixelOffset:[0,-20] });
-    return [ points, helix, labels, ...base ];
+    // Rare particle sparkles
+    const rare = new ScatterplotLayer({ id:'rare-spark', data: nodes.filter(n=> (n.rarity||0)>0.95), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius: d=> 2 + 1.2*Math.max(0, Math.sin(pulseT*3 + (d.id||0)*0.3)), getFillColor:[255,0,255,220], radiusUnits:'pixels', pickable:false, updateTriggers:{ getRadius: [pulseT] } });
+    return [ rare, points, helix, labels, ...base ];
   }
 
   function helixPath(list){
@@ -700,6 +704,8 @@
     }
     const TripsLayer = (window.deck && (window.deck.TripsLayer || window.deck?.GeoLayers?.TripsLayer)) || window.TripsLayer || null;
     if (TripsLayer) add.unshift(makeTripsLayer());
+    // Flow particles gliding along current timeline
+    try { const dots = buildFlowParticles(600); if (dots && dots.length) add.unshift(new ScatterplotLayer({ id:'flow-dots', data:dots, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.p, getRadius:2, getFillColor:d=> priceColor(d.price), radiusUnits:'pixels', pickable:false, updateTriggers:{ getPosition:[timeline.value] } })); } catch {}
     // Heat overlay using transfer timestamps and price
     try {
       if (transfersCache && transfersCache.length && typeof HeatmapLayer==='function'){
