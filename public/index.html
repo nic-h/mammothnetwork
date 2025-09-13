@@ -7,8 +7,8 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
   <!-- PIXI served from /lib; preconnect not required -->
-  <link rel="stylesheet" href="/client/styles/tokens.css">
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/client/styles/tokens.css?v=20250912-1">
+  <link rel="stylesheet" href="/style.css?v=20250912-1">
 </head>
 <body>
   <header class="header">
@@ -38,7 +38,7 @@
       </div>
       <div class="view-selector" aria-label="Views">
         <label for="view">VIEW</label>
-        <select id="view">
+        <select id="view" aria-label="Views">
           <option value="ownership">OWNERSHIP NETWORK</option>
           <option value="trading">TRADING ACTIVITY</option>
           <option value="traits">TRAIT EXPLORER</option>
@@ -52,10 +52,6 @@
       </div>
     </div>
   </header>
-  <div id="view-tip" class="view-tip" role="region" aria-live="polite" hidden>
-    <span class="tip-text">TIP: Use VIEW to switch Ownership, Trading, Traits, Whales, Health.</span>
-    <button id="view-tip-close" class="btn btn--clear" aria-label="Dismiss view tip">✕</button>
-  </div>
   <div class="main-container">
     <aside class="left-panel">
       <div class="controls-section">
@@ -118,8 +114,8 @@
       <div id="details">Select a node…</div>
     </aside>
   </div>
-  <script src="/lib/pixi.min.js"></script>
-  <script src="/viewport.js"></script>
-  <script src="/main.js"></script>
+  <script src="/lib/pixi.min.js?v=20250912-1"></script>
+  <script src="/viewport.js?v=20250912-1"></script>
+  <script src="/main.js?v=20250912-1"></script>
 </body>
 </html>

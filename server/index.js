@@ -162,18 +162,27 @@ async function getEthosForWallet(wallet){
     const row = db?.prepare?.('SELECT has_ethos, profile_json, updated_at FROM ethos_profiles WHERE wallet=?').get(addr);
     const now = Math.floor(Date.now()/1000);
     if (row && row.updated_at && (now - row.updated_at) < TTL){
-      return { hasEthos: !!row.has_ethos, profile: (row.has_ethos? JSON.parse(row.profile_json||'null') : null) };
+      const prof = row.profile_json ? JSON.parse(row.profile_json) : null;
+      // Revalidate with stricter rules when reading cache
+      const hasProfileId = !!(prof && typeof prof.profileId === 'number' && prof.profileId > 0);
+      const hasProfileLink = !!(prof && prof.links && typeof prof.links.profile === 'string' && prof.links.profile.length > 0);
+      const hasScore = !!(prof && typeof prof.score === 'number' && isFinite(prof.score));
+      const isActive = !!(prof && String(prof.status||'').toUpperCase() === 'ACTIVE');
+      const ok = !!row.has_ethos && (hasProfileId || hasProfileLink) && hasScore && isActive;
+      if (ok) return { hasEthos: true, profile: prof };
+      // If old cache is too loose, treat as no-ethos and fall through to refresh
     }
   } catch {}
   // Fetch from Ethos API
   let data = null; let accept = false;
   try { data = await getEthosForAddress(addr); } catch {}
   try {
-    // Strict: only accept wallets with an ACTIVE Ethos account or an explicit profileId (signed up)
-    const isActive = !!(data && String(data.status||'').toUpperCase() === 'ACTIVE');
+    // Stricter: require an explicit profile (ID or link) and a numeric score
     const hasProfileId = !!(data && typeof data.profileId === 'number' && data.profileId > 0);
     const hasProfileLink = !!(data && data.links && typeof data.links.profile === 'string' && data.links.profile.length > 0);
-    if (isActive || hasProfileId || hasProfileLink) accept = true;
+    const hasScore = !!(data && typeof data.score === 'number' && isFinite(data.score));
+    const isActive = !!(data && String(data.status||'').toUpperCase() === 'ACTIVE');
+    if ((hasProfileId || hasProfileLink) && hasScore && isActive) accept = true;
   } catch {}
   const now = Math.floor(Date.now()/1000);
   try {
@@ -855,7 +864,9 @@ app.get('/api/wallet/:address/meta', (req, res) => {
     const holdings = (meta?.total_holdings ?? db.prepare('SELECT COUNT(1) c FROM tokens WHERE LOWER(owner)=?').get(addr).c);
     const first = (meta?.first_acquired ?? db.prepare('SELECT MIN(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t) ?? null;
     const last = (meta?.last_activity ?? db.prepare('SELECT MAX(timestamp) t FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).t) ?? null;
-    const trades = (meta?.trade_count ?? db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).c);
+    // Prefer live trade count when stored count is missing or stale
+    const tradesLive = db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(from_addr)=? OR LOWER(to_addr)=?').get(addr, addr).c;
+    const trades = (meta?.trade_count != null) ? Math.max(meta.trade_count, tradesLive) : tradesLive;
     const buyCount = meta?.buy_count ?? db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(to_addr)=? AND price IS NOT NULL').get(addr).c;
     const sellCount = meta?.sell_count ?? db.prepare('SELECT COUNT(1) c FROM transfers WHERE LOWER(from_addr)=? AND price IS NOT NULL').get(addr).c;
     const buyVol = meta?.buy_volume_tia ?? db.prepare('SELECT COALESCE(SUM(price),0) v FROM transfers WHERE LOWER(to_addr)=? AND price IS NOT NULL').get(addr).v;

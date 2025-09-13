@@ -183,8 +183,21 @@ Notes
 - Images: served at `/images`; thumbnails at `/thumbnails` (nodes never load images)
 - If better‑sqlite3 native errors: `npm rebuild better-sqlite3 --build-from-source`
 
-Codex system instructions
-- Launch Codex with the repo’s system rules: `codex chat --system-file SYSTEM.md`
+Preview & Dev
+- Start: `npm run dev` (default `PORT=3000`)
+- If the port is busy: `PORT=3001 npm run dev` or kill the existing process (`lsof -i :3000 | awk 'NR>1{print $2}' | xargs kill -9` on macOS)
+- Open: `http://localhost:3000` (or your chosen port)
+- Optional: preselect a token for pretty screenshots with `?token=5000`, e.g. `http://localhost:3000/?token=5000`
+
+Screenshots
+- Generate 1440px desktop previews for each view: `npm run test:ui`
+- Configure variants: `PREVIEW_IDS=5000,3333,2500 PREVIEW_VARIANTS=3 npm run test:ui`
+- Images are saved to `artifacts/ui/`
+
+UI tweaks
+- Tip toolbar removed (cleaner top bar)
+- View selector font matches the logo and has extra left margin for breathing room
 
 Changelog (high level)
+- 2025‑09‑12: Removed tip bar; tightened header spacing; stricter Ethos gating; added N/A ETHOS when no verified profile; added URL `?token=` preselection; improved Trading/Whales/Traits layouts; multiple screenshot variants.
 - 2025‑09‑10: Added `/api/transfer-edges` and transaction edge styles with toggles; header sticky; grid visibility tuned; centralized JS palette.

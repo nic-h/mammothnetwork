@@ -10,6 +10,14 @@ const legendEl = document.getElementById('legend');
 const statusEl = null;
 const traitsContainer = document.getElementById('traits-container');
 const searchEl = document.getElementById('search');
+// Optional preview token via URL (?token=1234)
+var initialTokenParam = null; // var to be robust in older browsers
+try {
+  const qp = (typeof window!=='undefined' && window.location && window.location.search) ? window.location.search : '';
+  const usp = new URLSearchParams(qp||'');
+  const tok = usp.get('token');
+  if (tok) initialTokenParam = Number(tok);
+} catch {}
 const sidebar = document.getElementById('sidebar');
 const thumbEl = document.getElementById('thumb');
 const detailsEl = document.getElementById('details');
@@ -143,7 +151,17 @@ async function init() {
     edgesEl.addEventListener('input', ()=>{ if (ec) ec.textContent = String(edgesEl.value); load(modeEl.value, Number(edgesEl.value||200)); });
   }
   const clearBtn = document.getElementById('clear-search');
-  if (clearBtn){ clearBtn.addEventListener('click', ()=>{ searchEl.value=''; searchEl.focus(); }); }
+  if (clearBtn){
+    clearBtn.addEventListener('click', ()=>{
+      searchEl.value='';
+      highlightSet = null; // clear any trait filter highlights
+      selectedIndex = -1;  // clear selection
+      clearSelectionOverlay();
+      resetAlpha();
+      try { resetView(); } catch {}
+      searchEl.focus();
+    });
+  }
   window.addEventListener('keydown', (e)=>{
     if (e.key==='Escape'){
       selectedIndex = -1; clearSelectionOverlay(); resetAlpha();
@@ -219,6 +237,11 @@ async function init() {
   resetAlpha();
   resetView();
   setLegend(preset);
+  // Preselect token by URL param (?token=1234)
+  if (initialTokenParam && idToIndex && idToIndex.has(initialTokenParam)) {
+    const idxP = idToIndex.get(initialTokenParam);
+    try { selectNode(idxP); } catch {}
+  }
 
   // Enable unified view selector behavior
   try { document.body.classList.add('view-selector-enabled'); } catch {}
@@ -317,6 +340,7 @@ async function init() {
     const morePanel = document.getElementById('more-panel');
     if (moreBtn && morePanel && !moreBtn.dataset.bound){
       moreBtn.dataset.bound='1';
+      const prefersReduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
       const closeMenu = ()=>{ morePanel.hidden = true; moreBtn.setAttribute('aria-expanded','false'); };
       moreBtn.addEventListener('click', (e)=>{
         e.stopPropagation();
@@ -330,7 +354,7 @@ async function init() {
       document.addEventListener('click', (e)=>{
         if (!morePanel.hidden && !morePanel.contains(e.target) && e.target !== moreBtn) closeMenu();
       });
-      document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') closeMenu(); });
+      document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') { closeMenu(); try { moreBtn.focus(); } catch {} } });
       const items = Array.from(morePanel.querySelectorAll('.menu-item'));
       morePanel.addEventListener('keydown', (e)=>{
         if (!items.length) return;
@@ -352,9 +376,16 @@ async function init() {
             let el = null;
             if (tgt === 'edges'){ el = document.querySelector('.edge-groups'); if (el) { try { el.closest('.edge-group')?.classList.add('open'); } catch {} } }
             if (tgt === 'traits'){ const ts = document.querySelector('.traits-section'); ts?.classList.add('open'); el = ts; }
-            if (panel && el){ try { el.scrollIntoView({ behavior:'smooth', block:'start' }); } catch { panel.scrollTop = el.offsetTop - 12; } }
+            if (panel && el){
+              try {
+                el.scrollIntoView({ behavior: (prefersReduced ? 'auto' : 'smooth'), block:'start' });
+              } catch {
+                panel.scrollTop = el.offsetTop - 12;
+              }
+            }
           }
           closeMenu();
+          try { moreBtn.focus(); } catch {}
         });
       });
     }
@@ -547,8 +578,8 @@ function drawEdges(){
     }
     if ((edgesData?.length||0) && edgesData.length <= maxDraw) {
       // scale factors for width/alpha based on zoom (gentler falloff)
-      const aF = Math.max(0, Math.min(1, (s - 0.35) / 0.9));
-      const wF = 0.6 + aF * 0.4; // keep ambient edges thin
+      const aF = Math.max(0, Math.min(1, (s - 0.3) / 0.8));
+      const wF = 0.8 + aF * 0.6; // slightly thicker so dashed/dotted remain visible
       for (let e=0;e<edgesData.length;e++){
         const item = edgesData[e];
         const a = Array.isArray(item)? item[0] : (item.a ?? item.source ?? item.from ?? 0);
@@ -560,8 +591,15 @@ function drawEdges(){
         const x2 = sprites[j].x, y2 = sprites[j].y;
         let style = pickEdgeStyle(mode, i, j, item);
         if (!layerEnabled(style, item)) continue;
-        // Ambient edges: very light and thin; no weight-based thickening
-        style = { ...style, width: Math.max(0.25, Math.min(0.5, (style.width || 0.6) * wF)), opacity: Math.max(0.08, (style.opacity ?? 0.8) * 0.18) };
+        // Ambient edges: still light, but ensure patterns are readable
+        const baseW = (style.kind==='dotted'||style.kind==='dashed'||style.kind==='arrow') ? 0.9 : 0.6;
+        const minW = (style.kind==='dotted'||style.kind==='dashed') ? 0.8 : 0.5;
+        const alphaBoost = (style.kind==='dotted'||style.kind==='dashed'||style.kind==='arrow') ? 0.35 : 0.25;
+        style = {
+          ...style,
+          width: Math.max(minW, Math.min(1.8, (style.width || baseW) * wF)),
+          opacity: Math.max(0.12, (style.opacity ?? 0.8) * alphaBoost)
+        };
         strokeEdge(edgesGfx, x1, y1, x2, y2, style);
       }
     }
@@ -646,25 +684,30 @@ function lineSolid(g, x1, y1, x2, y2, s){
 function lineDashed(g, x1, y1, x2, y2, s, dash=6, gap=4){
   const dx = x2-x1, dy = y2-y1; const len = Math.hypot(dx,dy);
   const ux = dx/len, uy = dy/len;
-  g.lineStyle({ width:s.width||0.5, color:s.color||BRAND.GRAY, alpha:s.opacity??0.6, cap:'butt' });
+  // Keep dash pattern legible across zoom levels
+  const z = (world?.scale?.x || 1);
+  const d = Math.max(4, dash * (1/z));
+  const gsz = Math.max(3, gap * (1/z));
+  g.lineStyle({ width:s.width||0.8, color:s.color||BRAND.GRAY, alpha:s.opacity??0.7, cap:'butt' });
   let dist = 0; let on=true; let cx=x1, cy=y1;
   while (dist < len){
-    const step = on? dash : gap; const nx = cx + ux*step; const ny = cy + uy*step;
+    const step = on? d : gsz; const nx = cx + ux*step; const ny = cy + uy*step;
     if (on){ g.moveTo(cx, cy); g.lineTo(Math.min(nx, x2), Math.min(ny, y2)); }
     cx = nx; cy = ny; dist += step; on = !on;
   }
 }
 
 function lineArrow(g, x1, y1, x2, y2, s){
-  const w = s.width || 0.6;
-  g.lineStyle({ width:w, color:s.color||BRAND.RED, alpha:s.opacity??0.9, cap:'round' });
+  const w = Math.max(0.9, s.width || 0.9);
+  g.lineStyle({ width:w, color:s.color||BRAND.RED, alpha:s.opacity??0.95, cap:'round' });
   g.moveTo(x1, y1); g.lineTo(x2, y2);
   const dx = x2 - x1, dy = y2 - y1; const len = Math.hypot(dx, dy) || 1;
   const ux = dx/len, uy = dy/len;
-  const size = Math.max(6, Math.min(10, 10*w+4));
+  const z = (world?.scale?.x || 1);
+  const size = Math.max(10, Math.min(16, (10*w+4) * (1/z)));
   const bx = x2 - ux*size, by = y2 - uy*size;
   const nx = -uy, ny = ux;
-  g.lineStyle({ width:w, color:s.color||BRAND.RED, alpha:s.opacity??0.9, join:'miter' });
+  g.lineStyle({ width:w, color:s.color||BRAND.RED, alpha:s.opacity??0.95, join:'miter' });
   g.moveTo(x2, y2); g.lineTo(bx + nx*(size*0.4), by + ny*(size*0.4));
   g.moveTo(x2, y2); g.lineTo(bx - nx*(size*0.4), by - ny*(size*0.4));
 }
@@ -738,8 +781,9 @@ async function selectNode(index){
   selectedIndex = index;
   if (sprites[selectedIndex]) sprites[selectedIndex].scale.set(1.6,1.6);
   updateSelectionOverlay();
+  let t = null;
   try {
-    const t = await fetch(`/api/token/${id}?v=${Date.now()}`, { cache:'no-store' }).then(r=>r.json());
+    t = await fetch(`/api/token/${id}?v=${Date.now()}`, { cache:'no-store' }).then(r=>r.json());
     if (t && (t.thumbnail_local||t.image_local)) {
       thumbEl.style.display='block';
       const primary = `/${t.thumbnail_local||t.image_local}`;
@@ -764,7 +808,8 @@ async function selectNode(index){
     selectedWalletSet = holdings ? new Set(holdings.map(Number)) : null;
     updateSelectionOverlay();
     if (focusMode) applyFocus();
-    viewport.centerOn(sprites[selectedIndex].x, sprites[selectedIndex].y, 1.2);
+    // Center view on selected sprite (avoid dependency on viewport local var)
+    try { centerOn(sprites[selectedIndex].x, sprites[selectedIndex].y, 1.2); } catch {}
     // rarity score from preset data
     await ensurePresetData();
     const idx2 = idToIndex.get(id);
@@ -809,16 +854,23 @@ async function selectNode(index){
     const lastSaleWhen = lastSaleTs ? (timeAgo(lastSaleTs*1000)+' ago') : '';
     const lastBuyWhen  = lastBuyTs  ? (timeAgo(lastBuyTs*1000)+' ago') : '';
     const holdDaysTxt = (t.hold_days!=null && isFinite(t.hold_days)) ? String(Math.round(Number(t.hold_days))) : '--';
+    const ethosCard = ethosValid ? `
+        <div class='card'>
+          <div class='label'>ETHOS</div>
+          <div class='big-number'>${Math.round(ethos)}</div>
+          <div class='small-meta'>${ethosBar}</div>
+        </div>` : `
+        <div class='card'>
+          <div class='label'>ETHOS</div>
+          <div class='big-number'>N/A</div>
+          <div class='small-meta'>No verified profile</div>
+        </div>`;
     detailsEl.innerHTML = `
       <div class='token-title'>MAMMOTH #${id.toString().padStart(4,'0')} <span class='token-close' id='close-detail'><i class="ri-close-line"></i></span></div>
       <div class='section-label'>OWNER</div>
       ${ens? `<div class='ens-name'>${ens} ✓</div>`:`<div class='address'>${addrShort}</div>`}
       <div class='card2'>
-        <div class='card'>
-          <div class='label'>ETHOS</div>
-          <div class='big-number'>${ethosValid?Math.round(ethos):'--'}</div>
-          <div class='small-meta'>${ethosValid? ethosBar: ''}</div>
-        </div>
+        ${ethosCard}
         <div class='card'>
           <div class='label'>HOLDINGS</div>
           <div class='big-number'>${holdings? holdings.length : '--'}</div>
@@ -861,7 +913,7 @@ async function selectNode(index){
       </div>
       <div class='card2'>
         <div class='card'>
-          <div class='label'>TRADES</div>
+          <div class='label'>WALLET TRADES</div>
           <div class='big-number'>${trades!=null?trades:'--'}</div>
           <div class='small-meta'>${actLabel}</div>
         </div>
@@ -889,22 +941,23 @@ async function selectNode(index){
     // chip events
     detailsEl.querySelectorAll('.chip').forEach(el=> el.addEventListener('click', ()=>{ const tok = Number(el.dataset.token); const idx = idToIndex.get(tok); if (idx!=null) selectNode(idx); }));
     const closeBtn = document.getElementById('close-detail'); if (closeBtn) closeBtn.onclick = ()=>{ selectedIndex=-1; clearSelectionOverlay(); detailsEl.innerHTML='Select a node…'; thumbEl.style.display='none'; resetAlpha(); };
-    if (ethos==null && t.owner) {
-      setTimeout(async ()=>{
-        try {
-          const meta2 = await fetch(`/api/wallet/${t.owner}/meta`).then(r=>r.json());
-          const e2 = meta2?.ethos_score;
-          if (e2!=null) {
-            // append ethos line if absent
-            if (!detailsEl.innerHTML.includes('ETHOS')) {
-              const ins = `<div class=\"label\">ETHOS</div><div>${Math.round(e2)}</div>`;
-              detailsEl.innerHTML = detailsEl.innerHTML.replace('</div>\n      <div style', `${ins}</div>\n      <div style`);
-            }
-          }
-        } catch {}
-      }, 2000);
-    }
-  } catch { detailsEl.innerHTML = '<div>NO DATA</div>'; }
+    // No background ETHOS injection; details already gated to real profiles
+  } catch (e) {
+    try {
+      // Minimal, never-fail fallback details rendering
+      const name = (t && t.id!=null) ? `MAMMOTH #${String(t.id).padStart(4,'0')}` : `TOKEN #${id}`;
+      const owner = (t && t.owner) ? t.owner : '';
+      const addrShort = owner ? (owner.slice(0,6)+'...'+owner.slice(-4)) : '--';
+      const traitsRows = (t?.traits||[]).slice(0,12).map(a=>`<div class='label'>${a.trait_type}</div><div class='value'>${a.trait_value}</div>`).join('') || `<div class='label'>TRAITS</div><div class='value'>--</div>`;
+      detailsEl.innerHTML = `
+        <div class='token-title'>${name}</div>
+        <div class='section-label'>OWNER</div>
+        <div class='address'>${addrShort}</div>
+        <div class='section-label'>TRAITS</div>
+        <div class='traits-table'>${traitsRows}</div>
+      `;
+    } catch { detailsEl.innerHTML = '<div>NO DATA</div>'; }
+  }
 }
 
 function updateSelectionOverlay(){
@@ -1105,6 +1158,14 @@ async function ensurePresetData(){
     const vals = presetData.ownerEthos.filter(v=>v!=null && isFinite(v));
     if (vals.length){ ethosMin = Math.min(...vals); ethosMax = Math.max(...vals); if (ethosMin===ethosMax){ ethosMin=0; ethosMax=ethosMin+1; } }
   }
+  // compute global ownerCounts for rank labels and selection indicators
+  try {
+    const oi = presetData?.ownerIndex || [];
+    if (Array.isArray(oi) && oi.length) {
+      ownerCounts = new Array(Math.max(...oi)+1).fill(0);
+      for (let i=0;i<oi.length;i++){ const k = oi[i]; if (k>=0) ownerCounts[k] = (ownerCounts[k]||0)+1; }
+    }
+  } catch {}
 }
 
 function applyPreset(p){
@@ -1154,9 +1215,10 @@ function applyPreset(p){
         break;
       }
       case 'trading': {
+        // Make stale tokens still visible (avoid near-black on black)
         const t = presetData?.tokenLastActivity?.[i] ?? 0;
         const fresh = t ? ((Date.now()/1000 - t) < 30*24*3600) : false;
-        sprites[i].tint = fresh ? BRAND.GREEN : 0x444444;
+        sprites[i].tint = fresh ? BRAND.GREEN : 0x117744; // dim green, not gray
         break;
       }
       case 'ownership': {
@@ -1240,39 +1302,63 @@ function layoutPreset(p){
       break;
     }
     case 'trading': {
-      // X = recency of last sale; Y = turnover (sale count); size = last sale price; color by heat
+      // If no trading data available, fall back to a compact grid so the view is never empty
+      const hasSaleCounts = Array.isArray(tokenSaleCount) && tokenSaleCount.some(v=>Number(v)>0);
+      const hasLastTs     = (Array.isArray(tokenLastSaleTs) && tokenLastSaleTs.some(v=>v!=null && Number(v)>0)) ||
+                            (Array.isArray(tokenLast) && tokenLast.some(v=>v!=null && Number(v)>0));
+      if (!hasSaleCounts && !hasLastTs) { layoutGrid(); break; }
+      // Scatter: X = recency of last sale (recent -> right); Y = turnover (sale count, log); size = last sale price; color by heat
       for (let i=0;i<n;i++){
         const lastTs = Number(tokenLastSaleTs[i] || tokenLast[i] || 0);
         const daysSince = lastTs ? ((Date.now()/1000 - lastTs)/86400) : 365;
         const xn = Math.max(0, Math.min(1, 1 - Math.min(365, daysSince)/365));
         const x = 80 + xn * (cw-160);
         const sc = Number(tokenSaleCount[i] || 0);
-        const vol = Math.log(1 + sc);
-        const y = 100 + Math.min(ch-200, vol*120) + (prng(i)-0.5)*12;
+        const vol = Math.log1p(sc);
+        const y = 100 + Math.min(ch-200, vol*140) + (prng(i)-0.5)*10;
         const lastPrice = Number(tokenLastSalePrice[i] || tokenPrice[i] || 0);
-        const sz = lastPrice>0 ? (0.6 + Math.min(2.0, lastPrice/10)) : 0.6;
+        const sz = lastPrice>0 ? (0.7 + Math.min(2.2, lastPrice/10)) : 0.7;
         sprites[i].scale.set(sz, sz);
+        sprites[i].alpha = 0.96;
         // Heat coloring
         let color = 0x444444;
-        if (sc>10) color = 0xff3333; else if (sc>5) color = 0xff9933; else if (sc>2) color = 0xffcc33; else if (daysSince<30) color = BRAND.GREEN;
+        if (sc>10) color = 0xff3333; else if (sc>5) color = 0xff9933; else if (sc>2) color = 0xffcc33; else if (daysSince<30) color = BRAND.GREEN; else color = 0x22aa66;
         sprites[i].tint = color;
         place(i, x, y);
       }
+      // If bounding box looks degenerate (no spread), fall back to grid
+      try {
+        const b = computeContentBounds();
+        if (b && ((b.maxx-b.minx) < 10 || (b.maxy-b.miny) < 10)) { layoutGrid(); }
+      } catch {}
+      // Ensure we zoom to the occupied area for visibility
+      try { fitToVisible(); } catch {}
       break;
     }
     case 'rarity': {
+      // Phyllotaxis spiral (fills area better than a ring), size/color by rarity
+      const pad = 40;
+      const maxR = Math.min(cx, cy) - pad;
+      const c = maxR / Math.sqrt(Math.max(1, n)); // step
+      const golden = Math.PI * (3 - Math.sqrt(5)); // ~2.39996 rad
       for (let i=0;i<n;i++){
-        const r = Math.max(0, Math.min(1, rarity[i]||0));
-        const ang = (i*0.1618)%1 * Math.PI*10;
-        const rad = 120 + r* Math.min(cx,cy)*0.9;
-        const lastPrice = Number(tokenLastSalePrice[i] || tokenPrice[i] || 0);
-        const sz = lastPrice>0 ? (0.7 + Math.min(2.2, lastPrice/12)) : 0.7;
+        const rs = Math.max(0, Math.min(1, rarity[i]||0));
+        const r = c * Math.sqrt(i+1);
+        const ang = i * golden;
+        const x = cx + Math.cos(ang) * r;
+        const y = cy + Math.sin(ang) * r;
+        // Size primarily by rarity (keeps circles readable)
+        let sz = 0.5 + rs*0.9; // 0.5 .. 1.4
         sprites[i].scale.set(sz, sz);
-        // Highlight if high sale_count in rare region
-        const sc = Number(tokenSaleCount[i]||0);
-        if (r>0.7 && sc>=3) sprites[i].tint = 0xffee66;
-        place(i, cx + Math.cos(ang)*rad, cy + Math.sin(ang)*rad);
+        // Slight transparency for dense areas
+        sprites[i].alpha = 0.90 - (rs*0.15);
+        // Color scale: rare -> brighter yellow-green (with slight red lift)
+        const g = 0x60 + Math.floor(rs * 0x9F);
+        const rcol = Math.floor(rs * 0x44);
+        sprites[i].tint = (rcol<<16) | (g<<8) | 0x22;
+        place(i, x, y);
       }
+      try { fitToVisible(); } catch {}
       break;
     }
     case 'social': {
@@ -1296,28 +1382,30 @@ function layoutPreset(p){
       break;
     }
     case 'whales': {
-      // Size & position by wallet trading volume; closer to center = higher volume
+      // Scatter: X = wallet volume (buy+sell, log normalized); Y = realized PnL (normalized); size by holdings; color by wallet type
       const owners = Math.max(1, (ownerCounts?.length||12));
-      // Precompute volume per owner
-      const ownerVol = new Array(owners).fill(0);
-      for (let oi=0; oi<owners; oi++){
-        const v = (ownerBuyVol[oi]||0) + (ownerSellVol[oi]||0);
-        ownerVol[oi] = v || 0;
-      }
-      const maxVol = Math.max(1e-6, ...ownerVol);
+      const padX = 80, padY = 100;
+      const maxVol = Math.max(1e-6, ...(ownerBuyVol||[]).map((v,i)=> (v||0) + (ownerSellVol?.[i]||0)));
+      const maxHold = ownerCounts && ownerCounts.length ? Math.max(...ownerCounts) : 0;
+      let maxAbsPnl = 0; for (let i=0;i<(ownerPnl?.length||0);i++){ maxAbsPnl = Math.max(maxAbsPnl, Math.abs(ownerPnl[i]||0)); }
+      maxAbsPnl = Math.max(1, maxAbsPnl);
       for (let i=0;i<n;i++){
         const oi = ownerIndex[i] ?? -1;
-        const ang = ((oi>=0?oi:(i%owners))/owners)*Math.PI*2;
-        const voln = (oi>=0) ? Math.max(0, Math.min(1, (ownerVol[oi]||0)/maxVol)) : 0;
-        const rad = 120 + (1 - voln) * Math.min(cx,cy)*0.85;
-        const scl = 0.8 + voln*2.0;
+        const vol = (oi>=0) ? ((ownerBuyVol[oi]||0) + (ownerSellVol[oi]||0)) : 0;
+        const voln = Math.log1p(Math.max(0, vol)) / Math.log1p(Math.max(1, maxVol));
+        const pnl = (oi>=0) ? (ownerPnl[oi]||0) : 0;
+        const pnln = Math.max(-1, Math.min(1, pnl / maxAbsPnl));
+        const x = padX + voln * (cw - padX*2);
+        const y = cy - pnln * (ch/2 - padY);
+        const holds = (oi>=0 && ownerCounts) ? (ownerCounts[oi]||0) : 0;
+        const scl = 0.7 + (maxHold? Math.min(2.2, holds / maxHold * 2.0) : 0.8);
         sprites[i].scale.set(scl, scl);
-        // Color by wallet type for whales
         const wtype = (oi>=0) ? (ownerWalletType[oi] || 'casual') : 'casual';
-        const typeColors = { whale_trader: 0x0066ff, flipper: 0xff6600, accumulator: 0xffcc00 };
-        if (ownerVol[oi] > maxVol*0.2) sprites[i].tint = typeColors[wtype] || BRAND.BLUE;
-        place(i, cx + Math.cos(ang)*rad, cy + Math.sin(ang)*rad);
+        const typeColors = { whale_trader: 0x00ccff, flipper: 0xff6600, accumulator: 0xffcc00, holder: 0x66ff66, collector: 0x99ccff };
+        sprites[i].tint = typeColors[wtype] || BRAND.GREEN;
+        place(i, x, y);
       }
+      try { fitToVisible(); } catch {}
       break;
     }
     case 'frozen': {
@@ -1359,6 +1447,17 @@ function resetView(){
   // keep the world center anchored to screen center when scaling
   const cx = app.renderer.width/2, cy = app.renderer.height/2;
   world.position.set((1-s)*cx, (1-s)*cy);
+}
+
+// Center world on a world-space point (x,y) at optional target scale
+function centerOn(x, y, targetScale){
+  try {
+    if (targetScale) world.scale.set(clamp(targetScale, 0.2, 5));
+    const s = world.scale.x || 1;
+    const cx = app.renderer.width/2, cy = app.renderer.height/2;
+    world.position.x = cx - x*s;
+    world.position.y = cy - y*s;
+  } catch {}
 }
 
 function computeContentBounds(){

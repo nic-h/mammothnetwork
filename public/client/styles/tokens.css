@@ -22,7 +22,7 @@
 
   /* Spacing & container widths */
   --pad-4: 4px; --pad-6: 6px; --pad-8: 8px; --pad-12: 12px; --pad-16: 16px; --pad-24: 24px; --pad-32: 32px; --pad-48: 48px;
-  --col-left: 280px; --col-right: 420px;
+  --col-left: 280px; --col-right: 256px;
   --radius: 0;
   --line-rgb: 0,255,102; /* alias for borders/shadows */
   /* Controls */
