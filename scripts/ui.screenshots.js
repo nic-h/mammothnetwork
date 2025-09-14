@@ -110,6 +110,8 @@ async function main(){
     // Select legacy view (ensures nodes array is present for focusSelect)
     await page.selectOption('#view', view).catch(()=>{});
     await waitForIdle(page);
+    // Zoom out to show entire scene/UI
+    try { await page.keyboard.press('r'); await page.waitForTimeout(200); } catch {}
     // Expand traits panel on the left for context
     try { await page.evaluate(()=>{ const ts=document.querySelector('.traits-section'); ts?.classList.add('open'); }); } catch {}
     // Generate a few variants by selecting curated token IDs
@@ -137,6 +139,7 @@ async function main(){
       // Desktop only per request
       await page.setViewportSize({ width: 1440, height: 900 });
       await waitForIdle(page);
+      try { await page.keyboard.press('r'); await page.waitForTimeout(200); } catch {}
       await page.waitForSelector('#deck-canvas', { timeout: 8000 }).catch(()=>{});
       await screenshot(page, `desktop-preset-${view}-v${vi+1}-1440`);
     }
@@ -157,6 +160,7 @@ async function main(){
     }, { timeout: 5000 }).catch(()=>{});
     await page.setViewportSize({ width: 1440, height: 900 });
     await waitForIdle(page);
+    try { await page.keyboard.press('r'); await page.waitForTimeout(200); } catch {}
     await page.waitForSelector('#deck-canvas', { timeout: 8000 }).catch(()=>{});
     await screenshot(page, `desktop-simple-${key}-1440`);
   }

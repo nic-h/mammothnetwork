@@ -64,9 +64,16 @@ console.log('deck.app: boot');
   function buildSimpleLayers(mode){
     const layers = []; const zoom=(currentZoom==null)?0:currentZoom;
     if (simpleView==='dots'){
+      // Optional ownership edges (lightweight)
+      if (Array.isArray(edges) && edges.length && ui.ownership && (currentZoom==null || currentZoom>=0.2)){
+        layers.push(new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+          getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0],
+          getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0],
+          getColor:d=>d.color||[0,255,102,60], getWidth:d=>d.width||1, widthUnits:'pixels', opacity:0.35 }));
+      }
       // Use positioned nodes so coordinate space matches view fitting
       layers.push(new ScatterplotLayer({ id:'dots', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, highlightColor:[255,255,255,100], stroked:true, getLineWidth: d=>0, lineWidthUnits:'pixels', transitions:{ getRadius:{ duration:200 } },
-        getPosition:d=>d.position, getRadius:d=>d.radius||4, getFillColor:d=>d.color,
+        getPosition:d=>d.position, getRadius:d=> Math.max(1.6, Math.min(4, d.radius||2.5)), getFillColor:d=>d.color,
         onClick: handleClick
       }));
     } else if (simpleView==='currents' || simpleView==='web'){
@@ -459,7 +466,7 @@ console.log('deck.app: boot');
         dormant: !!n.dormant,
         color: [0,255,102,180],
         baseColor: [0,255,102,180],
-        radius: 4,
+        radius: 2.5,
       };
     }).map(d=>{ const c=nodeColor(d); d.baseColor=c.slice(); d.color=c.slice(); return d; });
   }
@@ -569,10 +576,10 @@ console.log('deck.app: boot');
       // Wash/desire overlays
       (showOverlays && ui.wash && washSet && washSet.size) && new ScatterplotLayer({ id:'wash', data:nodes.filter(n=>washSet.has(n.id)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(8, (d.radius||4)+6), getFillColor:[0,0,0,0], getLineColor:[255,0,102,220], lineWidthMinPixels:1.5, stroked:true, filled:false, radiusUnits:'pixels' }),
       (showOverlays && ui.desire && desireSet && desireSet.size) && new ScatterplotLayer({ id:'desire', data:nodes.filter(n=>desireSet.has(n.id)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(7, (d.radius||4)+4), getFillColor:[0,0,0,0], getLineColor:[255,215,0,200], lineWidthMinPixels:1, stroked:true, filled:false, radiusUnits:'pixels' }),
-      new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>d.radius*3.0, getFillColor:d=>[d.color[0],d.color[1],d.color[2], 12], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
+      new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(3, (d.radius||2.5)*2.4), getFillColor:d=>[d.color[0],d.color[1],d.color[2], 12], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
       // Neighbor edges on click
       (selectedId>0) && new LineLayer({ id:'click-edges', data: buildClickEdges(selectedId), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,180], getWidth:1.2, widthUnits:'pixels', parameters:{ depthTest:false } }),
-      new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=>d.radius||4, getFillColor:d=>d.color, radiusUnits:'pixels', onClick: handleClick }),
+      new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=> Math.max(1.6, Math.min(4, d.radius||2.5)), getFillColor:d=>d.color, radiusUnits:'pixels', onClick: handleClick }),
       // Subtle pulse rings for recently active tokens
       (showOverlays) && new ScatterplotLayer({ id:'pulses', data: nodes.filter(n=>recentActive(n)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> (d.radius||4) * (1.6 + 0.4*Math.sin(pulseT*2 + (d.id||0))), getLineColor:[0,255,102,140], lineWidthMinPixels:1, radiusUnits:'pixels', updateTriggers:{ getRadius: [pulseT] }, parameters:{ depthTest:false } }),
       (selObj) && new ScatterplotLayer({ id:'selection-ring', data:[selObj], coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(10,(d.radius||4)+8), getFillColor:[0,0,0,0], getLineColor:[0,255,102,220], lineWidthMinPixels:2, stroked:true, filled:false, radiusUnits:'pixels' })
