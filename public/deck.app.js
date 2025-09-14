@@ -64,24 +64,10 @@ console.log('deck.app: boot');
   function buildSimpleLayers(mode){
     const layers = []; const zoom=(currentZoom==null)?0:currentZoom;
     if (simpleView==='dots'){
-      const hasW = Array.isArray(pre.wallets?.wallets) && pre.wallets.wallets.length>0;
-      const bin = hasW ? buildWalletBinary(pre.wallets) : buildNodeBinaryFromNodes(nodes);
-      layers.push(new ScatterplotLayer({ id:'dots', data:bin, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, highlightColor:[255,255,255,100], stroked:true, getLineWidth: d=>0, lineWidthUnits:'pixels', transitions:{ getRadius:{ duration:200 } },
-        onClick: async (info)=>{
-          const idx=info?.index; if (idx==null) return;
-          if (hasW){
-            const addr=pre.wallets.wallets[idx]?.addr || pre.wallets.wallets[idx]?.address;
-            if (addr){
-              try {
-                const r = await jfetch(`/api/wallet/${addr}`);
-                const tok = Array.isArray(r?.tokens) && r.tokens.length ? Number(r.tokens[0]) : null;
-                if (tok!=null) { focusSelect(tok); return; }
-              } catch {}
-            }
-          }
-          // Fallback: open token from current graph nodes by index
-          const obj = nodes[idx]; if (obj) handleClick({ object: obj });
-        }
+      // Use positioned nodes so coordinate space matches view fitting
+      layers.push(new ScatterplotLayer({ id:'dots', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, highlightColor:[255,255,255,100], stroked:true, getLineWidth: d=>0, lineWidthUnits:'pixels', transitions:{ getRadius:{ duration:200 } },
+        getPosition:d=>d.position, getRadius:d=>d.radius||4, getFillColor:d=>d.color,
+        onClick: handleClick
       }));
     } else if (simpleView==='currents' || simpleView==='web'){
       const hasE = Array.isArray(pre.edges?.edges) && pre.edges.edges.length>0;
@@ -555,6 +541,7 @@ console.log('deck.app: boot');
     if (SIMPLE_VIEW){
       const simple = buildSimpleLayers(mode);
       deckInst.setProps({ layers: simple });
+      if (!hasFittedOnce) { try { fitViewToNodes(nodes); hasFittedOnce = true; } catch {} }
       return;
     }
     const grid = makeGridLines(w, h, 50);
