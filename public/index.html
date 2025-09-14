@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="app-build" content="20250915-1">
   <title>mammoths.network</title>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
   <!-- Deck.gl UMD loaded below; no PIXI -->
-  <link rel="stylesheet" href="/client/styles/tokens.css?v=20250912-1">
-  <link rel="stylesheet" href="/style.css?v=20250912-1">
+  <link rel="stylesheet" href="/client/styles/tokens.css?v=20250915-1">
+  <link rel="stylesheet" href="/style.css?v=20250915-1">
 </head>
 <body>
   <header class="header">
@@ -121,10 +122,10 @@
       <div id="details">Select a node…</div>
     </aside>
   </div>
-  <!-- Deck.gl UMD (CDN) -->
-  <script src="https://unpkg.com/deck.gl@8.9.24/dist.min.js"></script>
-  <!-- Geo-layers (TripsLayer, etc.) (CDN) -->
-  <script src="https://unpkg.com/@deck.gl/geo-layers@8.9.24/dist.min.js"></script>
-  <script src="/engine.js?v=20250912-1"></script>
+  <!-- Deck.gl UMD (local, works offline/headless) -->
+  <script src="/lib/deck.gl/dist.min.js"></script>
+  <script src="/lib/@deck.gl/geo-layers/dist.min.js"></script>
+  <!-- Engine loader (loads Deck UMDs + app bundle) -->
+  <script src="/engine.js?v=20250915-1"></script>
 </body>
 </html>

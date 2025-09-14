@@ -602,7 +602,7 @@ app.get('/api/precomputed/wallets', (req, res) => {
       degree: r.degree||0,
       isTeam: !!r.isTeam,
       isMarketplace: !!r.isMarketplace,
-    }) });
+    })) });
   } catch (e) { return res.status(500).json({ wallets: [] }); }
 });
 

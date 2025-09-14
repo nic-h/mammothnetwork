@@ -1,5 +1,9 @@
 // Deck.gl engine mounted into the center panel while keeping left/right UI
 // Load with ?engine=deck or localStorage.engine='deck'
+if (!window.deck) {
+  console.error('deck.app.js: window.deck missing; aborting init');
+  throw new Error('Deck UMD not loaded');
+}
 (function(){
   // ETag-aware JSON fetch with in-memory memo; dedupes view switches
   const __mem = new Map(); // url -> { etag, json, t }
@@ -447,7 +451,11 @@
     const ownerIndex = pdata.ownerIndex||[]; const ownerEthos = pdata.ownerEthos||[];
     const tokenLastActivity = pdata.tokenLastActivity||[]; const tokenPrice=pdata.tokenPrice||[]; const rarity=pdata.rarity||[];
     return apiNodes.map((n,i)=>{
-      const idx = (n.id-1>=0)?(n.id-1):i; const oi=ownerIndex[idx]??-1; const ethos=oi>=0?(ownerEthos[oi]||0):0;
+      const idx = (n.id-1>=0)?(n.id-1):i;
+      const rawOi = ownerIndex[idx];
+      // Fallback grouping when DB ownerIndex is missing: spread into 12 clusters
+      const oi = (rawOi!=null && rawOi>=0) ? rawOi : (i % 12);
+      const ethos=oi>=0?(ownerEthos[oi]||0):0;
       return {
         id: n.id, tokenId: idx,
         position: [0,0,0],
@@ -518,13 +526,15 @@
       // Wallets view uses owner aggregates in layers; no need to reposition token nodes here
       basePositions = nodes.map(d=>d.position.slice());
     } else if (mode==='transfers'){
-      // Timeline layout: X=time, Y=price (log)
-      const tarr = pdata.tokenLastActivity||[]; const parr = pdata.tokenLastSalePrice||[];
-      const t0 = Math.min(...tarr.filter(Boolean)), t1 = Math.max(...tarr.filter(Boolean));
-      timelineLimits = { t0: t0||0, t1: t1||1 };
-      const lx = (t)=>{ if(!t0||!t1||t0===t1) return cx; return (t - t0)/(t1 - t0) * (w-160) + 80; };
-      const ly = (p)=>{ const v=Math.log1p(Math.max(0, p||0)); const vmax = Math.log1p(Math.max(1, Math.max(...parr.filter(x=>x!=null))))||1; const y = (1 - v/(vmax||1))*(h-160) + 80; return y; };
-      basePositions = nodes.map(d=>{ const t=tarr[d.tokenId]||t0; const p=parr[d.tokenId]||0; const pos=[lx(t), ly(p), 0]; d.position=pos; d.radius=3+(p?Math.min(6,Math.sqrt(p)):2); return pos.slice(); });
+      // Timeline layout: X=time, Y=price (log), with safe fallbacks when DB arrays are empty
+      const tarrRaw = pdata.tokenLastActivity||[]; const parr = pdata.tokenLastSalePrice||[];
+      const tvals = tarrRaw.filter(t=> typeof t==='number' && isFinite(t));
+      const t0 = tvals.length ? Math.min(...tvals) : 0;
+      const t1 = tvals.length ? Math.max(...tvals) : 1;
+      timelineLimits = { t0, t1 };
+      const lx = (t)=>{ if(!(t1>t0)) return cx; return (t - t0)/(t1 - t0) * (w-160) + 80; };
+      const ly = (p)=>{ const v=Math.log1p(Math.max(0, p||0)); const vmax = Math.log1p(Math.max(1, Math.max(...(parr.filter(x=>x!=null && isFinite(x))), 1))); const y = (1 - v/(vmax||1))*(h-160) + 80; return y; };
+      basePositions = nodes.map(d=>{ const t=tarrRaw[d.tokenId] ?? t0; const p=parr[d.tokenId] ?? 0; const pos=[lx(t), ly(p), 0]; d.position=pos; d.radius=3+(p?Math.min(6,Math.sqrt(p)):2); return pos.slice(); });
     } else {
       // Default grid
       const grid=100; nodes.forEach((d,i)=>{ d.position=[(i%grid)*20-1000, Math.floor(i/grid)*20-1000, 0]; }); basePositions = nodes.map(d=>d.position.slice());

@@ -64,6 +64,8 @@ async function main(){
   page.on('console', msg => { try { console.log('[page]', msg.text()); } catch {} });
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await waitForIdle(page);
+  // Wait for deck canvas if available (avoid blank snapshots)
+  await page.waitForSelector('#deck-canvas', { timeout: 8000 }).catch(()=>{});
   try {
     await page.waitForLoadState('load', { timeout: 10000 });
     const info = await page.evaluate(() => ({ t: typeof window.deck, scripts: Array.from(document.querySelectorAll('script')).map(s=>s.src).filter(s=>/deck\.gl|geo-layers/.test(s)).length }));
@@ -71,10 +73,11 @@ async function main(){
   } catch {}
 
   // Views to exercise
-  const views = ['ownership', 'trading', 'traits', 'whales', 'health'];
-  const simple = ['dots', 'currents', 'web', 'pulse', 'crown'];
+  const quick = String(process.env.QUICK||'0')==='1';
+  const views = quick ? ['ownership', 'trading'] : ['ownership', 'trading', 'traits', 'whales', 'health'];
+  const simple = quick ? ['dots'] : ['dots', 'currents', 'web', 'pulse', 'crown'];
   const previewIds = (process.env.PREVIEW_IDS || '5000,3333,2500,2000,1000,100,2').split(',').map(s=>parseInt(s,10)).filter(n=>!isNaN(n));
-  const perViewVariants = parseInt(process.env.PREVIEW_VARIANTS || '3', 10);
+  const perViewVariants = quick ? 1 : parseInt(process.env.PREVIEW_VARIANTS || '3', 10);
 
   for (const view of views){
     // Select legacy view (ensures nodes array is present for focusSelect)
@@ -107,6 +110,7 @@ async function main(){
       // Desktop only per request
       await page.setViewportSize({ width: 1440, height: 900 });
       await waitForIdle(page);
+      await page.waitForSelector('#deck-canvas', { timeout: 8000 }).catch(()=>{});
       await screenshot(page, `desktop-preset-${view}-v${vi+1}-1440`);
     }
   }
@@ -126,6 +130,7 @@ async function main(){
     }, { timeout: 5000 }).catch(()=>{});
     await page.setViewportSize({ width: 1440, height: 900 });
     await waitForIdle(page);
+    await page.waitForSelector('#deck-canvas', { timeout: 8000 }).catch(()=>{});
     await screenshot(page, `desktop-simple-${key}-1440`);
   }
 
