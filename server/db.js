@@ -79,6 +79,14 @@ export function runMigrations(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_transfers_token_time ON transfers (token_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_transfers_token_to_time ON transfers (token_id, to_addr, timestamp);
+    -- Additional indexes for frequent address lookups and summaries
+    CREATE INDEX IF NOT EXISTS idx_transfers_from ON transfers (from_addr);
+    CREATE INDEX IF NOT EXISTS idx_transfers_to ON transfers (to_addr);
+    CREATE INDEX IF NOT EXISTS idx_transfers_from_time ON transfers (from_addr, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_transfers_to_time ON transfers (to_addr, timestamp);
+    -- Expression indexes to support queries using LOWER()
+    CREATE INDEX IF NOT EXISTS idx_transfers_from_lower ON transfers (LOWER(from_addr));
+    CREATE INDEX IF NOT EXISTS idx_transfers_to_lower ON transfers (LOWER(to_addr));
     CREATE TABLE IF NOT EXISTS graph_cache (
       key TEXT PRIMARY KEY,
       etag TEXT,
@@ -94,6 +102,12 @@ export function runMigrations(db) {
       links_profile TEXT,
       links_x TEXT,
       links_fc TEXT,
+      is_team INTEGER,
+      is_marketplace INTEGER,
+      degree INTEGER,
+      buy_volume_30d_tia REAL,
+      sell_volume_30d_tia REAL,
+      volume_30d_tia REAL,
       total_holdings INTEGER,
       first_acquired INTEGER,
       last_activity INTEGER,
@@ -178,6 +192,12 @@ export function runMigrations(db) {
       { name: 'last_buy_ts', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN last_buy_ts INTEGER' },
       { name: 'last_sell_ts', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN last_sell_ts INTEGER' },
       { name: 'unrealized_pnl_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN unrealized_pnl_tia REAL' },
+      { name: 'is_team', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN is_team INTEGER' },
+      { name: 'is_marketplace', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN is_marketplace INTEGER' },
+      { name: 'degree', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN degree INTEGER' },
+      { name: 'buy_volume_30d_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN buy_volume_30d_tia REAL' },
+      { name: 'sell_volume_30d_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN sell_volume_30d_tia REAL' },
+      { name: 'volume_30d_tia', ddl: 'ALTER TABLE wallet_metadata ADD COLUMN volume_30d_tia REAL' },
     ];
     for (const c of want2) if (!cols2.includes(c.name)) db.exec(c.ddl);
   } catch {}
@@ -194,9 +214,33 @@ export function runMigrations(db) {
       { name: 'last_acquired_ts', ddl: 'ALTER TABLE tokens ADD COLUMN last_acquired_ts INTEGER' },
       { name: 'last_buy_price', ddl: 'ALTER TABLE tokens ADD COLUMN last_buy_price REAL' },
       { name: 'hold_days', ddl: 'ALTER TABLE tokens ADD COLUMN hold_days REAL' },
-      { name: 'velocity', ddl: 'ALTER TABLE tokens ADD COLUMN velocity REAL' }
+      { name: 'velocity', ddl: 'ALTER TABLE tokens ADD COLUMN velocity REAL' },
+      { name: 'total_sale_volume_tia', ddl: 'ALTER TABLE tokens ADD COLUMN total_sale_volume_tia REAL' },
+      { name: 'rarity_rank', ddl: 'ALTER TABLE tokens ADD COLUMN rarity_rank INTEGER' }
     ];
     for (const c of wantT) if (!colsT.includes(c.name)) db.exec(c.ddl);
+  } catch {}
+
+  // Layout tables for precomputed XY coordinates
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS wallet_layout (
+        address TEXT PRIMARY KEY,
+        x REAL,
+        y REAL,
+        mode TEXT,
+        updated_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_wallet_layout_mode ON wallet_layout(mode);
+      CREATE TABLE IF NOT EXISTS token_layout (
+        token_id INTEGER PRIMARY KEY,
+        x REAL,
+        y REAL,
+        mode TEXT,
+        updated_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_token_layout_mode ON token_layout(mode);
+    `);
   } catch {}
 
   // Listings fidelity columns
@@ -228,8 +272,13 @@ export function runMigrations(db) {
         unique_holders INTEGER,
         volume_24h REAL,
         sentiment_score REAL
-      );
-    `);
+    );
+    -- Speed up owner-based queries
+    CREATE INDEX IF NOT EXISTS idx_tokens_owner ON tokens (owner);
+    -- If SQLite supports expression indexes, also index LOWER(owner)
+    -- This will be ignored on older SQLite versions
+    CREATE INDEX IF NOT EXISTS idx_tokens_owner_lower ON tokens (LOWER(owner));
+  `);
   } catch {}
 
   // Optional story view for quick aggregation

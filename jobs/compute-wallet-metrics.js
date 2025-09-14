@@ -75,16 +75,31 @@ async function main(){
       buy_count=?, sell_count=?,
       buy_volume_tia=?, sell_volume_tia=?, realized_pnl_tia=?,
       avg_buy_tia=?, avg_sell_tia=?, last_buy_ts=?, last_sell_ts=?, unrealized_pnl_tia=?,
+      degree=?, buy_volume_30d_tia=?, sell_volume_30d_tia=?, volume_30d_tia=?,
       updated_at=CURRENT_TIMESTAMP
     WHERE address=?
   `);
+  // helpers for 30d window + degree
+  const nowSec = Math.floor(Date.now()/1000);
+  const win30 = nowSec - 30*86400;
+  const qBuy30 = db.prepare('SELECT COALESCE(SUM(price),0) v FROM transfers WHERE price IS NOT NULL AND LOWER(to_addr)=? AND timestamp>=?');
+  const qSell30 = db.prepare('SELECT COALESCE(SUM(price),0) v FROM transfers WHERE price IS NOT NULL AND LOWER(from_addr)=? AND timestamp>=?');
+  const qDegree = db.prepare(`
+    SELECT COUNT(DISTINCT CASE WHEN LOWER(from_addr)=? THEN LOWER(to_addr) ELSE LOWER(from_addr) END) AS d
+    FROM transfers WHERE (LOWER(from_addr)=? OR LOWER(to_addr)=?) AND (from_addr IS NOT NULL AND from_addr<>'' AND to_addr IS NOT NULL AND to_addr<>'')
+  `);
+
   const tx = db.transaction((rows)=>{
     for (const addr of rows){
       const m = metricsForWallet(addr, lastPriceByToken);
+      const b30 = qBuy30.get(addr, win30).v || 0;
+      const s30 = qSell30.get(addr, win30).v || 0;
+      const deg = qDegree.get(addr, addr, addr).d || 0;
       update.run(
         m.buyCount||0, m.sellCount||0,
         m.buyVol||0, m.sellVol||0, m.pnl||0,
         m.avgBuy, m.avgSell, m.lastBuy, m.lastSell, m.upnl||0,
+        deg, b30, s30, (b30 + s30),
         addr
       );
     }

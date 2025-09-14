@@ -18,6 +18,7 @@ function computeForToken(id, owner) {
     SELECT COUNT(1) AS c, AVG(price) AS avg_p, MIN(timestamp) AS first_ts, MAX(timestamp) AS last_ts
     FROM transfers WHERE token_id=? AND price IS NOT NULL AND price>0
   `).get(id);
+  const saleSum = db.prepare(`SELECT COALESCE(SUM(price),0) AS s FROM transfers WHERE token_id=? AND price IS NOT NULL AND price>0`).get(id);
   const lastSale = db.prepare(`
     SELECT price AS p, timestamp AS ts
     FROM transfers WHERE token_id=? AND price IS NOT NULL AND price>0
@@ -37,7 +38,8 @@ function computeForToken(id, owner) {
   const first_sale_ts = saleAgg?.first_ts || null;
   const last_sale_ts = saleAgg?.last_ts || null;
   const last_sale_price = (lastSale && lastSale.p!=null) ? Number(lastSale.p) : null;
-  return { sale_count, avg_sale_price, last_sale_price, first_sale_ts, last_sale_ts, last_acquired_ts, last_buy_price, hold_days };
+  const total_sale_volume_tia = saleSum ? Number(saleSum.s)||0 : 0;
+  return { sale_count, avg_sale_price, last_sale_price, first_sale_ts, last_sale_ts, last_acquired_ts, last_buy_price, hold_days, total_sale_volume_tia };
 }
 
 async function main(){
@@ -46,7 +48,7 @@ async function main(){
   const update = db.prepare(`
     UPDATE tokens SET
       sale_count=?, avg_sale_price=?, last_sale_price=?,
-      first_sale_ts=?, last_sale_ts=?, last_acquired_ts=?, last_buy_price=?, hold_days=?,
+      first_sale_ts=?, last_sale_ts=?, last_acquired_ts=?, last_buy_price=?, hold_days=?, total_sale_volume_tia=?,
       updated_at=CURRENT_TIMESTAMP
     WHERE id=?
   `);
@@ -62,11 +64,35 @@ async function main(){
         m.last_acquired_ts,
         m.last_buy_price,
         m.hold_days,
+        m.total_sale_volume_tia||0,
         r.id
       );
     }
   });
   tx(ids);
+
+  // Compute rarity scores and ranks (sum of -log(freq) across traits)
+  try {
+    const attrRows = db.prepare('SELECT token_id, trait_type, trait_value FROM attributes').all();
+    const freq = new Map();
+    for (const a of attrRows) {
+      const k = `${a.trait_type}:${a.trait_value}`;
+      freq.set(k, (freq.get(k)||0)+1);
+    }
+    const totalAttrs = attrRows.length || 1;
+    const sumMap = new Map();
+    for (const a of attrRows) {
+      const k = `${a.trait_type}:${a.trait_value}`;
+      const c = freq.get(k) || 1;
+      const s = Math.max(0, Math.log(totalAttrs / c));
+      sumMap.set(a.token_id, (sumMap.get(a.token_id)||0) + s);
+    }
+    const ranks = db.prepare('SELECT id FROM tokens ORDER BY id').all().map(r=>({ id:r.id, score: sumMap.get(r.id)||0 }));
+    ranks.sort((a,b)=> b.score - a.score );
+    const upRank = db.prepare('UPDATE tokens SET rarity_rank=? WHERE id=?');
+    const txr = db.transaction((list)=>{ for (let i=0;i<list.length;i++){ upRank.run(i+1, list[i].id); } });
+    txr(ranks);
+  } catch {}
   try { fs.mkdirSync(path.join(ROOT, 'data', '.checkpoints'), { recursive: true }); } catch {}
   fs.writeFileSync(path.join(ROOT, 'data', '.checkpoints', 'compute-token-metrics.txt'), new Date().toISOString() + ` tokens=${ids.length}\n`);
   console.log('Token metrics updated for', ids.length, 'tokens');

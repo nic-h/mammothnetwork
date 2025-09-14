@@ -82,9 +82,10 @@ async function main(){
     // Expand traits panel on the left for context
     try { await page.evaluate(()=>{ const ts=document.querySelector('.traits-section'); ts?.classList.add('open'); }); } catch {}
     // Generate a few variants by selecting curated token IDs
+    const baseIndex = views.indexOf(view);
     for (let vi=0; vi<perViewVariants; vi++){
       try {
-        const id = previewIds[(vi) % previewIds.length];
+        const id = previewIds[(baseIndex + vi) % previewIds.length];
         await page.fill('#search', String(id));
         await page.keyboard.press('Enter');
         await page.waitForTimeout(300);

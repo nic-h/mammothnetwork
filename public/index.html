@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MAMMOTHS NETWORK</title>
+  <title>mammoths.network</title>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
   <!-- Deck.gl UMD loaded below; no PIXI -->
@@ -13,9 +13,10 @@
 <body>
   <header class="header">
     <div id="top-loader" class="top-loader" hidden></div>
-    <div class="logo">MAMMOTH.NETWORK</div>
+    <div class="logo">mammoths.network</div>
+    <div></div>
+    <input id="search" type="search" placeholder="0x… / ENS / TOKEN ID" class="header-search">
     <div class="header-controls">
-      <div class="mode-chips" aria-label="Modes" style="display:none"></div>
       <!-- preset buttons removed (views live in left panel) -->
       <div class="more">
         <button id="more-btn" class="btn btn--chip tooltipped" title="More" data-tooltip="MORE" aria-haspopup="menu" aria-expanded="false" aria-controls="more-panel"><i class="ri-more-2-fill"></i></button>
@@ -26,12 +27,6 @@
         </div>
       </div>
       <!-- View selector moved to left panel -->
-      <div class="search-wrapper">
-        <input id="search" type="search" placeholder="0x… / ENS / TOKEN ID" class="header-search">
-        <button id="clear-search" class="btn btn--clear clear-btn tooltipped" title="Clear (ESC)" data-tooltip="CLEAR">
-          <i class="ri-close-line"></i>
-        </button>
-      </div>
     </div>
   </header>
   <div class="main-container">
@@ -45,6 +40,13 @@
             <button class="tab-btn" data-view="traits" role="tab">TRAITS</button>
             <button class="tab-btn" data-view="whales" role="tab">WHALES</button>
             <button class="tab-btn" data-view="health" role="tab">HEALTH</button>
+          </div>
+          <div class="view-tabs" role="tablist" aria-label="Simple Views">
+            <button class="tab-btn" data-simple="constellation" role="tab">CONSTELLATION</button>
+            <button class="tab-btn" data-simple="currents" role="tab">CURRENTS</button>
+            <button class="tab-btn" data-simple="web" role="tab">WEB</button>
+            <button class="tab-btn" data-simple="pulse" role="tab">PULSE</button>
+            <button class="tab-btn" data-simple="crown" role="tab">CROWN</button>
           </div>
           <select id="view" aria-label="Views" class="sr-only" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;">
             <option value="ownership">OWNERSHIP NETWORK</option>
@@ -76,26 +78,33 @@
         <div class="layer-toggles" style="margin-top: var(--pad-12);">
           <h4>DISPLAY</h4>
           <div class="layer-toggle"><label>Ambient Edges</label><input type="checkbox" id="ambient-edges"></div>
-          <div class="layer-toggle"><label>Whale Bubbles</label><input type="checkbox" id="layer-bubbles" checked></div>
+          <div class="layer-toggle"><label>Whale Bubbles</label><input type="checkbox" id="layer-bubbles"></div>
           <!-- Removed: Wash Watch / Desire Paths -->
+          <div class="colors">
+            <div><span class="sw sw--team"></span>Team</div>
+            <div><span class="sw sw--whale"></span>Whale</div>
+            <div><span class="sw sw--frozen"></span>Frozen</div>
+            <div><span class="sw sw--dormant"></span>Dormant</div>
+            <div><span class="sw sw--other"></span>Other</div>
+          </div>
         </div>
         <!-- Focus removed -->
         <!-- legend removed (dynamic UI already conveys meaning) -->
         <div class="edge-groups">
-          <div class="edge-group open" data-group="relationships">
-            <div class="edge-group-header" role="button" tabindex="0" aria-expanded="true" aria-controls="relationships-body">RELATIONSHIPS <span class="twist">▶</span></div>
+          <div class="edge-group" data-group="relationships">
+            <div class="edge-group-header" role="button" tabindex="0" aria-expanded="false" aria-controls="relationships-body">RELATIONSHIPS <span class="twist">▶</span></div>
             <div id="relationships-body" class="edge-group-body">
-              <div class="layer-toggle"><label>Ownership</label><input type="checkbox" id="layer-ownership" checked></div>
+              <div class="layer-toggle"><label>Ownership</label><input type="checkbox" id="layer-ownership"></div>
               <div class="layer-toggle"><label>Rare Traits</label><input type="checkbox" id="layer-traits"></div>
             </div>
           </div>
-          <div class="edge-group open" data-group="transactions">
-            <div class="edge-group-header" role="button" tabindex="0" aria-expanded="true" aria-controls="transactions-body">TRANSACTIONS <span class="twist">▶</span></div>
+          <div class="edge-group" data-group="transactions">
+            <div class="edge-group-header" role="button" tabindex="0" aria-expanded="false" aria-controls="transactions-body">TRANSACTIONS <span class="twist">▶</span></div>
             <div id="transactions-body" class="edge-group-body">
-              <div class="layer-toggle"><label>Recent Trades</label><input type="checkbox" id="layer-trades" checked></div>
-              <div class="layer-toggle"><label>Sales</label><input type="checkbox" id="layer-sales" checked></div>
-              <div class="layer-toggle"><label>Transfers</label><input type="checkbox" id="layer-transfers" checked></div>
-              <div class="layer-toggle"><label>Mints</label><input type="checkbox" id="layer-mints" checked></div>
+              <div class="layer-toggle"><label>Recent Trades</label><input type="checkbox" id="layer-trades"></div>
+              <div class="layer-toggle"><label>Sales</label><input type="checkbox" id="layer-sales"></div>
+              <div class="layer-toggle"><label>Transfers</label><input type="checkbox" id="layer-transfers"></div>
+              <div class="layer-toggle"><label>Mints</label><input type="checkbox" id="layer-mints"></div>
             </div>
           </div>
           <div class="edge-group" data-group="analysis">
@@ -114,7 +123,7 @@
         </div>
       </div>
     </aside>
-    <div class="center-panel"><canvas id="stage"></canvas></div>
+    <div class="center-panel"></div>
     <aside class="right-panel" id="sidebar">
       <img id="thumb" alt="thumb" style="display:none">
       <div id="details">Select a node…</div>

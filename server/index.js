@@ -32,7 +32,18 @@ const localThumbs = path.join(ROOT, 'data', 'thumbnails');
 const diskThumbs = '/data/thumbnails';
 if (fs.existsSync(localThumbs)) app.use('/thumbnails', express.static(localThumbs, { maxAge: '365d', immutable: true }));
 if (fs.existsSync(diskThumbs)) app.use('/thumbnails', express.static(diskThumbs, { maxAge: '365d', immutable: true }));
-app.use(express.static(path.join(ROOT, 'public'), { fallthrough: true }));
+app.use(express.static(path.join(ROOT, 'public'), {
+  fallthrough: true,
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    if (/\.(?:js|css|png|jpg|jpeg|svg|woff2)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=300');
+    }
+  }
+}));
 
 // DB
 const { db, dbPath } = openDatabase(ROOT);
@@ -45,6 +56,14 @@ if (haveDb) {
 }
 
 function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+function parseSinceWindow(windowParam){
+  const now = Math.floor(Date.now()/1000);
+  const w = String(windowParam||'').toLowerCase();
+  if (w === '7d') return now - 7*86400;
+  if (w === '30d') return now - 30*86400;
+  if (w === '90d') return now - 90*86400;
+  return null;
+}
 
 // Utility: map id->color in black/white/green palette
 function idToColor(id) {
@@ -400,7 +419,9 @@ function sendWithCaching(req, res, key, payload) {
 app.get(['/api/graph', '/api/network-graph'], (req, res) => {
   const mode = (req.query.mode || 'holders').toString();
   const nodes = clamp(parseInt(req.query.nodes || '10000', 10), 100, 10000);
-  const edges = clamp(parseInt(req.query.edges || '200', 10), 0, 500); // cap at 500
+  const full = String(req.query.full||'').toLowerCase()==='1';
+  const maxEdges = full ? 5000 : 500;
+  const edges = clamp(parseInt(req.query.edges || '200', 10), 0, maxEdges);
   const force = String(req.query.force || '').toLowerCase() === '1';
   const key = cacheKey({ mode, nodes, edges });
 
@@ -514,16 +535,20 @@ app.get('/api/activity', (req, res) => {
 });
 
 app.get('/api/heatmap', (req, res) => {
-  if (!haveDb || !db) return res.json({ grid: [] });
+  if (!haveDb || !db) return res.status(503).json({ grid: [] });
   // 7x24 grid: dayOfWeek (0-6), hour (0-23)
   try {
-    const rows = db.prepare("SELECT CAST(strftime('%w', timestamp, 'unixepoch') AS INTEGER) AS dow, CAST(strftime('%H', timestamp, 'unixepoch') AS INTEGER) AS hr, COUNT(1) AS count, SUM(COALESCE(price,0)) AS volume FROM transfers GROUP BY dow, hr").all();
+    const since = parseSinceWindow(req.query.window);
+    const rows = since != null
+      ? db.prepare("SELECT CAST(strftime('%w', timestamp, 'unixepoch') AS INTEGER) AS dow, CAST(strftime('%H', timestamp, 'unixepoch') AS INTEGER) AS hr, COUNT(1) AS count, SUM(COALESCE(price,0)) AS volume FROM transfers WHERE timestamp>=? GROUP BY dow, hr").all(since)
+      : db.prepare("SELECT CAST(strftime('%w', timestamp, 'unixepoch') AS INTEGER) AS dow, CAST(strftime('%H', timestamp, 'unixepoch') AS INTEGER) AS hr, COUNT(1) AS count, SUM(COALESCE(price,0)) AS volume FROM transfers GROUP BY dow, hr").all();
     const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ count: 0, volume: 0 })));
     for (const r of rows) {
       const d = Number(r.dow); const h = Number(r.hr);
       grid[d][h] = { count: r.count, volume: r.volume };
     }
-    res.json({ grid });
+    const key = since!=null ? `heatmap:7x24:${since}` : 'heatmap:7x24';
+    return sendWithCaching(req, res, key, { grid });
   } catch (e) {
     res.json({ grid: [] });
   }
@@ -532,17 +557,107 @@ app.get('/api/heatmap', (req, res) => {
 // Lightweight transfers feed for animated flows
 // Params: limit (<=5000), since (unix sec, optional)
 app.get('/api/transfers', (req, res) => {
-  if (!haveDb || !db) return res.json({ transfers: [] });
+  if (!haveDb || !db) return res.status(503).json({ transfers: [] });
   const limit = clamp(parseInt(req.query.limit || '1000', 10), 1, 5000);
   const since = parseInt(req.query.since || '0', 10) || 0;
+  const key = `transfers:${limit}:${since}`;
   try {
     const rows = since > 0
       ? db.prepare('SELECT token_id, from_addr, to_addr, timestamp, price FROM transfers WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT ?').all(since, limit)
       : db.prepare('SELECT token_id, from_addr, to_addr, timestamp, price FROM transfers ORDER BY timestamp ASC LIMIT ?').all(limit);
     const out = rows.map(r => ({ token_id: r.token_id, from: (r.from_addr||'').toLowerCase(), to: (r.to_addr||'').toLowerCase(), timestamp: r.timestamp||0, price: r.price==null?null:Number(r.price) }));
-    res.setHeader('Cache-Control', 'public, max-age=30');
-    res.json({ transfers: out });
+    return sendWithCaching(req, res, key, { transfers: out });
   } catch (e) { res.status(500).json({ transfers: [] }); }
+});
+
+// Precomputed: wallets with XY and recent metrics
+app.get('/api/precomputed/wallets', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ wallets: [] });
+  try {
+    const rows = db.prepare(`
+      SELECT wm.address,
+             wm.total_holdings AS holdings,
+             wm.buy_count AS buys,
+             wm.sell_count AS sells,
+             wm.trade_count AS transfers,
+             wm.last_activity AS lastTxAt,
+             COALESCE(wm.volume_30d_tia, 0) AS volume30dTia,
+             COALESCE(wm.degree, 0) AS degree,
+             COALESCE(wm.is_team, 0) AS isTeam,
+             COALESCE(wm.is_marketplace, 0) AS isMarketplace,
+             wl.x, wl.y
+      FROM wallet_metadata wm
+      LEFT JOIN wallet_layout wl ON LOWER(wl.address)=LOWER(wm.address)
+      ORDER BY wm.address
+    `).all();
+    return res.json({ wallets: rows.map(r => ({
+      addr: (r.address||'').toLowerCase(),
+      xy: [r.x||0, r.y||0],
+      holdings: r.holdings||0,
+      buys: r.buys||0,
+      sells: r.sells||0,
+      transfers: r.transfers||0,
+      lastTxAt: r.lastTxAt||null,
+      volume30dTia: r.volume30dTia||0,
+      degree: r.degree||0,
+      isTeam: !!r.isTeam,
+      isMarketplace: !!r.isMarketplace,
+    }) });
+  } catch (e) { return res.status(500).json({ wallets: [] }); }
+});
+
+// Precomputed: tokens with XY, rarityRank, and sale metrics
+app.get('/api/precomputed/tokens', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ tokens: [] });
+  const N = parseInt(req.query.limit || '0', 10) || null;
+  try {
+    const list = N ? db.prepare('SELECT * FROM tokens ORDER BY id LIMIT ?').all(N) : db.prepare('SELECT * FROM tokens ORDER BY id').all();
+    const coords = new Map(db.prepare('SELECT token_id, x, y FROM token_layout').all().map(r=>[r.token_id, [r.x, r.y]]));
+    const out = list.map(r => ({
+      id: r.id,
+      xy: coords.get(r.id) || [0,0],
+      rarityRank: r.rarity_rank || null,
+      ownerAddr: (r.owner||'').toLowerCase(),
+      lastSaleAt: r.last_sale_ts || null,
+      saleCount: r.sale_count || 0,
+      volumeAllTia: r.total_sale_volume_tia || 0,
+    }));
+    return res.json({ tokens: out });
+  } catch (e) { return res.status(500).json({ tokens: [] }); }
+});
+
+// Precomputed: wallet-to-wallet edges with type, value (TIA), last ts, weight, and path
+app.get('/api/precomputed/edges', (req, res) => {
+  if (!haveDb || !db) return res.status(404).json({ edges: [] });
+  const since = parseSinceWindow(req.query.window);
+  try {
+    const whereTs = since!=null ? 'AND timestamp>=?' : '';
+    const args = since!=null ? [since] : [];
+    const rows = db.prepare(`
+      SELECT LOWER(from_addr) AS a,
+             LOWER(to_addr) AS b,
+             COUNT(1) AS cnt,
+             SUM(CASE WHEN price IS NOT NULL AND price>0 THEN price ELSE 0 END) AS value_tia,
+             SUM(CASE WHEN price IS NOT NULL AND price>0 THEN 1 ELSE 0 END) AS sales,
+             SUM(CASE WHEN (price IS NULL OR price<=0) AND (event_type IS NULL OR event_type<>'mint') THEN 1 ELSE 0 END) AS transfers,
+             MAX(timestamp) AS ts
+      FROM transfers
+      WHERE from_addr IS NOT NULL AND from_addr<>'' AND to_addr IS NOT NULL AND to_addr<>'' ${whereTs}
+      GROUP BY a,b
+      ORDER BY cnt DESC
+      LIMIT 5000
+    `).all(...args);
+    const centers = new Map(db.prepare('SELECT LOWER(address) AS a, x, y FROM wallet_layout').all().map(r=>[r.a, [r.x, r.y]]));
+    const edges = rows.map(r => {
+      let type = 'transfer';
+      if (r.sales > 0 && r.transfers === 0) type = 'sale';
+      else if (r.sales > 0 && r.transfers > 0) type = 'mixed';
+      const ax = (centers.get(r.a)||[0,0])[0]; const ay=(centers.get(r.a)||[0,0])[1];
+      const bx = (centers.get(r.b)||[0,0])[0]; const by=(centers.get(r.b)||[0,0])[1];
+      return { a: r.a, b: r.b, type, valueTia: Number(r.value_tia||0), ts: r.ts||null, weight: r.cnt||0, path: [[ax,ay],[bx,by]] };
+    });
+    return res.json({ edges });
+  } catch (e) { return res.status(500).json({ edges: [] }); }
 });
 
 // Token story (lifecycle snapshot)
@@ -587,8 +702,40 @@ app.get('/api/suspicious-trades', (req, res) => {
 
 // API: Preset data for layouts (compact arrays for performance)
 app.get('/api/preset-data', (req, res) => {
-  if (!haveDb || !db) return res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], tokenSaleCount: [], tokenLastSaleTs: [], tokenLastSalePrice: [], tokenHoldDays: [], ownerWalletType: [], ownerPnl: [], ownerBuyVol: [], ownerSellVol: [], ownerAvgHoldDays: [], ownerFlipRatio: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
+  if (!haveDb || !db) return res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], tokenSaleCount: [], tokenLastSaleTs: [], tokenLastSalePrice: [], tokenLastBuyPrice: [], tokenHoldDays: [], ownerWalletType: [], ownerPnl: [], ownerBuyVol: [], ownerSellVol: [], ownerAvgHoldDays: [], ownerFlipRatio: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
   const N = parseInt(req.query.nodes || '10000', 10) || 10000;
+  const force = String(req.query.force || '').toLowerCase() === '1';
+  const key = `preset:${N}`;
+
+  // memory cache (skip when force=true)
+  if (!force) {
+    const cached = memCache.get(key);
+    if (cached) {
+      const etag = cached.etag || makeEtag(cached.value || cached);
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+      const inm = req.headers['if-none-match'];
+      if (inm && inm === etag) return res.status(304).end();
+      return res.json(cached.value || cached);
+    }
+  }
+
+  // DB cache with TTL (5 minutes); skip when force=true
+  if (!force && haveDb) {
+    try {
+      const row = db.prepare("SELECT etag, payload, updated_at FROM graph_cache WHERE key=? AND updated_at >= DATETIME('now', '-5 minutes')").get(key);
+      if (row && row.payload) {
+        const payload = JSON.parse(row.payload);
+        res.setHeader('ETag', row.etag || makeEtag(payload));
+        res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+        const inm = req.headers['if-none-match'];
+        if (inm && inm === row.etag) return res.status(304).end();
+        memCache.set(key, payload, row.etag);
+        return res.json(payload);
+      }
+    } catch {}
+  }
+
   try {
     const rows = db.prepare("SELECT id, LOWER(COALESCE(owner,'')) AS owner, sale_count, last_sale_ts, last_sale_price, hold_days FROM tokens WHERE id<=? ORDER BY id").all(N);
     const owners = [];
@@ -681,7 +828,8 @@ app.get('/api/preset-data', (req, res) => {
       ownerFlipRatio[i] = m.flip_ratio ?? null;
     }
 
-    res.json({ owners, ownerIndex, ownerEthos, tokenLastActivity, tokenPrice, tokenSaleCount, tokenLastSaleTs, tokenLastSalePrice, tokenLastBuyPrice, tokenHoldDays, ownerWalletType, ownerPnl, ownerBuyVol, ownerSellVol, ownerAvgHoldDays, ownerFlipRatio, traitKeys, tokenTraitKey, rarity });
+    const payload = { owners, ownerIndex, ownerEthos, tokenLastActivity, tokenPrice, tokenSaleCount, tokenLastSaleTs, tokenLastSalePrice, tokenLastBuyPrice, tokenHoldDays, ownerWalletType, ownerPnl, ownerBuyVol, ownerSellVol, ownerAvgHoldDays, ownerFlipRatio, traitKeys, tokenTraitKey, rarity };
+    return sendWithCaching(req, res, key, payload);
   } catch (e) {
     res.json({ owners: [], ownerIndex: [], ownerEthos: [], tokenLastActivity: [], tokenPrice: [], tokenSaleCount: [], tokenLastSaleTs: [], tokenLastSalePrice: [], tokenLastBuyPrice: [], tokenHoldDays: [], ownerWalletType: [], ownerPnl: [], ownerBuyVol: [], ownerSellVol: [], ownerAvgHoldDays: [], ownerFlipRatio: [], traitKeys: [], tokenTraitKey: [], rarity: [] });
   }
@@ -759,6 +907,23 @@ app.get('/api/token/:id', async (req, res) => {
   try {
     const row = db.prepare('SELECT id, owner, name, description, image_local, thumbnail_local, attributes, frozen, dormant, last_activity, sale_count, avg_sale_price, last_sale_price, first_sale_ts, last_sale_ts, last_acquired_ts, last_buy_price, hold_days FROM tokens WHERE id=?').get(id);
     if (!row) return res.status(404).json({ error: 'not-found' });
+    // Fallback to existing on-disk images when DB paths are null
+    let image_local = row.image_local;
+    let thumbnail_local = row.thumbnail_local;
+    try {
+      const localImg = path.join(ROOT, 'data', 'images', `${id}.jpg`);
+      const localTh = path.join(ROOT, 'data', 'thumbnails', `${id}.jpg`);
+      const diskImg = path.join('/data', 'images', `${id}.jpg`);
+      const diskTh = path.join('/data', 'thumbnails', `${id}.jpg`);
+      if (!thumbnail_local) {
+        if (fs.existsSync(localTh)) thumbnail_local = `thumbnails/${id}.jpg`;
+        else if (fs.existsSync(diskTh)) thumbnail_local = `thumbnails/${id}.jpg`;
+      }
+      if (!image_local) {
+        if (fs.existsSync(localImg)) image_local = `images/${id}.jpg`;
+        else if (fs.existsSync(diskImg)) image_local = `images/${id}.jpg`;
+      }
+    } catch {}
     // traits from attributes table (authoritative)
     let traits = [];
     try { traits = db.prepare('SELECT trait_type, trait_value FROM attributes WHERE token_id=?').all(id); } catch {}
@@ -771,8 +936,8 @@ app.get('/api/token/:id', async (req, res) => {
       owner: row.owner,
       name: row.name,
       description: row.description,
-      image_local: row.image_local,
-      thumbnail_local: row.thumbnail_local,
+      image_local,
+      thumbnail_local,
       traits,
       frozen: row.frozen || 0,
       dormant: row.dormant || 0,
