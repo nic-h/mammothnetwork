@@ -40,7 +40,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-te
 .main-container {
   display: grid;
   grid-template-columns: var(--col-left) 1fr var(--col-right);
-  height: calc(100dvh - 48px);
+  height: calc(100vh - 48px);
 }
 /* When header wraps to multiple rows, avoid clipping content by allowing extra height */
 @media (max-width: 1200px){
@@ -231,6 +231,19 @@ input[type="checkbox"] { accent-color: var(--fg); }
 @media (max-width: 1024px){
   .main-container { grid-template-columns: 240px 1fr 360px; }
   .center-panel { padding: var(--pad-12); }
+}
+
+/* Ensure center panel has concrete height for Deck.gl canvas */
+.center-panel {
+  position: relative;
+  min-width: 0;
+  height: calc(100vh - 40px);
+}
+
+.center-panel #deck-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
 }
 
 /* Additional tablet/mobile breakpoint */
