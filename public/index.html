@@ -15,7 +15,7 @@
     <div id="top-loader" class="top-loader" hidden></div>
     <div class="logo">mammoths.network</div>
     <div></div>
-    <input id="search" type="search" placeholder="0x… / ENS / TOKEN ID" class="header-search">
+    <input id="search" type="search" placeholder="0x… / ENS / TOKEN ID" class="header-search tooltipped" autocomplete="off" spellcheck="false" value="" data-tooltip="Search wallet (0x…), ENS, or token ID" title="Search wallet (0x…), ENS, or token ID">
     <div class="header-controls">
       <!-- preset buttons removed (views live in left panel) -->
       <div class="more">
@@ -33,17 +33,10 @@
     <aside class="left-panel">
       <div class="controls-section">
         <div class="view-selector panel-view" aria-label="Views">
-          <label for="view" class="panel-title">VIEW</label>
-          <div class="view-tabs" role="tablist" aria-label="Views">
-            <button class="tab-btn" data-view="ownership" role="tab">OWNERSHIP</button>
-            <button class="tab-btn" data-view="trading" role="tab">TRADING</button>
-            <button class="tab-btn" data-view="traits" role="tab">TRAITS</button>
-            <button class="tab-btn" data-view="whales" role="tab">WHALES</button>
-            <button class="tab-btn" data-view="health" role="tab">HEALTH</button>
-          </div>
+          <label class="panel-title" style="text-align:left;">VIEW</label>
           <div class="view-tabs" role="tablist" aria-label="Simple Views">
-            <button class="tab-btn" data-simple="constellation" role="tab">CONSTELLATION</button>
-            <button class="tab-btn" data-simple="currents" role="tab">CURRENTS</button>
+            <button class="tab-btn" data-simple="dots" role="tab">DOTS</button>
+            <button class="tab-btn" data-simple="currents" role="tab">FLOW</button>
             <button class="tab-btn" data-simple="web" role="tab">WEB</button>
             <button class="tab-btn" data-simple="pulse" role="tab">PULSE</button>
             <button class="tab-btn" data-simple="crown" role="tab">CROWN</button>
@@ -81,11 +74,10 @@
           <div class="layer-toggle"><label>Whale Bubbles</label><input type="checkbox" id="layer-bubbles"></div>
           <!-- Removed: Wash Watch / Desire Paths -->
           <div class="colors">
-            <div><span class="sw sw--team"></span>Team</div>
+            <div><span class="sw sw--active"></span>Active</div>
             <div><span class="sw sw--whale"></span>Whale</div>
             <div><span class="sw sw--frozen"></span>Frozen</div>
             <div><span class="sw sw--dormant"></span>Dormant</div>
-            <div><span class="sw sw--other"></span>Other</div>
           </div>
         </div>
         <!-- Focus removed -->

@@ -32,10 +32,9 @@
       rad[i] = 2 + Math.min(6, Math.log10(1 + h+b+s)*2.5);
       const days = w.lastTxAt ? Math.max(0, (now - Number(w.lastTxAt||0))/86400) : 9999;
       const a = Math.round(255 * (0.25 + 0.75 * (1 - Math.min(90, days)/90)));
-      let c = [80,120,98,200];
-      if (w.isTeam) c = [0,255,102,255];
-      else if ((h>=10) || (b+s>=20) || (Number(w.volume30dTia||0)>=500)) c = [10,138,61,230];
-      else if (days>=90) c = [102,102,102,180];
+      let c = COLORS.active;
+      if ((h>=10) || (b+s>=20) || (Number(w.volume30dTia||0)>=500)) c = COLORS.whale;
+      if (days>=90) c = COLORS.dormant;
       col[i*4]=c[0]; col[i*4+1]=c[1]; col[i*4+2]=c[2]; col[i*4+3]=a;
     }
     return { length:n, attributes:{ getPosition:{ value:pos, size:2 }, getRadius:{ value:rad, size:1 }, getFillColor:{ value:col, size:4 } } };
@@ -43,50 +42,104 @@
   function topEdges(edgeList, cap=400){ const e=Array.isArray(edgeList?.edges)?edgeList.edges:[]; return e.slice().sort((a,b)=> (Number(b.valueTia||0)-Number(a.valueTia||0)) || (Number(b.weight||0)-Number(a.weight||0)) ).slice(0,cap); }
   function buildTokenBinary(list){ const t=Array.isArray(list?.tokens)?list.tokens:[]; const n=t.length; const pos=new Float32Array(n*2); const rad=new Float32Array(n); const col=new Uint8ClampedArray(n*4); for(let i=0;i<n;i++){ const it=t[i]; const xy=it.xy||[0,0]; pos[i*2]=xy[0]; pos[i*2+1]=xy[1]; rad[i]=Math.max(2, 10 - Math.log10(Math.max(1, Number(it.rarityRank||999999)))); col[i*4]=0; col[i*4+1]=255; col[i*4+2]=102; col[i*4+3]=200; } return { length:n, attributes:{ getPosition:{value:pos,size:2}, getRadius:{value:rad,size:1}, getFillColor:{value:col,size:4} } };
   }
+  // Fallback binary from current graph nodes (positions from applyLayout)
+  function buildNodeBinaryFromNodes(nodeList){
+    const n = Array.isArray(nodeList)? nodeList.length : 0;
+    const pos = new Float32Array(n*2); const rad = new Float32Array(n); const col = new Uint8ClampedArray(n*4);
+    for (let i=0;i<n;i++){
+      const d=nodeList[i]; const p=d?.position||[0,0,0]; pos[i*2]=p[0]; pos[i*2+1]=p[1];
+      rad[i] = d?.radius || 4;
+      const c = nodeColor(d) || [0,255,102,200]; const a = c[3]!=null?c[3]:200;
+      col[i*4]=c[0]; col[i*4+1]=c[1]; col[i*4+2]=c[2]; col[i*4+3]=a;
+    }
+    return { length:n, attributes:{ getPosition:{ value:pos, size:2 }, getRadius:{ value:rad, size:1 }, getFillColor:{ value:col, size:4 } } };
+  }
   const SIMPLE_VIEW = true;
+  let simpleView = 'dots';
   function buildSimpleLayers(mode){
     const layers = []; const zoom=(currentZoom==null)?0:currentZoom;
-    if ((mode==='holders')||(mode==='wallets')){
-      const bin=buildWalletBinary(pre.wallets); layers.push(new ScatterplotLayer({ id:'constellation', data:bin, pickable:true, autoHighlight:true, onHover:onHoverThrottled, highlightColor:[255,255,255,100], stroked:true, getLineWidth: d=>0, lineWidthUnits:'pixels', transitions:{ getRadius:{ duration:200 } } }));
-    } else if (mode==='transfers'){
-      const E=topEdges(pre.edges, 400);
-      layers.push(new ArcLayer({ id:'currents', data:E, pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.4, getSourcePosition:e=> e.path?.[0]||[0,0,0], getTargetPosition:e=> e.path?.[1]||[0,0,0], getWidth:e=> Math.max(1, Math.min(3, Math.log10((Number(e.valueTia)||0)+1))), getSourceColor:e=> e.type==='sale'? [255,59,59,140] : [74,163,255,140], getTargetColor:e=> e.type==='sale'? [255,59,59,140] : [74,163,255,140] }));
-      layers.push(new PathLayer({ id:'web', data:E.map(r=>({ path:r.path, type:r.type, valueTia:r.valueTia })), pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.2, getPath:d=>d.path, getWidth:d=> Math.max(1, Math.min(2, Math.log10((Number(d.valueTia)||0)+1))), widthUnits:'pixels', getColor:d=> d.type==='sale'? [255,59,59,140] : [74,163,255,140] }));
-    } else if (mode==='health'){
-      const bin=buildWalletBinary(pre.wallets); const now=Math.floor(Date.now()/1000);
-      layers.push(new ScatterplotLayer({ id:'pulse', data:bin, pickable:true, autoHighlight:true, onHover:onHoverThrottled, updateTriggers:{ getRadius:[pulseT] }, getRadius:(obj,{index})=>{ const last=(pre.wallets?.wallets?.[index]?.lastTxAt)||0; const base=obj.attributes.getRadius.value[index]; const fresh=(now-last)<86400; return fresh ? base*(1+0.06*Math.sin((pulseT||0)*2+index)) : base; } }));
-    } else if (mode==='traits'){
-      const bin=buildTokenBinary(pre.tokens); layers.push(new ScatterplotLayer({ id:'crown', data:bin, pickable:true, autoHighlight:true, onHover:onHoverThrottled }));
-      try { const tok=pre.tokens?.tokens||[]; const K=20; const top=tok.filter(x=>Number.isFinite(x.rarityRank)).sort((a,b)=> (Number(a.rarityRank||1e12)-Number(b.rarityRank||1e12))).slice(0,K); layers.push(new TextLayer({ id:'crown-labels', data:top, visible:(zoom>=2), getPosition:d=> d.xy||[0,0,0], getText:d=>`#${d.id}`, sizeUnits:'pixels', getSize:12, getColor:[0,255,102,220] })); } catch {}
+    if (simpleView==='dots'){
+      const hasW = Array.isArray(pre.wallets?.wallets) && pre.wallets.wallets.length>0;
+      const bin = hasW ? buildWalletBinary(pre.wallets) : buildNodeBinaryFromNodes(nodes);
+      layers.push(new ScatterplotLayer({ id:'dots', data:bin, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, highlightColor:[255,255,255,100], stroked:true, getLineWidth: d=>0, lineWidthUnits:'pixels', transitions:{ getRadius:{ duration:200 } },
+        onClick: async (info)=>{
+          const idx=info?.index; if (idx==null) return;
+          if (hasW){
+            const addr=pre.wallets.wallets[idx]?.addr || pre.wallets.wallets[idx]?.address;
+            if (addr){
+              try {
+                const r = await jfetch(`/api/wallet/${addr}`);
+                const tok = Array.isArray(r?.tokens) && r.tokens.length ? Number(r.tokens[0]) : null;
+                if (tok!=null) { focusSelect(tok); return; }
+              } catch {}
+            }
+          }
+          // Fallback: open token from current graph nodes by index
+          const obj = nodes[idx]; if (obj) handleClick({ object: obj });
+        }
+      }));
+    } else if (simpleView==='currents' || simpleView==='web'){
+      const hasE = Array.isArray(pre.edges?.edges) && pre.edges.edges.length>0;
+      if (hasE){
+        const E=topEdges(pre.edges, 400);
+        if (simpleView==='currents') layers.push(new ArcLayer({ id:'currents', data:E, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.4, getSourcePosition:e=> e.path?.[0]||[0,0,0], getTargetPosition:e=> e.path?.[1]||[0,0,0], getWidth:e=> Math.max(1, Math.min(3, Math.log10((Number(e.valueTia)||0)+1))), getSourceColor:e=> e.type==='sale'? COLORS.saleArc : COLORS.xferArc, getTargetColor:e=> e.type==='sale'? COLORS.saleArc : COLORS.xferArc }));
+        if (simpleView==='web') layers.push(new PathLayer({ id:'web', data:E.map(r=>({ path:r.path, type:r.type, valueTia:r.valueTia })), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.2, getPath:d=>d.path, getWidth:d=> Math.max(1, Math.min(2, Math.log10((Number(d.valueTia)||0)+1))), widthUnits:'pixels', getColor:d=> d.type==='sale'? COLORS.saleArc : COLORS.xferArc }));
+      } else if ((edges||[]).length){
+        const segs = (edges||[]).slice(0, 400).map(e=>({ path:[ nodes[e.sourceIndex]?.position||[0,0,0], nodes[e.targetIndex]?.position||[0,0,0] ], type:'transfer', valueTia:1 }));
+        if (simpleView==='currents') layers.push(new ArcLayer({ id:'currents', data:segs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.4, getSourcePosition:e=> e.path[0], getTargetPosition:e=> e.path[1], getWidth:1, getSourceColor: COLORS.xferArc, getTargetColor: COLORS.xferArc }));
+        if (simpleView==='web') layers.push(new PathLayer({ id:'web', data:segs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.2, getPath:d=>d.path, getWidth:1, widthUnits:'pixels', getColor: COLORS.xferArc }));
+      }
+    } else if (simpleView==='pulse'){
+      const hasW = Array.isArray(pre.wallets?.wallets) && pre.wallets.wallets.length>0;
+      const bin = hasW ? buildWalletBinary(pre.wallets) : buildNodeBinaryFromNodes(nodes);
+      const now=Math.floor(Date.now()/1000);
+      layers.push(new ScatterplotLayer({ id:'pulse', data:bin, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, updateTriggers:{ getRadius:[pulseT] }, getRadius:(obj,{index})=>{ const last=(pre.wallets?.wallets?.[index]?.lastTxAt)||0; const base=obj.attributes.getRadius.value[index]; const fresh=(now-last)<86400; return fresh ? base*(1+0.06*Math.sin((pulseT||0)*2+index)) : base; },
+        onClick: (info)=>{ const idx=info?.index; if (idx==null) return; if (hasW){ const addr=pre.wallets.wallets[idx]?.addr || pre.wallets.wallets[idx]?.address; if (addr) openWallet(String(addr)); } else { const obj=nodes[idx]; if (obj) handleClick({ object: obj }); } }
+      }));
+    } else if (simpleView==='crown'){
+      const hasT = Array.isArray(pre.tokens?.tokens) && pre.tokens.tokens.length>0;
+      const bin = hasT ? buildTokenBinary(pre.tokens) : buildNodeBinaryFromNodes(nodes);
+      layers.push(new ScatterplotLayer({ id:'crown', data:bin, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled,
+        onClick: (info)=>{ const idx=info?.index; if (idx==null) return; if (hasT){ const t=pre.tokens.tokens[idx]; const id=t?.id; if (id!=null) handleClick({ object:{ id } }); } else { const obj=nodes[idx]; if (obj) handleClick({ object: obj }); } }
+      }));
+      if (hasT){ try { const tok=pre.tokens?.tokens||[]; const K=20; const top=tok.filter(x=>Number.isFinite(x.rarityRank)).sort((a,b)=> (Number(a.rarityRank||1e12)-Number(b.rarityRank||1e12))).slice(0,K); layers.push(new TextLayer({ id:'crown-labels', data:top, visible:(zoom>=2), getPosition:d=> d.xy||[0,0,0], getText:d=>`#${d.id}`, sizeUnits:'pixels', getSize:12, getColor:[0,255,102,220] })); } catch {} }
     }
+    // Selection ring overlay in simple views
+    try {
+      if (selectedId>0){
+        const obj = nodes.find(n=> n && n.id===selectedId);
+        if (obj){
+          layers.push(new ScatterplotLayer({ id:'selection-ring', data:[obj], coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> Math.max(10,(d.radius||4)+8), getLineColor:[0,255,102,220], lineWidthMinPixels:2, radiusUnits:'pixels' }));
+        }
+      }
+    } catch {}
     return layers;
   }
   // Unified colors and node color mapping (Team, Whale, Frozen, Dormant, Other)
   const COLORS = {
-    team:    [0,255,102,255],
-    whale:   [10,138,61,230],
-    frozen:  [68,136,255,200],
-    dormant: [102,102,102,180],
-    other:   [80,120,98,200],
-    saleArc: [255,59,59,120],
-    xferArc: [74,163,255,120],
+    active:  [0,255,102,220],     // neon green
+    whale:   [10,138,61,230],     // dark green
+    frozen:  [68,136,255,200],    // blue
+    dormant: [102,102,102,180],   // gray
+    saleArc: [255,59,59,140],     // red
+    xferArc: [74,163,255,140],    // blue
+    rare:    [255,215,0,220],     // gold (labels/rare dots)
   };
   function nodeColor(d){
     try {
       const types = presetData?.ownerWalletType || [];
       const t = (d.ownerIndex!=null && d.ownerIndex>=0) ? (types[d.ownerIndex]||'') : '';
-      const isTeam = (t==='team' || t==='team_wallet' || t==='creator');
+      // Whale: explicit wallet_type or large holdings/volume (approx from price)
       const isWhale = (t==='whale_trader' || t==='whale');
       const isFrozen = !!d.frozen;
       const now = Math.floor(Date.now()/1000);
       const daysSince = d.lastActivity? (now - (d.lastActivity||0))/86400 : 9e6;
       const isDormant = !isFrozen && (d.dormant || daysSince >= 90);
-      if (isTeam) return COLORS.team;
       if (isWhale) return COLORS.whale;
       if (isFrozen) return COLORS.frozen;
       if (isDormant) return COLORS.dormant;
-      return COLORS.other;
-    } catch { return [0,255,102,180]; }
+      return COLORS.active;
+    } catch { return COLORS.active.slice(); }
   }
   const center = document.querySelector('.center-panel');
   const stage = document.getElementById('stage');
@@ -185,6 +238,7 @@
     bindViewControls();
     bindInputs();
     bindShortcuts();
+    try { const se=document.getElementById('search'); if (se) se.value=''; } catch {}
     // Initialize edge slider value
     const edgesEl = document.getElementById('edges-slider');
     if (edgesEl) edgeCount = parseInt(edgesEl.value||'200',10);
@@ -375,6 +429,20 @@
     try { if ((!selectedId || selectedId<0) && nodes && nodes.length){ focusSelect(nodes[Math.floor(nodes.length*0.5)].id); } } catch {}
   }
 
+  // Expose tiny control API for automated tests/screenshots
+  try {
+    window.mammoths = {
+      setSimpleView: async (key)=>{
+        simpleView = String(key||'dots');
+        if (simpleView==='dots') await loadMode('holders', edgeCount);
+        else if (simpleView==='currents' || simpleView==='web') await loadMode('transfers', edgeCount);
+        else if (simpleView==='pulse') await loadMode('health', edgeCount);
+        else if (simpleView==='crown') await loadMode('traits', edgeCount);
+      },
+      focusToken: (id)=>{ try { focusSelect(Number(id)); } catch {} },
+    };
+  } catch {}
+
   function buildNodes(apiNodes, pdata){
     const ownerIndex = pdata.ownerIndex||[]; const ownerEthos = pdata.ownerEthos||[];
     const tokenLastActivity = pdata.tokenLastActivity||[]; const tokenPrice=pdata.tokenPrice||[]; const rarity=pdata.rarity||[];
@@ -408,7 +476,7 @@
 
   function applyLayout(nodes, mode, pdata){
     const w = center.clientWidth||1200, h=center.clientHeight||800; const cx=w/2, cy=h/2;
-    if (SIMPLE_VIEW){ return; }
+    // Compute layout even when SIMPLE_VIEW is on so fallbacks have positions
     if (mode==='holders'){
       // Gravitational clusters: owner hubs + token orbits
       const owners = Math.max(1, (pdata.owners?.length||12));
@@ -888,7 +956,11 @@ function buildFlowParticles(limit=600){
   async function fetchWash(){ try { const r = await jfetch('/api/suspicious-trades'); const s=new Set((r?.tokens||[]).map(t=>Number(t.token_id||t.id))); return s; } catch { return null; } }
   async function fetchDesire(){ try { const r = await jfetch('/api/desire-paths'); const s=new Set((r?.desire_paths||[]).map(t=>Number(t.token_id||t.id))); return s; } catch { return null; } }
   function focusSelect(id){ const obj = nodes.find(n=>n.id===id); if (!obj) return; selectedId=id; // center roughly by resetting viewState target
-    try { const vs = deckInst?.viewState || {}; deckInst?.setProps?.({ viewState: { target: [obj.position[0], obj.position[1], 0], zoom: 1.2 } }); } catch {}
+    try {
+      const vs = deckInst?.viewState || {};
+      deckInst?.setProps?.({ viewState: { target: [obj.position[0], obj.position[1], 0], zoom: 1.8, transitionDuration: 400 } });
+    } catch {}
+    try { const se=document.getElementById('search'); if (se) se.value=''; } catch {}
     handleClick({ object: obj }); }
 
   // ---------- View builders and helpers ----------

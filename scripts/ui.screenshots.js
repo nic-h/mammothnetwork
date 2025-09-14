@@ -72,11 +72,12 @@ async function main(){
 
   // Views to exercise
   const views = ['ownership', 'trading', 'traits', 'whales', 'health'];
+  const simple = ['dots', 'currents', 'web', 'pulse', 'crown'];
   const previewIds = (process.env.PREVIEW_IDS || '5000,3333,2500,2000,1000,100,2').split(',').map(s=>parseInt(s,10)).filter(n=>!isNaN(n));
   const perViewVariants = parseInt(process.env.PREVIEW_VARIANTS || '3', 10);
 
   for (const view of views){
-    // Select view
+    // Select legacy view (ensures nodes array is present for focusSelect)
     await page.selectOption('#view', view).catch(()=>{});
     await waitForIdle(page);
     // Expand traits panel on the left for context
@@ -86,8 +87,10 @@ async function main(){
     for (let vi=0; vi<perViewVariants; vi++){
       try {
         const id = previewIds[(baseIndex + vi) % previewIds.length];
-        await page.fill('#search', String(id));
-        await page.keyboard.press('Enter');
+        // Try direct focus via exposed API for reliability
+        await page.evaluate((tok)=>{ window.mammoths?.focusToken?.(tok); }, id).catch(()=>{});
+        // Also drive the search box in case the API isn't available yet
+        try { await page.fill('#search', String(id)); await page.keyboard.press('Enter'); } catch {}
         await page.waitForTimeout(300);
         await page.waitForFunction(() => {
           const d = document.querySelector('#details');
@@ -95,7 +98,7 @@ async function main(){
           const hasImg = img && img.getAttribute('src');
           const hasContent = d && d.textContent && !/Select a node/i.test(d.textContent);
           return !!(hasImg || hasContent);
-        }, { timeout: 1500 }).catch(()=>{});
+        }, { timeout: 5000 }).catch(()=>{});
       } catch (e) { console.warn('search selection failed', view, e?.message||e); }
 
       // Exercise keyboard flows once per view (only first variant)
@@ -106,6 +109,24 @@ async function main(){
       await waitForIdle(page);
       await screenshot(page, `desktop-preset-${view}-v${vi+1}-1440`);
     }
+  }
+
+  // Simple view screenshots too (use exposed API)
+  for (const key of simple){
+    await page.evaluate((k)=> window.mammoths?.setSimpleView?.(k), key).catch(()=>{});
+    await waitForIdle(page);
+    const id = (previewIds[0]||5000);
+    await page.evaluate((tok)=>{ window.mammoths?.focusToken?.(tok); }, id).catch(()=>{});
+    await page.waitForFunction(() => {
+      const d = document.querySelector('#details');
+      const img = document.querySelector('#thumb');
+      const hasImg = img && img.getAttribute('src');
+      const hasContent = d && d.textContent && !/Select a node/i.test(d.textContent);
+      return !!(hasImg || hasContent);
+    }, { timeout: 5000 }).catch(()=>{});
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await waitForIdle(page);
+    await screenshot(page, `desktop-simple-${key}-1440`);
   }
 
   await browser.close();
