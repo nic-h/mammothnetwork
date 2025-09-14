@@ -4,6 +4,7 @@ if (!window.deck) {
   console.error('deck.app.js: window.deck missing; aborting init');
   throw new Error('Deck UMD not loaded');
 }
+console.log('deck.app: boot');
 (function(){
   // ETag-aware JSON fetch with in-memory memo; dedupes view switches
   const __mem = new Map(); // url -> { etag, json, t }
@@ -146,6 +147,7 @@ if (!window.deck) {
     } catch { return COLORS.active.slice(); }
   }
   const center = document.querySelector('.center-panel');
+  if (!center) { console.error('deck.app: .center-panel not found'); }
   const stage = document.getElementById('stage');
   if (stage) stage.style.display = 'none';
   if (!center) return;
@@ -162,13 +164,13 @@ if (!window.deck) {
 
   function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
 
-  // Canvas for deck
+  // Canvas for deck (ensure non-zero backing store)
   const canvas = document.createElement('canvas');
   canvas.id = 'deck-canvas';
   canvas.style.width = '100%';
   canvas.style.height = '100%';
   canvas.style.display = 'block';
-  center.appendChild(canvas);
+  try { center.appendChild(canvas); console.log('deck.app: canvas appended'); } catch(e){ console.error('deck.app: append canvas failed', e?.message||e); }
 
   let deckInst = null;
   let presetData = null;
@@ -220,8 +222,11 @@ if (!window.deck) {
     get desire(){ return getChecked('layer-desire', false); },
   };
 
+  // Minimal hover handler to avoid runtime errors in simple views
+  function onHoverThrottled(info){ /* no-op; selection handled onClick */ }
+
   // Resize
-  try { new ResizeObserver(()=>{ const w=center.clientWidth||800, h=center.clientHeight||600; deckInst?.setProps?.({width:w, height:h}); }).observe(center); } catch {}
+  try { new ResizeObserver(()=>{ const w=center.clientWidth||800, h=center.clientHeight||600; try { const dpr=Math.min((window.devicePixelRatio||1), 1.75); canvas.width=Math.max(1, Math.floor(w*dpr)); canvas.height=Math.max(1, Math.floor(h*dpr)); } catch {}; deckInst?.setProps?.({width:w, height:h}); }).observe(center); } catch {}
 
   init().catch(console.error);
 
@@ -229,6 +234,7 @@ if (!window.deck) {
     startUILoad();
     presetData = await jfetch(API.preset) || null;
     const w = center.clientWidth||800, h = center.clientHeight||600;
+    try { const dpr=Math.min((window.devicePixelRatio||1), 1.75); canvas.width=Math.max(1, Math.floor(w*dpr)); canvas.height=Math.max(1, Math.floor(h*dpr)); } catch {}
     deckInst = new Deck({
       canvas: 'deck-canvas', width:w, height:h,
       controller: { dragPan: true, scrollZoom: true, touchRotate: false, doubleClickZoom: false },
@@ -606,10 +612,10 @@ if (!window.deck) {
       if (paths.length) layers.unshift(new LineLayer({ id:'trait-constellations', data:paths, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[255,215,0,160], getWidth:0.8, widthUnits:'pixels', opacity:0.6 }));
     }
     // LOD: stronger gating for heavy visuals
-    const showEdges = currentZoom >= 0.5;
+    const lodEdges = currentZoom >= 0.5;
     const showFx = currentZoom >= 0.8;     // glow/pulses only when quite close
     const showDots = currentZoom >= 0.25;  // particles only when close
-    if (!showEdges) layers = layers.filter(l=> l && l.id!=='edges');
+    if (!lodEdges) layers = layers.filter(l=> l && l.id!=='edges');
     if (!showFx) layers = layers.filter(l=> l && l.id!=='glow' && l.id!=='pulses');
     if (currentMode==='transfers' && !showDots) layers = layers.filter(l=> l && l.id!=='flow-dots');
     deckInst.setProps({ layers });

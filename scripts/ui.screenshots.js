@@ -62,10 +62,37 @@ async function main(){
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   page.on('console', msg => { try { console.log('[page]', msg.text()); } catch {} });
+  page.on('pageerror', err => { try { console.log('[pageerror]', err.message); } catch {} });
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await waitForIdle(page);
   // Wait for deck canvas if available (avoid blank snapshots)
   await page.waitForSelector('#deck-canvas', { timeout: 8000 }).catch(()=>{});
+  // Wait until Deck has initialized and canvas backing store is non-zero
+  await page.waitForFunction(() => {
+    const c = document.getElementById('deck-canvas');
+    return !!(window.deck && c && c.width > 0 && c.height > 0);
+  }, { timeout: 12000 }).catch(()=>{});
+  // Log canvas size and a center pixel sample from WebGL (debug)
+  try {
+    const probe = await page.evaluate(() => {
+      const c = document.getElementById('deck-canvas');
+      const ctr = document.querySelector('.center-panel');
+      const w = c?.width||0, h=c?.height||0;
+      const bb = c?.getBoundingClientRect?.() || {width:0,height:0};
+      const cw = ctr?.clientWidth||0, ch=ctr?.clientHeight||0;
+      let px=[-1,-1,-1,-1];
+      try{
+        const gl = c?.getContext?.('webgl2') || c?.getContext?.('webgl');
+        if (gl && w>4 && h>4){ const arr=new Uint8Array(4); gl.readPixels(Math.floor(w/2), Math.floor(h/2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, arr); px=[arr[0],arr[1],arr[2],arr[3]]; }
+      } catch {}
+      const canvases = Array.from(document.querySelectorAll('canvas')).map((el,i)=>{
+        const r=el.getBoundingClientRect();
+        return { i, id: el.id||null, cls: el.className||'', w: el.width||0, h: el.height||0, bw: Math.round(r.width), bh: Math.round(r.height) };
+      });
+      return { w, h, bbW: Math.round(bb.width), bbH: Math.round(bb.height), cw, ch, px, canvases };
+    });
+    console.log('canvas:', probe);
+  } catch {}
   try {
     await page.waitForLoadState('load', { timeout: 10000 });
     const info = await page.evaluate(() => ({ t: typeof window.deck, scripts: Array.from(document.querySelectorAll('script')).map(s=>s.src).filter(s=>/deck\.gl|geo-layers/.test(s)).length }));

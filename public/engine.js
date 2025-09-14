@@ -47,6 +47,7 @@
     try { await ensureDeck(); }
     catch (e) { console.error(e.message); return; }
     await load('/deck.app.js?v=' + ver());
+    try { console.log('engine: deck.app injected'); } catch {}
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
