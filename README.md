@@ -6,6 +6,7 @@ WebGL network for the Mammoths NFT collection.
 New here? Start with Onboarding:
 - docs/ONBOARDING.md — quick start, engine, DB, commands
 - docs/TECH_SPEC.md — deeper spec for views/data/engine
+- docs/DEV_TRIAGE.md — quick triage to verify data, endpoints, and canvas
 
 At‑a‑Glance System Overview
 - Frontend: Deck.gl (center canvas) with additive glow & smooth transitions.
@@ -199,6 +200,50 @@ Screenshots
 - Generate 1440px desktop previews for each view: `npm run test:ui`
 - Configure variants: `PREVIEW_IDS=5000,3333,2500 PREVIEW_VARIANTS=3 npm run test:ui`
 - Images are saved to `artifacts/ui/`
+
+Simple Views (2025‑09)
+----------------------
+
+Fast, GPU‑friendly views backed by binary attributes and zoom gates. These render from `/api/precomputed/*` when available and fall back to the live `/api/graph` nodes/edges so the canvas never appears blank.
+
+- DOTS: wallet scatter. Size = log10(holdings+buys+sells). Color = Active/Whale/Frozen/Dormant. Click opens token detail (from wallet → first token, or from graph fallback).
+- FLOW: market flows (ArcLayer). Red = sales; Blue = transfers. Visible at zoom ≥ 1.4. Top ~400 arcs.
+- WEB: straight connections (PathLayer). Red/Blue like FLOW. Visible at zoom ≥ 1.2. Top ~400 lines.
+- PULSE: recent activity dots. Alpha = 1−days/90; soft “breathe” if <24h.
+- CROWN: token rarity dots; gold labels for top‑K rare at zoom ≥ 2.
+
+Precomputed Endpoints
+- `/api/precomputed/wallets` — `{ wallets:[{ addr, xy:[x,y], holdings, buys, sells, lastTxAt, volume30dTia, degree, isFrozen, … }] }`
+- `/api/precomputed/edges?window=7d|30d|90d` — `{ edges:[{ a,b,type,valueTia,ts,weight,path:[[ax,ay],[bx,by]] }] }`
+- `/api/precomputed/tokens` — `{ tokens:[{ id, xy:[x,y], rarityRank, ownerAddr, lastSaleAt, saleCount, volumeAllTia }] }`
+
+Populate + Verify (quick)
+1) `npm ci && npm run db:migrate`
+2) Export env: `CONTRACT_ADDRESS`, `MODULARIUM_API`, `ETHOS_API`
+3) Minimum data fill:
+   - `node jobs/sync-metadata.js`
+   - `node jobs/sync-holders.js`
+   - `node jobs/sync-activity.js`
+   - `node jobs/compute-token-metrics.js`
+   - `node jobs/enrich-wallets.js`
+   - `node jobs/precompute-layouts.js`
+4) Start server: `npm run dev`
+5) Verify:
+```
+curl -s http://localhost:3000/api/health
+curl -s http://localhost:3000/api/graph | jq '.nodes|length'
+node -e "import { openDatabase } from './server/db.js'; const { db }=openDatabase(process.cwd()); const n=a=>db.prepare(a).get().c; console.log({ tokens:n('SELECT COUNT(1) c FROM tokens'), transfers:n('SELECT COUNT(1) c FROM transfers') }); db.close();"
+```
+
+Troubleshooting
+- Canvas blank: restart the server so new routes are active; if `/api/precomputed/*` returns HTML (index), the process hasn’t reloaded. Simple views now fall back to live `/api/graph`, so if still blank inspect `/api/graph` in Network.
+- Sidebar image missing: ensure `data/thumbnails/:id.jpg` or `tokens.thumbnail_local/image_local` exists; server falls back to disk automatically.
+- Search alignment: header and main share the same 3‑column grid; search is in column 3. The placeholder tooltip is “Search wallet (0x…), ENS, or token ID”.
+
+Headless Screenshots
+1) `npm ci && npx playwright install`
+2) `PREVIEW_IDS=1000,724,1472 PREVIEW_VARIANTS=1 node scripts/ui.screenshots.js`
+   The script forces a selection via `window.mammoths.focusToken(id)` and waits for sidebar + image before capture.
 
 - Engine
 - The center rendering engine is Deck.gl (`public/deck.app.js`).

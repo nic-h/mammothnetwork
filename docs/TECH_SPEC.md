@@ -5,6 +5,15 @@ Status: living specification for the repo. This doc tracks intent (spec) and imp
 ## Summary
 Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas runs on Deck.gl (GPU‑accelerated layers, smooth transitions, additive glow). Data is served by a SQLite backend with cached endpoints and compact “preset‑data” arrays.
 
+### Simple Views (binary path)
+- DOTS (ScatterplotLayer): wallet scatter using binary attributes; color = Active/Whale/Frozen/Dormant; size = log10(holdings+buys+sells). Click opens token detail.
+- FLOW (ArcLayer): top ~400 edges; red sales / blue transfers; visible ≥ 1.4 zoom.
+- WEB (PathLayer): straight connections; visible ≥ 1.2 zoom.
+- PULSE (ScatterplotLayer): recency‑weighted alpha; subtle pulse for <24h.
+- CROWN (ScatterplotLayer + TextLayer): rarity dots + gold labels for top‑K at zoom ≥ 2.
+
+Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → fallback to live `/api/graph` nodes/edges (ensures canvas never blank).
+
 ## Alignment Snapshot
 - Rendering: Deck.gl primary (Scatterplot/Line/Polygon/Heatmap layers) — Implemented
 - Nodes: colored circles only (no per-node images) — Implemented
@@ -31,6 +40,7 @@ Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownershi
 - `/api/wallet/:address/meta` — wallet stats + ethos_score (null unless accepted)
 - `/api/ethos/profile` — v2 proxy; 24h cache
 - `/api/activity`, `/api/heatmap`, `/api/traits`, `/api/stats`, `/api/health`
+- `/api/precomputed/wallets`, `/api/precomputed/edges?window=7d|30d|90d`, `/api/precomputed/tokens`
 - `/api/transfer-edges?limit=500&nodes=10000` — aggregated wallet→wallet edges with `{ a, b, type, count, sales, transfers, mints }`; maps wallets to representative token IDs for display.
 - `/api/token/:id/story` — unified token lifecycle snapshot (view `token_story`)
 - `/api/suspicious-trades` — tokens with suspected wash trading (view `suspicious_trades`)

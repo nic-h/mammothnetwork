@@ -1,0 +1,10 @@
+import { openDatabase } from './server/db.js';
+const { db } = openDatabase(process.cwd());
+const rec30 = Math.floor(Date.now()/1000)-30*86400;
+const range = db.prepare('SELECT MIN(timestamp) mn, MAX(timestamp) mx, COUNT(1) c FROM transfers').get();
+const last30d = db.prepare('SELECT COUNT(1) c FROM transfers WHERE timestamp>=?').get(rec30).c;
+const sampleSales = db.prepare('SELECT token_id, from_addr, to_addr, timestamp, price FROM transfers WHERE price IS NOT NULL AND price>0 ORDER BY timestamp DESC LIMIT 5').all();
+const sampleTokens = db.prepare('SELECT id, owner, sale_count, last_sale_price, last_sale_ts, total_sale_volume_tia FROM tokens ORDER BY last_sale_ts DESC LIMIT 5').all();
+const samplePairs = db.prepare("SELECT LOWER(from_addr) a, LOWER(to_addr) b, COUNT(1) cnt, SUM(CASE WHEN price IS NOT NULL AND price>0 THEN price ELSE 0 END) val, MAX(timestamp) ts FROM transfers WHERE from_addr IS NOT NULL AND from_addr<>'' AND to_addr IS NOT NULL AND to_addr<>'' GROUP BY a,b ORDER BY cnt DESC LIMIT 5").all();
+console.log(JSON.stringify({ range, last30d, sampleSales, sampleTokens, samplePairs }, null, 2));
+db.close();
