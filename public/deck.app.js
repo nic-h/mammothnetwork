@@ -59,22 +59,20 @@ console.log('deck.app: boot');
     }
     return { length:n, attributes:{ getPosition:{ value:pos, size:2 }, getRadius:{ value:rad, size:1 }, getFillColor:{ value:col, size:4 } } };
   }
-  const SIMPLE_VIEW = true;
+  const SIMPLE_VIEW = false;
   let simpleView = 'dots';
   function buildSimpleLayers(mode){
     const layers = []; const zoom=(currentZoom==null)?0:currentZoom;
     if (simpleView==='dots'){
-      // Optional ownership edges (lightweight)
-      if (Array.isArray(edges) && edges.length && ui.ownership && (currentZoom==null || currentZoom>=0.2)){
+      if (Array.isArray(edges) && edges.length && ui.ownership){
         layers.push(new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
           getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0],
           getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0],
-          getColor:d=>d.color||[0,255,102,60], getWidth:d=>d.width||1, widthUnits:'pixels', opacity:0.35 }));
+          getColor:d=>[0,255,0,140], widthUnits:'pixels', widthMinPixels:2, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }));
       }
-      // Use positioned nodes so coordinate space matches view fitting
-      layers.push(new ScatterplotLayer({ id:'dots', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, highlightColor:[255,255,255,100], stroked:true, getLineWidth: d=>0, lineWidthUnits:'pixels', transitions:{ getRadius:{ duration:200 } },
-        getPosition:d=>d.position, getRadius:d=> Math.max(1.6, Math.min(4, d.radius||2.5)), getFillColor:d=>d.color,
-        onClick: handleClick
+      layers.push(new ScatterplotLayer({ id:'dots', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, highlightColor:[255,255,255,100], stroked:true, getLineWidth:0.5, lineWidthUnits:'pixels', lineWidthMinPixels:0.5, transitions:{ getRadius:{ duration:200 } },
+        getPosition:d=>d.position, getRadius:d=> (d.radius||3), radiusUnits:'pixels', radiusMinPixels:2, radiusMaxPixels:7, getFillColor:d=>d.color,
+        onClick: handleClick, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 }, extensions:[ new (BrushingExtension||window.deck.BrushingExtension)() ], brushingEnabled:true, brushingRadius:60
       }));
     } else if (simpleView==='currents' || simpleView==='web'){
       const hasE = Array.isArray(pre.edges?.edges) && pre.edges.edges.length>0;
@@ -218,25 +216,24 @@ console.log('deck.app: boot');
   // Minimal hover handler to avoid runtime errors in simple views
   function onHoverThrottled(info){ /* no-op; selection handled onClick */ }
 
-  // Resize
-  try { new ResizeObserver(()=>{ const w=center.clientWidth||800, h=center.clientHeight||600; try { const dpr=Math.min((window.devicePixelRatio||1), 1.75); canvas.width=Math.max(1, Math.floor(w*dpr)); canvas.height=Math.max(1, Math.floor(h*dpr)); } catch {}; deckInst?.setProps?.({width:w, height:h}); }).observe(center); } catch {}
+  // Resize: let Deck handle DPR; only trigger a props update
+  try { new ResizeObserver(()=>{ deckInst?.setProps?.({}); }).observe(center); } catch {}
 
   init().catch(console.error);
 
   async function init(){
     startUILoad();
     presetData = await jfetch(API.preset) || null;
-    const w = center.clientWidth||800, h = center.clientHeight||600;
-    try { const dpr=Math.min((window.devicePixelRatio||1), 1.75); canvas.width=Math.max(1, Math.floor(w*dpr)); canvas.height=Math.max(1, Math.floor(h*dpr)); } catch {}
     deckInst = new Deck({
-      canvas: 'deck-canvas', width:w, height:h,
-      controller: { dragPan: true, scrollZoom: true, touchRotate: false, doubleClickZoom: false },
+      canvas: 'deck-canvas',
+      controller: true,
+      useDevicePixels: true,
       pickingRadius: 6,
       views:[ new (OrthographicView||window.deck.OrthographicView)({ id:'ortho' }) ],
       initialViewState:{ target:[0,0,0], zoom:0 },
       onViewStateChange: ({viewState}) => { currentZoom = viewState.zoom; }
     });
-    try { deckInst.setProps?.({ useDevicePixels: Math.min((window.devicePixelRatio||1), 1.75) }); } catch {}
+    // no DPR clamps; Deck manages device pixels
     // Wire tabs/select and inputs
     bindViewControls();
     bindInputs();
@@ -571,15 +568,17 @@ console.log('deck.app: boot');
       (showHulls && holdersHulls.length) && new PolygonLayer({ id:'hulls', data:holdersHulls, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPolygon:d=>d.path, stroked:true, filled:true, getFillColor:[0,255,102,10], getLineColor:[0,255,102,45], getLineWidth:1, lineWidthUnits:'pixels' }),
       // Fancy ownership multi-rings (top owners), also gated by zoom
       (showHulls && mode==='holders' && ui.bubbles) && new PolygonLayer({ id:'owner-rings', data: buildOwnerRings(), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, stroked:true, filled:false, getPolygon:d=>d.path, getLineColor:d=>d.color, getLineWidth:d=>d.width, lineWidthUnits:'pixels', parameters:{ depthTest:false }, updateTriggers:{ getLineColor: [pulseT] } }),
-      // Ambient ownership edges
-      showEdges && new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0], getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0], getColor:d=>d.color, getWidth:d=>d.width, widthUnits:'pixels', opacity:0.35 }),
+      // Optional density underlay (GPU aggregator)
+      (Array.isArray(nodes) && nodes.length) && new (ScreenGridLayer||window.deck.ScreenGridLayer)({ id:'density', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, cellSizePixels:12, gpuAggregation:true, opacity:0.35, minColor:[0,0,0,0], maxColor:[0,255,0,255], pickable:false, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
+      // Ownership edges (thicker, additive blending)
+      showEdges && new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0], getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0], getColor:d=> d.color||[0,255,0,140], widthUnits:'pixels', widthMinPixels:2, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
       // Wash/desire overlays
       (showOverlays && ui.wash && washSet && washSet.size) && new ScatterplotLayer({ id:'wash', data:nodes.filter(n=>washSet.has(n.id)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(8, (d.radius||4)+6), getFillColor:[0,0,0,0], getLineColor:[255,0,102,220], lineWidthMinPixels:1.5, stroked:true, filled:false, radiusUnits:'pixels' }),
       (showOverlays && ui.desire && desireSet && desireSet.size) && new ScatterplotLayer({ id:'desire', data:nodes.filter(n=>desireSet.has(n.id)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(7, (d.radius||4)+4), getFillColor:[0,0,0,0], getLineColor:[255,215,0,200], lineWidthMinPixels:1, stroked:true, filled:false, radiusUnits:'pixels' }),
-      new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(3, (d.radius||2.5)*2.4), getFillColor:d=>[d.color[0],d.color[1],d.color[2], 12], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
+      new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(3, (d.radius||3)*2.4), getFillColor:d=>[d.color[0],d.color[1],d.color[2], 12], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
       // Neighbor edges on click
       (selectedId>0) && new LineLayer({ id:'click-edges', data: buildClickEdges(selectedId), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,180], getWidth:1.2, widthUnits:'pixels', parameters:{ depthTest:false } }),
-      new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=> Math.max(1.6, Math.min(4, d.radius||2.5)), getFillColor:d=>d.color, radiusUnits:'pixels', onClick: handleClick }),
+      new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=> (d.radius||3), radiusUnits:'pixels', radiusMinPixels:2, radiusMaxPixels:7, stroked:true, getLineWidth:0.5, lineWidthUnits:'pixels', lineWidthMinPixels:0.5, getFillColor:d=>d.color, onClick: handleClick, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 }, extensions:[ new (BrushingExtension||window.deck.BrushingExtension)() ], brushingEnabled:true, brushingRadius:60 }),
       // Subtle pulse rings for recently active tokens
       (showOverlays) && new ScatterplotLayer({ id:'pulses', data: nodes.filter(n=>recentActive(n)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> (d.radius||4) * (1.6 + 0.4*Math.sin(pulseT*2 + (d.id||0))), getLineColor:[0,255,102,140], lineWidthMinPixels:1, radiusUnits:'pixels', updateTriggers:{ getRadius: [pulseT] }, parameters:{ depthTest:false } }),
       (selObj) && new ScatterplotLayer({ id:'selection-ring', data:[selObj], coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(10,(d.radius||4)+8), getFillColor:[0,0,0,0], getLineColor:[0,255,102,220], lineWidthMinPixels:2, stroked:true, filled:false, radiusUnits:'pixels' })
@@ -606,7 +605,7 @@ console.log('deck.app: boot');
       if (paths.length) layers.unshift(new LineLayer({ id:'trait-constellations', data:paths, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[255,215,0,160], getWidth:0.8, widthUnits:'pixels', opacity:0.6 }));
     }
     // LOD: stronger gating for heavy visuals
-    const lodEdges = currentZoom >= 0.5;
+    const lodEdges = true;
     const showFx = currentZoom >= 0.8;     // glow/pulses only when quite close
     const showDots = currentZoom >= 0.25;  // particles only when close
     if (!lodEdges) layers = layers.filter(l=> l && l.id!=='edges');

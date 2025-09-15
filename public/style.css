@@ -248,7 +248,7 @@ input[type="checkbox"] { accent-color: var(--fg); }
   height: 100%;
   min-height: 0; /* avoid grid min-content clamping */
   overflow: hidden;
-  padding: var(--pad-16);
+  padding: 0; /* full-bleed canvas */
   pointer-events: none; /* let panels win; canvas will re-enable */
 }
 
