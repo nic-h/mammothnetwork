@@ -1358,8 +1358,10 @@ function buildFlowParticles(limit=600){
         const c = (type==='sale') ? [255,0,102,180] : (type==='mint') ? [255,255,255,160] : [0,160,255,160];
         return { s, t, w, c };
       }).filter(Boolean);
-      add.push(new LineLayer({ id:'transfer-highways', data:segs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:d=>d.c, getWidth:d=>d.w, widthUnits:'pixels' }));
+      add.push(new ArcLayer({ id:'flows', data:segs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getSourceColor:d=>d.c, getTargetColor:d=>d.c, widthUnits:'pixels', widthMinPixels:2, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }));
     }
+    // Merge with base
+    if (add.length) base = base.concat(add);
     // Terrain: price contours (topography) using token last-sale data (CPU-safe)
     try {
       const t0 = timeline.start || (timelineLimits?.t0||0); const t1 = timeline.end || (timelineLimits?.t1||t0+1); const dt = (t1-t0)||1;
