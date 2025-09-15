@@ -2,10 +2,15 @@
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-template-rows: auto 1fr; }
 .header { display:grid; grid-template-columns: var(--col-left) 1fr var(--col-right); align-items:center; padding: 0; border-bottom:1px solid rgba(var(--green-rgb),.3); position: sticky; top: 0; z-index: 100; background: var(--bg); height: 40px; min-height: 40px; }
-.top-loader { position:absolute; left:0; right:0; top:0; height: 2px; background: linear-gradient(90deg, transparent, var(--fg), transparent); box-shadow: 0 0 8px rgba(var(--green-rgb),.5); animation: header-scan 1.1s linear infinite; }
+.top-loader { position:absolute; left:0; right:0; top:0; height: 2px; background: linear-gradient(90deg, transparent, var(--fg), transparent); box-shadow: 0 0 6px rgba(var(--green-rgb),.35); opacity:.85; animation: header-scan 1.6s linear infinite; }
 @keyframes header-scan { from { background-position-x: 0; } to { background-position-x: 200%; } }
 .view-tip, .view-tip .tip-text, .view-tip .btn { display: none !important; }
-.logo { font-weight:700; padding-left: var(--pad-16); font-size: var(--fs-18); line-height: 40px; align-self: center; font-family: 'Fira Code', var(--font-mono); letter-spacing: .02em; }
+.logo-wrap { display:flex; align-items:center; gap:8px; padding-left: var(--pad-16); }
+.logo { font-weight:700; font-size: var(--fs-18); line-height: 40px; align-self: center; font-family: 'Fira Code', var(--font-mono); letter-spacing: .02em; animation: logo-glow 3s ease-in-out infinite; }
+@keyframes logo-glow { 0%,100%{ text-shadow: 0 0 6px rgba(var(--green-rgb),.35);} 50%{ text-shadow: 0 0 14px rgba(var(--green-rgb),.65), 0 0 20px rgba(var(--green-rgb),.25);} }
+.status-dot { width:8px; height:8px; border-radius:50%; background: var(--fg); position: relative; box-shadow: 0 0 8px rgba(var(--green-rgb),.75); }
+.status-dot::after { content:''; position:absolute; inset:-5px; border-radius:50%; background: radial-gradient(circle, rgba(var(--green-rgb),.35), transparent 60%); animation: ping 2.4s ease-in-out infinite; }
+@keyframes ping { 0%,100%{ transform:scale(1); opacity:.8;} 50%{ transform:scale(1.5); opacity:0; } }
 .header-controls { display:grid; align-items:center; gap:12px 16px; min-width:0; grid-column: 1 / 3; grid-template-columns: auto 1fr auto; }
 .header-controls .mode-chips { display:none; }
 .header-controls .more { grid-column: 3; justify-self:end; }
@@ -111,6 +116,7 @@ select {
 .right-panel .grid { display:grid; grid-template-columns: 100px 1fr; gap: var(--pad-4) var(--pad-8); }
 .right-panel .label { opacity:.75; font-size: var(--fs-10); color:rgba(var(--green-rgb),.7); text-transform:uppercase; }
 .panel-title { font-weight:700; font-size: var(--fs-14); color: var(--fg); text-transform:uppercase; }
+.panel-title::after { content:''; display:block; height:1px; margin-top:6px; opacity:.25; background: repeating-linear-gradient(90deg, rgba(var(--green-rgb),.7) 0 8px, transparent 8px 16px); }
 .section-label { font-size: var(--fs-10); color: rgba(var(--green-rgb), .65); text-transform:uppercase; opacity:.9; margin: var(--pad-8) 0 var(--pad-4); }
 .big-number { font-weight:700; font-size: var(--fs-14); color: var(--fg); text-transform:none; }
 .data-value { font-size: var(--fs-12); color: var(--text); }
@@ -346,7 +352,9 @@ input[type="checkbox"] { accent-color: var(--fg); }
   /* Stronger active feedback for icon-only buttons on touch */
   .btn:active { background: rgba(var(--green-rgb), .15); }
 }
-.tab-btn { border: var(--border); background: var(--bg); color: var(--fg); padding: 4px 6px; cursor:pointer; }
+.tab-btn { border: var(--border); background: var(--bg); color: var(--fg); padding: 4px 6px; cursor:pointer; position:relative; overflow:hidden; }
+.tab-btn::before { content:''; position:absolute; top:0; left:-150%; width:150%; height:100%; background: linear-gradient(90deg, transparent 0%, rgba(var(--green-rgb),.06) 45%, rgba(var(--green-rgb),.18) 50%, rgba(var(--green-rgb),.06) 55%, transparent 100%); transition:left .8s ease; pointer-events:none; }
+.tab-btn:hover::before { left:100%; }
 .tab-btn:hover { background: var(--fg); color:#000; box-shadow: 0 0 12px rgba(var(--green-rgb), .45); }
 .tab-btn:active { transform: translateY(1px) scale(0.985); box-shadow: 0 0 0 1px rgba(var(--green-rgb), .35), 0 0 8px rgba(var(--green-rgb), .25) inset; }
 .view-selector .panel-title { text-align: left; }
