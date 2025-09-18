@@ -9,7 +9,7 @@ New here? Start with Onboarding:
 - docs/DEV_TRIAGE.md — quick triage to verify data, endpoints, and canvas
 
 At‑a‑Glance System Overview
-- Frontend: Deck.gl (center canvas) with additive glow & smooth transitions.
+- Frontend: Deck.gl (center canvas), crisp device‑pixel rendering, additive blending, brushing, optional GPU density.
 - Backend: Express + SQLite (better-sqlite3). `/api/graph` delivers nodes/edges; `/api/preset-data` provides compact arrays for fast view encoding; ETag + TTL cache.
 - Data sources: Modularium API (holders, activity/transfers, listings), Ethos API (scores/users). Jobs fetch and cache into SQLite; UI reads only from DB.
 - Storage: images/thumbnails on disk (optional); no per-node images in the graph, only in the sidebar.
@@ -33,21 +33,18 @@ Current Status
 Local setup
 1. `npm ci`
 2. `npm run db:migrate`
-3. (optional) Populate:
-   - `export CONTRACT_ADDRESS=0xbE25A97896b9CE164a314C70520A4df55979a0c6`
-   - `export MODULARIUM_API=https://api.modularium.art`
-   - `export ETHOS_API=https://api.ethos.network`
-   - Optional: `export DOWNLOAD_IMAGES=1`
+3. Populate (reads `.env` automatically):
+   - `set -a; source .env; set +a`
    - `npm run jobs:all`
-4. `npm run dev` → http://localhost:3000
-5. Open: `http://localhost:3000` (Deck.gl)
+4. `PORT=3001 npm run dev` (or use 3000)
+5. Open: `http://localhost:3001`
 
 Environment
 - Required: `CONTRACT_ADDRESS`, `MODULARIUM_API`, `ETHOS_API`
 - DB path override: `DATABASE_PATH=/path/to.db`
 - Optional: `DATABASE_PATH` (default `./data/mammoths.db`), `DOWNLOAD_IMAGES=1`, `ROYALTY_BPS` (default `250`), and job tuning vars (see Jobs & Data Flow)
 
-Endpoints
+Endpoints (selected)
 - `/api/network-graph?mode=holders|transfers|traits|wallets&nodes=10000&edges=0..500` (alias `/api/graph`)
 - `/api/preset-data?nodes=10000`
 - `/api/token/:id`
@@ -191,9 +188,8 @@ Notes
 - If better‑sqlite3 native errors: `npm rebuild better-sqlite3 --build-from-source`
 
 Preview & Dev
-- Start: `npm run dev` (default `PORT=3000`)
-- If the port is busy: `PORT=3001 npm run dev` or kill the existing process (`lsof -i :3000 | awk 'NR>1{print $2}' | xargs kill -9` on macOS)
-- Open: `http://localhost:3000` (Deck.gl)
+- Start: `npm run dev` (default `PORT=3000`; set `PORT=3001` if needed)
+- Open: `http://localhost:3000` or `http://localhost:3001`
 - Optional: preselect a token with `?token=5000`
 
 Screenshots

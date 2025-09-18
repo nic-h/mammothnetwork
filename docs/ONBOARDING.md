@@ -6,8 +6,8 @@ This is the fastest path to get productive on the project. It assumes Node 20+, 
 1. Install: `npm ci`
 2. Migrate DB: `npm run db:migrate`
 3. Backfill data (normalize/metrics): `node scripts/db.backfill.js`
-4. Start server: `npm run dev` (defaults to `PORT=3000`)
-5. Open: `http://localhost:3000`
+4. Start server: `npm run dev` (defaults to `PORT=3000`; you can set `PORT=3001`)
+5. Open: `http://localhost:3000` (or `http://localhost:3001`)
    - Left/right UI stay the same. The center canvas is Deck.gl.
    - Keyboard: `1–5` switch views, `R` reset zoom.
 
@@ -15,7 +15,7 @@ If port 3000 is in use: `PORT=3001 npm run dev` or kill: `lsof -i :3000 | awk 'N
 
 ## Repo Map
 - `public/` — client assets
-  - `engine.js` — boots Deck.gl
+  - `engine.js` — boots Deck.gl (ensures UMDs, injects `deck.app.js`)
   - `deck.app.js` — Deck.gl center renderer (Scatterplot/Line/Polygon/Glow)
   - `client/styles/tokens.css` — brand tokens (colors, spacing, font)
 - `server/` — Express + SQLite

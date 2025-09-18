@@ -3,7 +3,7 @@
 Status: living specification for the repo. This doc tracks intent (spec) and implementation status to avoid drift while we iterate.
 
 ## Summary
-Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas runs on Deck.gl (GPU‑accelerated layers, smooth transitions, additive glow). Data is served by a SQLite backend with cached endpoints and compact “preset‑data” arrays.
+Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas runs on Deck.gl with crisp device‑pixel rendering (no manual DPR clamps), additive blending, and optional GPU aggregation. Data is served by a SQLite backend with cached endpoints and compact “preset‑data” arrays.
 
 ### Simple Views (binary path)
 - DOTS (ScatterplotLayer): wallet scatter using binary attributes; color = Active/Whale/Frozen/Dormant; size = log10(holdings+buys+sells). Click opens token detail.
@@ -15,7 +15,7 @@ Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownershi
 Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → fallback to live `/api/graph` nodes/edges (ensures canvas never blank).
 
 ## Alignment Snapshot
-- Rendering: Deck.gl primary (Scatterplot/Line/Polygon/Heatmap layers) — Implemented
+- Rendering: Deck.gl primary (ScreenGrid/Scatterplot/Line/Arc/Polygon/Heatmap) — Implemented
 - Nodes: colored circles only (no per-node images) — Implemented
 - Modes: holders, transfers, traits, wallets — Implemented
 - Presets: ownership, trading, rarity, social, whales, frozen — Implemented (6/10)
@@ -29,7 +29,7 @@ Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → fallback t
 
 ## Notes & Decisions
 - “Real-time” phrasing clarified to “interactive (cached)”; no websockets/streaming today.
-- Render port: server defaults to 3000; render.yaml should match. (If you need 3001, we will change the server.)
+- Render port: server can run on 3000 or 3001; set `PORT` in env. Render config should match.
 - Presets beyond the current six (Hubs, Discovery, Activity timeline, etc.) are planned — not implemented yet.
 
 ## API Surface
@@ -158,6 +158,14 @@ Caching
 
 Ethos
 - Strict acceptance: only ACTIVE / profileId>0 / profile link users are surfaced (else `ethos` is null in responses). `/api/ethos/profile` caches 24h.
+
+## Rendering Details
+- Crisp DPR: Deck manages `useDevicePixels`; delete any manual DPR/canvas sizing.
+- Dots (ScatterplotLayer): pixel units, `radiusMinPixels:2`..`radiusMaxPixels:7`, outline 0.5px, additive blending, brushing enabled.
+- Edges (LineLayer): `widthMinPixels:2`, additive blending; visible earlier for denser look.
+- Flows (ArcLayer): additive, `widthMinPixels:2`, visible from ~0.6 zoom, brushing enabled.
+- Density (ScreenGridLayer): optional low‑opacity underlay with `gpuAggregation:true`.
+- Layer order: density → edges → flows → dots → overlays (labels/selection).
 
 ## Performance Targets
 - Initial load < 500ms (with cache)

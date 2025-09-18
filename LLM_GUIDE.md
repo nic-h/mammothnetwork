@@ -1,89 +1,69 @@
-# Mammoths Network — LLM Contributor Guide
+# Mammoths Network — LLM Contributor Guide (Deck.gl)
 
 This document gives a compact mental model and a reproducible checklist so an LLM (or a new engineer) can help without breaking working behavior.
 
 ## TL;DR
-- Frontend: PIXI v7 UMD, entry at `public/main.js`, HTML at `public/index.html`, styles in `public/style.css`.
+- Frontend: Deck.gl UMD, loader at `public/engine.js`, app at `public/deck.app.js`, HTML at `public/index.html`, styles in `public/style.css`.
 - Backend: Express in `server/index.js` with SQLite (see `server/db.js`).
-- Data jobs (Modularium + Ethos): `jobs/*` — run them to (re)populate SQLite.
+- Data jobs (Modularium + Ethos): `jobs/*` — run them to (re)populate SQLite; scripts read `.env` automatically via `node --env-file=.env`.
 - Graph API: `/api/graph?mode=holders|transfers|traits|wallets&edges=0..500`.
+- Presets arrays: `/api/preset-data?nodes=10000`.
 - Detail API: `/api/token/:id`, wallet APIs at `/api/wallet/:address` and `/api/wallet/:address/meta`.
-- Frozen/Dormant: marked in `tokens` table; UI colors under the FROZEN preset (blue/gray/green).
 
-## How to run
-1) `npm install`
-2) Ensure `.env` has:
+## How to run (fast)
+1) `npm ci`
+2) Load env and migrate:
 ```
-CONTRACT_ADDRESS=0xbE25A97896b9CE164a314C70520A4df55979a0c6
-MODULARIUM_API=https://api.modularium.art
-ETHOS_API=https://api.ethos.network
-DATABASE_PATH=./data/mammoths.db
+set -a; source .env; set +a
+npm run db:migrate
 ```
-3) Initialize DB (creates tables): `npm run db:init` (or `node scripts/db.init.js`)
-4) Populate (idempotent, safe to re-run):
+3) Populate (full pipeline, safe to re‑run):
 ```
-node jobs/sync-holders.js
-ACT_PAGES=100 ACT_LIMIT=1000 node jobs/backfill-activity.js
-node jobs/mark-dormant.js
-node jobs/sync-frozen-from-holders.js
-MODE=holders node jobs/compute-edges.js
-MODE=wallets node jobs/compute-edges.js
-MODE=traits   node jobs/compute-edges.js
-MODE=transfers node jobs/compute-edges.js
+npm run jobs:all
 ```
-5) Run server: `npm run dev` → http://localhost:3000
+4) Start server: `PORT=3001 npm run dev` → http://localhost:3001
 
 ## Anatomy
 - `public/index.html`
-  - Loads PIXI from `/lib/pixi.min.js` (UMD). Fallback loader in `main.js` tries alt paths + CDN and surfaces a red banner on failure.
-  - Header: brand, mode selector, preset buttons (with icons), header search, focus toggle, small legend text.
-  - Three-panel grid: left (traits), center (canvas), right (details).
-- `public/main.js`
-  - Cache-busts all fetches (`v=timestamp`, `no-store`) to avoid ETag 304 “blank” states.
-  - Starts a PIXI app and draws 10k nodes with `PIXI.ParticleContainer` and a `Graphics` overlay for edges/selection.
-  - Layout: static grid (no worker physics) for determinism; hover highlight and subtle grid background.
-  - Selection: centers camera, outlines node, loads sidebar (image, ENS/owner, Ethos, holdings, trades, last seen, traits, similar chips), draws neighbor + same-owner links.
-  - Presets: apply color/position changes; FROZEN uses DB flags; Social normalizes by Ethos; Whales scales node size by holdings.
-  - Focus (checkbox or `f`): dims non-neighbors to ~0.25 alpha.
+  - Loads Deck.gl UMD from `/lib/deck.gl/dist.min.js` and geo-layers from `/lib/@deck.gl/geo-layers/dist.min.js`.
+  - Loads `engine.js` which ensures the UMDs are ready, then injects `deck.app.js` with cache‑busting from `<meta name="app-build">`.
+  - Three‑panel grid: left (controls), center (Deck canvas), right (details).
+- `public/engine.js`
+  - Robust loader: tries local UMDs first, then CDN; boots `deck.app.js` only after `window.deck` is present.
+- `public/deck.app.js`
+  - Creates a Deck instance with `useDevicePixels: true` (crisp DPR). No manual DPR clamps.
+  - Layers: ScreenGrid density (optional) → Line edges (additive) → Arc flows (additive, brushing) → Scatterplot dots (pixel‑capped, outline, additive, brushing) → overlays.
+  - Simple views (DOTS/FLOW/WEB/PULSE/CROWN) exist but rich stack is default.
 - `server/index.js`
-  - Serves `/lib` from `node_modules/pixi.js/dist`, plus `public/` and API endpoints.
-  - Graph endpoints return bounded edges (≤ 500) and include caching headers.
+  - Serves `/lib` from `node_modules`, `public/`, and the API routes.
+  - Graph and preset endpoints with ETag/TTL; `/api/precomputed/*` as fast path.
 - `jobs/*`
-  - `sync-holders.js`: owners from Modularium.
-  - `backfill-activity.js`: paged `/collection/{contract}/activity` → inserts into `transfers`.
-  - `mark-dormant.js`: sets `tokens.dormant=1` for zero-activity tokens; fills `last_activity`.
-  - `sync-frozen-from-holders.js`: marks `tokens.frozen=1` for `frozenBalance === "1"` from `/collection/{contract}/holders`.
-  - `ethos.js`: batch-enrich wallet_metadata.
+  - Pulls holders/activity/listings from Modularium and Ethos; computes metrics; saves to SQLite.
 
 ## Debug checklist (when canvas looks empty)
-1) Hard refresh (Cmd+Shift+R) — critical; old JS can linger.
+1) Hard refresh (Cmd+Shift+R) — invalidates sticky assets.
 2) Network tab:
-   - `/lib/pixi.min.js` returns 200 (or fallback loads; otherwise red banner appears).
+   - `/lib/deck.gl/dist.min.js` returns 200.
+   - `/engine.js?v=…` → `/deck.app.js?v=…` injected.
    - `/api/graph?mode=holders&edges=200` returns JSON with `nodes`.
-   - `/api/traits` returns JSON with `traits`.
-3) Console: no uncaught errors. If there are, copy the first one.
-4) Try changing the mode to `holders` and recheck `/api/graph` response.
+3) DOM/Console:
+   - DOM contains `.center-panel #deck-canvas`.
+   - Console shows: `deck.app: boot` and `engine: deck.app injected`.
+4) Data sanity: `/api/preset-data?nodes=10000` returns keys; `/api/health` shows `haveDb: true`.
 
-## Non-breaking tasks an LLM can tackle
-- Add small loading states (header status text) during graph/traits fetch.
-- Add error toast/banner when any API call fails.
-- Clarify preset legends and keep them in sync.
-- Improve Trading layout (clear timeline mapping), keep code in `layoutPreset('trading')`.
-- Mobile-friendly adaptations (touch pan/zoom, responsive right panel).
-- Improve culling/LOD for big zoomed-out views (without reintroducing worker physics just yet).
+## Non‑breaking tasks an LLM can tackle
+- Add UI toggles for density overlay and brushing radius.
+- Add lightweight text labels on zoom (TextLayer) for whales/rare tokens.
+- Add small error toast/banner when any API call fails.
+- Improve culling/LOD for zoomed‑out views.
 
 ## Style + brand rules
-- Match dash.mammoths.tech: black background, green #00ff66, IBM Plex Mono (uppercase), flat (no shadows/gradients).
-- Keep borders: `1px solid rgba(0,255,102,.2)`; spacing 12–20px; header ≈ 44–48px.
-
-## Rollback safety
-- Tag `working-00e6ca4` is the last known working snapshot (nodes visible, default zoom).
-- Branch `rollback/working-00e6ca4` points to it.
+- Black background, neon green `#00ff66` (variables in tokens.css), mono fonts (Fira Code/IBM Plex Mono), subtle glow.
+- Keep borders: `1px solid rgba(0,255,102,.2)`; spacing via tokens.
 
 ## Gotchas
-- ETag 304 from `/api/graph` can blank the UI if cached — handled by cache-busting.
-- Token IDs are 1‑based and selection relies on `idToIndex`; don’t revert to `index+1`.
-- Keep edge caps ≤ 500 for perf; draw them only when small.
+- Do not reintroduce manual DPR clamps or canvas sizing — Deck manages DPR.
+- Keep edges ≤ 500 for perf; use pixel units (widthMinPixels).
+- Simple views must still fall back to live `/api/graph` data to avoid blank states.
 
-If you change rendering or data flows, keep changes surgical and reversible. Do not alter server endpoints’ shapes unless coordinated with jobs and frontend.
-
+If you change rendering or data flows, keep changes surgical and reversible. Do not alter server endpoint shapes unless coordinated with jobs and frontend.
