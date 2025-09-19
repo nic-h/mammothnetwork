@@ -139,6 +139,7 @@ const center = document.querySelector('.center-panel');
       initialViewState:{ target:[0,0,0], zoom:0 },
       onViewStateChange: ({viewState}) => { currentZoom = viewState.zoom; }
     });
+    try { window.deckInst = deckInst; } catch {}
     // no DPR clamps; Deck manages device pixels
     // Wire tabs/select and inputs
     bindViewControls();
@@ -276,6 +277,7 @@ const center = document.querySelector('.center-panel');
     const graph = await jfetch(`${API.graph}?${params}`) || {nodes:[],edges:[]};
     const pdata = presetData || {};
     nodes = buildNodes(graph.nodes||[], pdata);
+    try { window.__mammothNodes = nodes.slice(0, 50); } catch {}
     if (!nodes || nodes.length===0){ stopUILoad(); console.warn('API returned zero nodes'); return; }
     edges = buildEdges(graph.edges||[], nodes);
     computeOwnerMetrics(pdata, nodes);
