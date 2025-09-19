@@ -30,12 +30,12 @@ body { margin: 0; background: var(--bg); color: var(--fg); display:grid; grid-te
 .preset-btn .preset-label { display:inline !important; }
 
 /* Pro-level button hovers (aligned to maker/dash style) */
-.preset-btn:hover, .chip-btn:hover, .tab-btn:hover, .btn:hover, .clear-btn:hover {
+.preset-btn:hover, .chip-btn:hover, .btn:hover, .clear-btn:hover {
   background: var(--fg);
   color: #000;
   box-shadow: 0 0 16px rgba(var(--green-rgb), 0.5);
 }
-.preset-btn:active, .chip-btn:active, .tab-btn:active, .btn:active, .clear-btn:active {
+.preset-btn:active, .chip-btn:active, .btn:active, .clear-btn:active {
   transform: translateY(1px) scale(0.985);
   box-shadow: 0 0 0 1px rgba(var(--green-rgb), .35), 0 0 8px rgba(var(--green-rgb), .25) inset;
 }
@@ -142,10 +142,6 @@ select {
 
 /* Keep view-tip reserved height even when hidden to avoid layout jump */
 .view-tip[hidden] { display:block !important; visibility:hidden; padding: 0 var(--pad-12); min-height: 24px; border-bottom: 1px dashed transparent; }
-
-/* Left panel view tabs side-by-side */
-.view-tabs { display:grid; grid-template-columns: repeat(2, 1fr); gap: var(--pad-8); margin-bottom: var(--pad-8); width: 100%; }
-.tab-btn { width:100%; border: var(--border); background: var(--bg); color: var(--fg); padding: 4px 8px; cursor: pointer; }
 
 /* Detail panel text normalization */
 .right-panel .ens-name,
@@ -321,14 +317,12 @@ input[type="checkbox"] { accent-color: var(--fg); }
 /* Header placement spacing is handled via parent; left panel variant uses full width */
 .left-panel .panel-view { display:flex; flex-direction: column; gap: var(--pad-8); margin-bottom: var(--pad-12); width: 100%; }
 .left-panel .panel-view select { width: 100%; }
-.view-tabs { display:grid; grid-template-columns: repeat(2, 1fr); gap: var(--pad-8); }
-.tab-btn { background: var(--bg); color: var(--fg); border: var(--border); padding: var(--pad-6) var(--pad-8); height: var(--ctl-h); cursor:pointer; letter-spacing:.06em; }
-.tab-btn:hover { background: rgba(var(--green-rgb), .1); }
-.tab-btn.active { background: var(--fg); color: #000; box-shadow: 0 0 12px rgba(var(--green-rgb), .35); }
 .sr-only { position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
 
 /* Panel head label unified style */
 .panel-title { display:block; font-size: var(--fs-12); letter-spacing: .06em; color: rgba(var(--green-rgb), .85); text-transform: uppercase; margin: 0 0 var(--pad-8) 0; }
+.left-panel .view-selector { display:flex; flex-direction: column; align-items: flex-start; width: 100%; }
+.left-panel .view-selector .panel-title { text-align: left; margin-left: 0; }
 
 /* Hide redundant controls when unified views are present */
 /* removed legacy view-selector overrides for mode-chips/preset-bar */
@@ -352,9 +346,4 @@ input[type="checkbox"] { accent-color: var(--fg); }
   /* Stronger active feedback for icon-only buttons on touch */
   .btn:active { background: rgba(var(--green-rgb), .15); }
 }
-.tab-btn { border: var(--border); background: var(--bg); color: var(--fg); padding: 4px 6px; cursor:pointer; position:relative; overflow:hidden; }
-.tab-btn::before { content:''; position:absolute; top:0; left:-150%; width:150%; height:100%; background: linear-gradient(90deg, transparent 0%, rgba(var(--green-rgb),.06) 45%, rgba(var(--green-rgb),.18) 50%, rgba(var(--green-rgb),.06) 55%, transparent 100%); transition:left .8s ease; pointer-events:none; }
-.tab-btn:hover::before { left:100%; }
-.tab-btn:hover { background: var(--fg); color:#000; box-shadow: 0 0 12px rgba(var(--green-rgb), .45); }
-.tab-btn:active { transform: translateY(1px) scale(0.985); box-shadow: 0 0 0 1px rgba(var(--green-rgb), .35), 0 0 8px rgba(var(--green-rgb), .25) inset; }
 .view-selector .panel-title { text-align: left; }

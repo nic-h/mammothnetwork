@@ -21,8 +21,6 @@ app.use(zlibCompression());
 app.use(express.json({ limit: '2mb' }));
 
 // Serve frontend static assets
-// Provide local access to deck.gl UMDs under /lib
-app.use('/lib', express.static(path.join(ROOT, 'node_modules')));
 // Serve images + thumbnails if present (local data folder or mounted disk)
 const localImages = path.join(ROOT, 'data', 'images');
 const diskImages = '/data/images';
@@ -37,7 +35,7 @@ app.use(express.static(path.join(ROOT, 'public'), {
   etag: true,
   lastModified: true,
   setHeaders: (res, filePath) => {
-    if (/\.(?:js|css|png|jpg|jpeg|svg|woff2)$/i.test(filePath)) {
+    if (/\.(?:js|css|png|jpg|jpeg|svg|woff2|ttf)$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     } else {
       res.setHeader('Cache-Control', 'public, max-age=300');

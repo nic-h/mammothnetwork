@@ -20,130 +20,40 @@ console.log('deck.app: boot');
       return json;
     } catch { return null; }
   }
-  // Precomputed caches and builders for fast, simple views
-  const pre = { wallets: null, edges: null, tokens: null };
-  async function loadPrecomputed(mode){
-    try { if (!pre.wallets && (mode==='holders' || mode==='wallets' || mode==='transfers' || mode==='health')) pre.wallets = await jfetch('/api/precomputed/wallets'); } catch {}
-    try { if (!pre.edges && mode==='transfers') pre.edges = await jfetch('/api/precomputed/edges?window=30d'); } catch {}
-    try { if (!pre.tokens && mode==='traits') pre.tokens = await jfetch('/api/precomputed/tokens'); } catch {}
-  }
-  function buildWalletBinary(list){
-    const wallets = Array.isArray(list?.wallets) ? list.wallets : [];
-    const n = wallets.length; const pos = new Float32Array(n*2); const rad = new Float32Array(n); const col = new Uint8ClampedArray(n*4);
-    const now = Math.floor(Date.now()/1000);
-    for (let i=0;i<n;i++){
-      const w = wallets[i]; const xy=w.xy||[0,0]; const h=Number(w.holdings||0); const b=Number(w.buys||0); const s=Number(w.sells||0);
-      pos[i*2]=xy[0]; pos[i*2+1]=xy[1];
-      rad[i] = 2 + Math.min(6, Math.log10(1 + h+b+s)*2.5);
-      const days = w.lastTxAt ? Math.max(0, (now - Number(w.lastTxAt||0))/86400) : 9999;
-      const a = Math.round(255 * (0.25 + 0.75 * (1 - Math.min(90, days)/90)));
-      let c = COLORS.active;
-      if ((h>=10) || (b+s>=20) || (Number(w.volume30dTia||0)>=500)) c = COLORS.whale;
-      if (days>=90) c = COLORS.dormant;
-      col[i*4]=c[0]; col[i*4+1]=c[1]; col[i*4+2]=c[2]; col[i*4+3]=a;
-    }
-    return { length:n, attributes:{ getPosition:{ value:pos, size:2 }, getRadius:{ value:rad, size:1 }, getFillColor:{ value:col, size:4 } } };
-  }
-  function topEdges(edgeList, cap=400){ const e=Array.isArray(edgeList?.edges)?edgeList.edges:[]; return e.slice().sort((a,b)=> (Number(b.valueTia||0)-Number(a.valueTia||0)) || (Number(b.weight||0)-Number(a.weight||0)) ).slice(0,cap); }
-  function buildTokenBinary(list){ const t=Array.isArray(list?.tokens)?list.tokens:[]; const n=t.length; const pos=new Float32Array(n*2); const rad=new Float32Array(n); const col=new Uint8ClampedArray(n*4); for(let i=0;i<n;i++){ const it=t[i]; const xy=it.xy||[0,0]; pos[i*2]=xy[0]; pos[i*2+1]=xy[1]; rad[i]=Math.max(2, 10 - Math.log10(Math.max(1, Number(it.rarityRank||999999)))); col[i*4]=0; col[i*4+1]=255; col[i*4+2]=102; col[i*4+3]=200; } return { length:n, attributes:{ getPosition:{value:pos,size:2}, getRadius:{value:rad,size:1}, getFillColor:{value:col,size:4} } };
-  }
-  // Fallback binary from current graph nodes (positions from applyLayout)
-  function buildNodeBinaryFromNodes(nodeList){
-    const n = Array.isArray(nodeList)? nodeList.length : 0;
-    const pos = new Float32Array(n*2); const rad = new Float32Array(n); const col = new Uint8ClampedArray(n*4);
-    for (let i=0;i<n;i++){
-      const d=nodeList[i]; const p=d?.position||[0,0,0]; pos[i*2]=p[0]; pos[i*2+1]=p[1];
-      rad[i] = d?.radius || 4;
-      const c = nodeColor(d) || [0,255,102,200]; const a = c[3]!=null?c[3]:200;
-      col[i*4]=c[0]; col[i*4+1]=c[1]; col[i*4+2]=c[2]; col[i*4+3]=a;
-    }
-    return { length:n, attributes:{ getPosition:{ value:pos, size:2 }, getRadius:{ value:rad, size:1 }, getFillColor:{ value:col, size:4 } } };
-  }
-  const SIMPLE_VIEW = false;
-  let simpleView = 'dots';
-  function buildSimpleLayers(mode){
-    const layers = []; const zoom=(currentZoom==null)?0:currentZoom;
-    if (simpleView==='dots'){
-      if (Array.isArray(edges) && edges.length && ui.ownership){
-        layers.push(new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
-          getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0],
-          getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0],
-          getColor:d=>[0,255,0,140], widthUnits:'pixels', widthMinPixels:2, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }));
-      }
-      layers.push(new ScatterplotLayer({ id:'dots', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, highlightColor:[255,255,255,100], stroked:true, getLineWidth:0.5, lineWidthUnits:'pixels', lineWidthMinPixels:0.5, transitions:{ getRadius:{ duration:200 } },
-        getPosition:d=>d.position, getRadius:d=> (d.radius||3), radiusUnits:'pixels', radiusMinPixels:2, radiusMaxPixels:7, getFillColor:d=>d.color,
-        onClick: handleClick, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 }, extensions:[ new (BrushingExtension||window.deck.BrushingExtension)() ], brushingEnabled:true, brushingRadius:60
-      }));
-    } else if (simpleView==='currents' || simpleView==='web'){
-      const hasE = Array.isArray(pre.edges?.edges) && pre.edges.edges.length>0;
-      if (hasE){
-        const E=topEdges(pre.edges, 400);
-        if (simpleView==='currents') layers.push(new ArcLayer({ id:'currents', data:E, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.4, getSourcePosition:e=> e.path?.[0]||[0,0,0], getTargetPosition:e=> e.path?.[1]||[0,0,0], getWidth:e=> Math.max(1, Math.min(3, Math.log10((Number(e.valueTia)||0)+1))), getSourceColor:e=> e.type==='sale'? COLORS.saleArc : COLORS.xferArc, getTargetColor:e=> e.type==='sale'? COLORS.saleArc : COLORS.xferArc }));
-        if (simpleView==='web') layers.push(new PathLayer({ id:'web', data:E.map(r=>({ path:r.path, type:r.type, valueTia:r.valueTia })), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.2, getPath:d=>d.path, getWidth:d=> Math.max(1, Math.min(2, Math.log10((Number(d.valueTia)||0)+1))), widthUnits:'pixels', getColor:d=> d.type==='sale'? COLORS.saleArc : COLORS.xferArc }));
-      } else if ((edges||[]).length){
-        const segs = (edges||[]).slice(0, 400).map(e=>({ path:[ nodes[e.sourceIndex]?.position||[0,0,0], nodes[e.targetIndex]?.position||[0,0,0] ], type:'transfer', valueTia:1 }));
-        if (simpleView==='currents') layers.push(new ArcLayer({ id:'currents', data:segs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.4, getSourcePosition:e=> e.path[0], getTargetPosition:e=> e.path[1], getWidth:1, getSourceColor: COLORS.xferArc, getTargetColor: COLORS.xferArc }));
-        if (simpleView==='web') layers.push(new PathLayer({ id:'web', data:segs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, visible: zoom>=1.2, getPath:d=>d.path, getWidth:1, widthUnits:'pixels', getColor: COLORS.xferArc }));
-      }
-    } else if (simpleView==='pulse'){
-      const hasW = Array.isArray(pre.wallets?.wallets) && pre.wallets.wallets.length>0;
-      const bin = hasW ? buildWalletBinary(pre.wallets) : buildNodeBinaryFromNodes(nodes);
-      const now=Math.floor(Date.now()/1000);
-      layers.push(new ScatterplotLayer({ id:'pulse', data:bin, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled, updateTriggers:{ getRadius:[pulseT] }, getRadius:(obj,{index})=>{ const last=(pre.wallets?.wallets?.[index]?.lastTxAt)||0; const base=obj.attributes.getRadius.value[index]; const fresh=(now-last)<86400; return fresh ? base*(1+0.06*Math.sin((pulseT||0)*2+index)) : base; },
-        onClick: (info)=>{ const idx=info?.index; if (idx==null) return; if (hasW){ const addr=pre.wallets.wallets[idx]?.addr || pre.wallets.wallets[idx]?.address; if (addr) openWallet(String(addr)); } else { const obj=nodes[idx]; if (obj) handleClick({ object: obj }); } }
-      }));
-    } else if (simpleView==='crown'){
-      const hasT = Array.isArray(pre.tokens?.tokens) && pre.tokens.tokens.length>0;
-      const bin = hasT ? buildTokenBinary(pre.tokens) : buildNodeBinaryFromNodes(nodes);
-      layers.push(new ScatterplotLayer({ id:'crown', data:bin, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, onHover:onHoverThrottled,
-        onClick: (info)=>{ const idx=info?.index; if (idx==null) return; if (hasT){ const t=pre.tokens.tokens[idx]; const id=t?.id; if (id!=null) handleClick({ object:{ id } }); } else { const obj=nodes[idx]; if (obj) handleClick({ object: obj }); } }
-      }));
-      if (hasT){ try { const tok=pre.tokens?.tokens||[]; const K=20; const top=tok.filter(x=>Number.isFinite(x.rarityRank)).sort((a,b)=> (Number(a.rarityRank||1e12)-Number(b.rarityRank||1e12))).slice(0,K); layers.push(new TextLayer({ id:'crown-labels', data:top, visible:(zoom>=2), getPosition:d=> d.xy||[0,0,0], getText:d=>`#${d.id}`, sizeUnits:'pixels', getSize:12, getColor:[0,255,102,220] })); } catch {} }
-    }
-    // Selection ring overlay in simple views
-    try {
-      if (selectedId>0){
-        const obj = nodes.find(n=> n && n.id===selectedId);
-        if (obj){
-          layers.push(new ScatterplotLayer({ id:'selection-ring', data:[obj], coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> Math.max(10,(d.radius||4)+8), getLineColor:[0,255,102,220], lineWidthMinPixels:2, radiusUnits:'pixels' }));
-        }
-      }
-    } catch {}
-    return layers;
-  }
-  // Unified colors and node color mapping (Team, Whale, Frozen, Dormant, Other)
+  const effectiveMode = (mode) => (mode === 'health' ? 'holders' : mode);
+
   const COLORS = {
-    active:  [0,255,102,220],     // neon green
-    whale:   [10,138,61,230],     // dark green
-    frozen:  [68,136,255,200],    // blue
-    dormant: [102,102,102,180],   // gray
-    saleArc: [255,59,59,140],     // red
-    xferArc: [74,163,255,140],    // blue
-    rare:    [255,215,0,220],     // gold (labels/rare dots)
+    active: [0, 255, 102, 180],
+    whale: [0, 255, 102, 220],
+    frozen: [68, 136, 255, 210],
+    dormant: [102, 102, 102, 160]
   };
+
   function nodeColor(d){
     try {
       const types = presetData?.ownerWalletType || [];
-      const t = (d.ownerIndex!=null && d.ownerIndex>=0) ? (types[d.ownerIndex]||'') : '';
-      // Whale: explicit wallet_type or large holdings/volume (approx from price)
-      const isWhale = (t==='whale_trader' || t==='whale');
+      const t = Array.isArray(types) ? types[d.ownerIndex] : null;
+      const isWhale = t === 'whale_trader' || t === 'whale';
       const isFrozen = !!d.frozen;
       const now = Math.floor(Date.now()/1000);
-      const daysSince = d.lastActivity? (now - (d.lastActivity||0))/86400 : 9e6;
+      const daysSince = d.lastActivity ? (now - d.lastActivity)/86400 : Infinity;
       const isDormant = !isFrozen && (d.dormant || daysSince >= 90);
-      if (isWhale) return COLORS.whale;
-      if (isFrozen) return COLORS.frozen;
-      if (isDormant) return COLORS.dormant;
-      return COLORS.active;
-    } catch { return COLORS.active.slice(); }
+      if (isWhale) return COLORS.whale.slice();
+      if (isFrozen) return COLORS.frozen.slice();
+      if (isDormant) return COLORS.dormant.slice();
+      return COLORS.active.slice();
+    } catch {
+      return COLORS.active.slice();
+    }
   }
-  const center = document.querySelector('.center-panel');
+
+const center = document.querySelector('.center-panel');
   if (!center) { console.error('deck.app: .center-panel not found'); }
   const stage = document.getElementById('stage');
   if (stage) stage.style.display = 'none';
   if (!center) return;
 
-  const {Deck, ScatterplotLayer, LineLayer, TextLayer, PolygonLayer, ArcLayer, ScreenGridLayer, HexagonLayer, HeatmapLayer, PathLayer, PointCloudLayer, GPUGridLayer, ContourLayer, IconLayer, OrthographicView, COORDINATE_SYSTEM, BrushingExtension} = window.deck || {};
+  const {Deck, ScatterplotLayer, LineLayer, TextLayer, PolygonLayer, ArcLayer, ScreenGridLayer, HexagonLayer, HeatmapLayer, PathLayer, PointCloudLayer, GPUGridLayer, ContourLayer, OrthographicView, COORDINATE_SYSTEM, BrushingExtension} = window.deck || {};
   if (!Deck) { console.error('Deck.gl UMD not found'); return; }
 
   const API = {
@@ -174,8 +84,6 @@ console.log('deck.app: boot');
   let activityBuckets = null; // activity for HEALTH
   let selectedId = -1; // persistent selection ring
   let highlightSet = null; // wallet highlight filter
-  let washSet = null; // wash watch overlay
-  let desireSet = null; // desire paths overlay
   let edgeCount = 200; // default UI slider value
   let ownerCenters = null; // computed per owner (holders view)
   let ownerOceanPos = null; // computed per owner (whales view)
@@ -209,8 +117,6 @@ console.log('deck.app: boot');
     get transfers(){ return getChecked('layer-transfers', true); },
     get mints(){ return getChecked('layer-mints', true); },
     get bubbles(){ return getChecked('layer-bubbles', true); },
-    get wash(){ return getChecked('layer-wash', false); },
-    get desire(){ return getChecked('layer-desire', false); },
   };
 
   // Minimal hover handler to avoid runtime errors in simple views
@@ -292,19 +198,6 @@ console.log('deck.app: boot');
         else if (v==='health') await loadMode('health', edgeCount);
       });
     }
-    document.querySelectorAll('.tab-btn[data-view]')?.forEach(btn=>{
-      if (!btn.dataset.deckBound){ btn.dataset.deckBound='1'; btn.addEventListener('click', ()=>{ const m=btn.dataset.view; if (m==='ownership') viewEl.value='ownership'; if (m==='trading') viewEl.value='trading'; if (m==='traits') viewEl.value='traits'; if (m==='whales') viewEl.value='whales'; if (m==='health') viewEl.value='health'; viewEl.dispatchEvent(new Event('change')); }); }
-    });
-    // Simple view buttons
-    document.querySelectorAll('.tab-btn[data-simple]')?.forEach(btn=>{
-      if (!btn.dataset.deckBound){ btn.dataset.deckBound='1'; btn.addEventListener('click', async ()=>{
-        simpleView = String(btn.dataset.simple||'constellation');
-        if (simpleView==='constellation') await loadMode('holders', edgeCount);
-        else if (simpleView==='currents' || simpleView==='web') await loadMode('transfers', edgeCount);
-        else if (simpleView==='pulse') await loadMode('health', edgeCount);
-        else if (simpleView==='crown') await loadMode('traits', edgeCount);
-      }); }
-    });
     // Mode select (fallback)
     const modeEl = document.getElementById('mode');
     if (modeEl && !modeEl.dataset.deckBound){
@@ -333,7 +226,7 @@ console.log('deck.app: boot');
           const p = Math.max(0, Math.min(100, parseInt(timeEl.value||'0',10)))/100;
           timeline.value = Math.round(timeline.start + (timeline.end - timeline.start)*p);
           timeline.playing = false;
-          if (currentMode==='transfers') render(nodes, edges, currentMode);
+          if (effectiveMode(currentMode)==='transfers') render(nodes, edges, effectiveMode(currentMode));
           updateLabel();
         }
       });
@@ -343,24 +236,17 @@ console.log('deck.app: boot');
         const p = ((parseInt(timeEl.value||'0',10)+1)%101);
         timeEl.value = String(p);
         const frac=p/100; timeline.value = Math.round(timeline.start + (timeline.end - timeline.start)*frac);
-        if (currentMode==='transfers') render(nodes, edges, currentMode);
+        if (effectiveMode(currentMode)==='transfers') render(nodes, edges, effectiveMode(currentMode));
         updateLabel();
       }, 2000);
     }
     // Layer toggles -> re-render
-    const ids = ['ambient-edges','layer-ownership','layer-traits','layer-trades','layer-sales','layer-transfers','layer-mints','layer-bubbles','layer-wash','layer-desire'];
+    const ids = ['ambient-edges','layer-ownership','layer-traits','layer-trades','layer-sales','layer-transfers','layer-mints','layer-bubbles'];
     ids.forEach(id=>{ const el=document.getElementById(id); if (el && !el.dataset.deckBound){ el.dataset.deckBound='1'; el.addEventListener('change', async ()=>{
-      if (id==='layer-wash' && el.checked && !washSet) washSet = await fetchWash().catch(()=>null);
-      if (id==='layer-desire' && el.checked && !desireSet) desireSet = await fetchDesire().catch(()=>null);
-      render(nodes, edges, currentMode);
+      render(nodes, edges, effectiveMode(currentMode));
     }); }});
     // Search behavior
     const searchEl = document.getElementById('search');
-    const clearBtn = document.getElementById('clear-search');
-    if (clearBtn && !clearBtn.dataset.deckBound){
-      clearBtn.dataset.deckBound='1';
-      clearBtn.addEventListener('click', ()=>{ highlightSet=null; selectedId=-1; try { searchEl.value=''; } catch {}; render(nodes,edges,currentMode); searchEl?.focus(); });
-    }
     if (searchEl && !searchEl.dataset.deckBound){
       searchEl.dataset.deckBound='1';
       searchEl.addEventListener('keydown', async (e)=>{
@@ -383,22 +269,22 @@ console.log('deck.app: boot');
 
   async function loadMode(mode, edgesWanted){
     currentMode = mode;
+    const graphMode = effectiveMode(mode);
     const full = new URLSearchParams(location.search).has('full');
-    const params = new URLSearchParams({ mode, nodes:'10000', edges: full ? '5000' : String(edgesWanted ?? edgeCount) });
+    const params = new URLSearchParams({ mode: graphMode, nodes:'10000', edges: full ? '5000' : String(edgesWanted ?? edgeCount) });
     startUILoad();
     const graph = await jfetch(`${API.graph}?${params}`) || {nodes:[],edges:[]};
-    await loadPrecomputed(mode);
     const pdata = presetData || {};
     nodes = buildNodes(graph.nodes||[], pdata);
     if (!nodes || nodes.length===0){ stopUILoad(); console.warn('API returned zero nodes'); return; }
     edges = buildEdges(graph.edges||[], nodes);
     computeOwnerMetrics(pdata, nodes);
-    applyLayout(nodes, mode, pdata);
+    applyLayout(nodes, graphMode, pdata);
     try { relaxWithinOwners(nodes, ownerHoldings, 2, 6); } catch {}
     // lazy fetch flow/activity data
-    if ((mode==='transfers' || mode==='holders') && !flowEdges) flowEdges = await fetchFlowEdges(nodes).catch(()=>null);
+    if ((graphMode==='transfers' || graphMode==='holders') && !flowEdges) flowEdges = await fetchFlowEdges(nodes).catch(()=>null);
     // Pull raw transfers for particles if we don't have them yet; also seed the timeline
-    if (mode==='transfers' && !transfersCache){
+    if (graphMode==='transfers' && !transfersCache){
       try {
         const r = await jfetch('/api/transfers?limit=5000');
         transfersCache = Array.isArray(r?.transfers) ? r.transfers : [];
@@ -410,8 +296,8 @@ console.log('deck.app: boot');
         }
       } catch {}
     }
-    if (mode==='holders' || mode==='frozen'){ if (!activityBuckets) activityBuckets = await jfetch('/api/activity') || null; }
-    render(nodes, edges, mode);
+    if (graphMode==='holders' || graphMode==='frozen'){ if (!activityBuckets) activityBuckets = await jfetch('/api/activity') || null; }
+    render(nodes, edges, graphMode);
     // (re)start tiny animation for holders and traits if applicable
     if (animReq) cancelAnimationFrame(animReq);
     const start = performance.now? performance.now(): Date.now();
@@ -419,9 +305,10 @@ console.log('deck.app: boot');
       const now = (performance.now? performance.now(): Date.now());
       const t = (now - start)/1000;
       pulseT = t; // global pulse time
-      if (currentMode==='holders') animateHolders(t);
-      else if (currentMode==='traits') animateTraits(t);
-      else if (currentMode==='transfers') { if (timeline.playing) render(nodes, edges, currentMode); }
+      const activeMode = effectiveMode(currentMode);
+      if (activeMode==='holders') animateHolders(t);
+      else if (activeMode==='traits') animateTraits(t);
+      else if (activeMode==='transfers') { if (timeline.playing) render(nodes, edges, activeMode); }
       animReq = requestAnimationFrame(tick);
     };
     animReq = requestAnimationFrame(tick);
@@ -432,13 +319,6 @@ console.log('deck.app: boot');
   // Expose tiny control API for automated tests/screenshots
   try {
     window.mammoths = {
-      setSimpleView: async (key)=>{
-        simpleView = String(key||'dots');
-        if (simpleView==='dots') await loadMode('holders', edgeCount);
-        else if (simpleView==='currents' || simpleView==='web') await loadMode('transfers', edgeCount);
-        else if (simpleView==='pulse') await loadMode('health', edgeCount);
-        else if (simpleView==='crown') await loadMode('traits', edgeCount);
-      },
       focusToken: (id)=>{ try { focusSelect(Number(id)); } catch {} },
     };
   } catch {}
@@ -480,7 +360,6 @@ console.log('deck.app: boot');
 
   function applyLayout(nodes, mode, pdata){
     const w = center.clientWidth||1200, h=center.clientHeight||800; const cx=w/2, cy=h/2;
-    // Compute layout even when SIMPLE_VIEW is on so fallbacks have positions
     if (mode==='holders'){
       // Gravitational clusters: owner hubs + token orbits
       const owners = Math.max(1, (pdata.owners?.length||12));
@@ -529,7 +408,9 @@ console.log('deck.app: boot');
       const t1 = tvals.length ? Math.max(...tvals) : 1;
       timelineLimits = { t0, t1 };
       const lx = (t)=>{ if(!(t1>t0)) return cx; return (t - t0)/(t1 - t0) * (w-160) + 80; };
-      const ly = (p)=>{ const v=Math.log1p(Math.max(0, p||0)); const vmax = Math.log1p(Math.max(1, Math.max(...(parr.filter(x=>x!=null && isFinite(x))), 1))); const y = (1 - v/(vmax||1))*(h-160) + 80; return y; };
+      const priceMax = parr.reduce((max,val)=> (Number.isFinite(val) && val>max) ? val : max, 1);
+      const vmaxLog = Math.log1p(Math.max(1, priceMax));
+      const ly = (p)=>{ const v=Math.log1p(Math.max(0, p||0)); const y = (1 - v/(vmaxLog||1))*(h-160) + 80; return y; };
       basePositions = nodes.map(d=>{ const t=tarrRaw[d.tokenId] ?? t0; const p=parr[d.tokenId] ?? 0; const pos=[lx(t), ly(p), 0]; d.position=pos; d.radius=3+(p?Math.min(6,Math.sqrt(p)):2); return pos.slice(); });
     } else {
       // Default grid
@@ -542,12 +423,6 @@ console.log('deck.app: boot');
 
   function render(nodes, edges, mode){
     const w = center.clientWidth||1200, h=center.clientHeight||800;
-    if (SIMPLE_VIEW){
-      const simple = buildSimpleLayers(mode);
-      deckInst.setProps({ layers: simple });
-      if (!hasFittedOnce) { try { fitViewToNodes(nodes); hasFittedOnce = true; } catch {} }
-      return;
-    }
     const grid = makeGridLines(w, h, 50);
     const holdersHulls = (mode==='holders' && ui.bubbles) ? computeHulls(nodes, presetData) : [];
     // Zoom gates to reduce GPU work when zoomed out
@@ -572,9 +447,6 @@ console.log('deck.app: boot');
       (Array.isArray(nodes) && nodes.length) && new (ScreenGridLayer||window.deck.ScreenGridLayer)({ id:'density', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, cellSizePixels:12, gpuAggregation:true, opacity:0.35, minColor:[0,0,0,0], maxColor:[0,255,0,255], pickable:false, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
       // Ownership edges (thicker, additive blending)
       showEdges && new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0], getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0], getColor:d=> d.color||[0,255,0,140], widthUnits:'pixels', widthMinPixels:2, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
-      // Wash/desire overlays
-      (showOverlays && ui.wash && washSet && washSet.size) && new ScatterplotLayer({ id:'wash', data:nodes.filter(n=>washSet.has(n.id)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(8, (d.radius||4)+6), getFillColor:[0,0,0,0], getLineColor:[255,0,102,220], lineWidthMinPixels:1.5, stroked:true, filled:false, radiusUnits:'pixels' }),
-      (showOverlays && ui.desire && desireSet && desireSet.size) && new ScatterplotLayer({ id:'desire', data:nodes.filter(n=>desireSet.has(n.id)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(7, (d.radius||4)+4), getFillColor:[0,0,0,0], getLineColor:[255,215,0,200], lineWidthMinPixels:1, stroked:true, filled:false, radiusUnits:'pixels' }),
       new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(3, (d.radius||3)*2.4), getFillColor:d=>[d.color[0],d.color[1],d.color[2], 12], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
       // Neighbor edges on click
       (selectedId>0) && new LineLayer({ id:'click-edges', data: buildClickEdges(selectedId), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,180], getWidth:1.2, widthUnits:'pixels', parameters:{ depthTest:false } }),
@@ -597,8 +469,7 @@ console.log('deck.app: boot');
         layers.unshift(new LineLayer({ id:'scanline', data:scan, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,120], getWidth:1.5, widthUnits:'pixels', parameters:{ depthTest:false }, updateTriggers:{ data: [timeline.value] } }));
       }
       // Health/Activity view keys off select state while using holders data
-      const ve = document.getElementById('view');
-      if (ve && ve.value==='health' && mode==='holders') layers = makeActivityLayers(layers);
+      if (currentMode==='health' && mode==='holders') layers = makeActivityLayers(layers);
     } catch {}
     if (mode==='traits' && ui.traits){
       const paths = computeConstellationPaths(nodes, presetData);
@@ -610,7 +481,7 @@ console.log('deck.app: boot');
     const showDots = currentZoom >= 0.25;  // particles only when close
     if (!lodEdges) layers = layers.filter(l=> l && l.id!=='edges');
     if (!showFx) layers = layers.filter(l=> l && l.id!=='glow' && l.id!=='pulses');
-    if (currentMode==='transfers' && !showDots) layers = layers.filter(l=> l && l.id!=='flow-dots');
+    if (effectiveMode(currentMode)==='transfers' && !showDots) layers = layers.filter(l=> l && l.id!=='flow-dots');
     deckInst.setProps({ layers });
     if (!hasFittedOnce) { try { fitViewToNodes(nodes); hasFittedOnce = true; } catch {} }
   }
@@ -634,13 +505,13 @@ console.log('deck.app: boot');
       }
     }
     if (collapseOwner>=0){ collapsePhase += 0.02; if (collapsePhase>=1){ collapseOwner=-1; collapsePhase=0; } }
-    render(nodes, edges, currentMode);
+    render(nodes, edges, effectiveMode(currentMode));
   }
   function animateTraits(t){
     if (!basePositions) return;
     const out = nodes.map((d,i)=>{ const bp=basePositions[i]; const ny = bp[1] + Math.sin((i*0.1)+t)*1.5; return [bp[0], ny, 0]; });
     nodes.forEach((d,i)=> d.position=out[i]);
-    render(nodes, edges, currentMode);
+    render(nodes, edges, effectiveMode(currentMode));
   }
 
   function bindShortcuts(){
@@ -667,7 +538,7 @@ console.log('deck.app: boot');
       try {
         if (!heatmapCache) {
           // lazy load; do not block
-          jfetch('/api/heatmap').then(j=>{ heatmapCache=j||{grid:[]}; render(nodes, edges, currentMode); });
+          jfetch('/api/heatmap').then(j=>{ heatmapCache=j||{grid:[]}; render(nodes, edges, effectiveMode(currentMode)); });
         }
         const grid = (heatmapCache && heatmapCache.grid) ? heatmapCache.grid : [];
         if (Array.isArray(grid) && grid.length){
@@ -933,7 +804,7 @@ function buildFlowParticles(limit=600){
           detailsEl.innerHTML += `<div class='section-label'>HISTORY</div><div class='traits-table'>${items}</div>`;
         }
       } catch {}
-      render(nodes, edges, currentMode);
+      render(nodes, edges, effectiveMode(currentMode));
     } catch {
       // Minimal, no-DB fallback so the panel is still useful in demo mode
       try {
@@ -962,8 +833,6 @@ function buildFlowParticles(limit=600){
       highlightSet = ids; selectedId=-1; render(nodes,edges,currentMode);
     } catch { highlightSet=null; }
   }
-  async function fetchWash(){ try { const r = await jfetch('/api/suspicious-trades'); const s=new Set((r?.tokens||[]).map(t=>Number(t.token_id||t.id))); return s; } catch { return null; } }
-  async function fetchDesire(){ try { const r = await jfetch('/api/desire-paths'); const s=new Set((r?.desire_paths||[]).map(t=>Number(t.token_id||t.id))); return s; } catch { return null; } }
   function focusSelect(id){ const obj = nodes.find(n=>n.id===id); if (!obj) return; selectedId=id; // center roughly by resetting viewState target
     try {
       const vs = deckInst?.viewState || {};
@@ -1009,15 +878,17 @@ function buildFlowParticles(limit=600){
   async function fetchTopOwnerLabels(pdata, counts, centers){
     const owners = pdata?.owners || [];
     const ranked = owners.map((addr,i)=>({ addr:(addr||'').toLowerCase(), i, h: counts[i]||0, c: centers[i] })).filter(x=>x.c).sort((a,b)=>b.h-a.h).slice(0,40);
-    for (const r of ranked){
-      if (!r.addr || ownerLabels.has(r.addr)) continue;
-      try {
-        const meta = await jfetch(`/api/wallet/${r.addr}/meta`);
-        const label = (meta?.ens_name && meta.ens_name.length>2) ? meta.ens_name : `${r.addr.slice(0,6)}...${r.addr.slice(-4)}`;
-        ownerLabels.set(r.addr, label);
-      } catch {}
+    const need = ranked.filter(r=> r.addr && !ownerLabels.has(r.addr)).slice(0, 24);
+    if (!need.length) return;
+    const tasks = need.map(r => jfetch(`/api/wallet/${r.addr}/meta`).then(meta => ({ r, meta })).catch(()=>null));
+    const settled = await Promise.allSettled(tasks);
+    for (const entry of settled){
+      if (entry.status !== 'fulfilled' || !entry.value) continue;
+      const { r, meta } = entry.value;
+      const label = (meta?.ens_name && meta.ens_name.length>2) ? meta.ens_name : `${r.addr.slice(0,6)}...${r.addr.slice(-4)}`;
+      ownerLabels.set(r.addr, label);
     }
-    if (currentMode==='holders') try { render(nodes, edges, currentMode); } catch {}
+    if (effectiveMode(currentMode)==='holders') try { render(nodes, edges, effectiveMode(currentMode)); } catch {}
   }
 
   function makeHoldersLayers(base){
@@ -1209,7 +1080,7 @@ function buildFlowParticles(limit=600){
       if (whalesRelationships && typeof whalesRelationships.then==='function'){
         whalesRelationships = null; // avoid double awaiting during layer construction
         // lazy background load
-        jfetch('/api/wallet-relationships?min_trades=3').then(j=>{ whalesRelationships = j||{relationships:[]}; render(nodes, edges, currentMode); });
+        jfetch('/api/wallet-relationships?min_trades=3').then(j=>{ whalesRelationships = j||{relationships:[]}; render(nodes, edges, effectiveMode(currentMode)); });
       }
       const data = (whalesRelationships && whalesRelationships.relationships) ? whalesRelationships.relationships : [];
       const map = new Map(ownersArr.map((a,i)=>[(a||'').toLowerCase(), i]));
@@ -1227,23 +1098,33 @@ function buildFlowParticles(limit=600){
       if (paths.length) currentL = new PathLayer({ id:'ocean-currents', data: paths, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPath:d=>d.path, getColor:d=>d.c, getWidth:d=>d.w, widthUnits:'pixels' });
     } catch {}
 
-    // Sea creatures using Remix Icon via IconLayer (no emoji)
-    function iconFor(t){
-      const base = 'https://cdn.jsdelivr.net/npm/remixicon@3.5.0/icons';
-      if (t==='whale_trader') return { url: base + '/animal/whale-line.svg', width:512, height:512, anchorY:256 };
-      if (t==='diamond_hands') return { url: base + '/finance/vip-diamond-line.svg', width:512, height:512, anchorY:256 };
-      if (t==='flipper') return { url: base + '/animal/fish-line.svg', width:512, height:512, anchorY:256 };
-      return { url: base + '/animal/turtle-line.svg', width:512, height:512, anchorY:256 };
-    }
-    const creatures = new IconLayer({ id:'sea-creatures', data: owners, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getIcon:d=>iconFor(d.type), getSize:d=> 24 + Math.min(28, Math.sqrt(Math.max(1,d.holdings))*2), sizeUnits:'pixels', getColor:[0,255,102,220] });
+    const creatureDots = new ScatterplotLayer({
+      id:'sea-creatures',
+      data: owners,
+      coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+      pickable:true,
+      autoHighlight:true,
+      highlightColor:[255,255,255,120],
+      onClick: async (info)=>{ if(info?.object){ await openWallet(info.object.address);} },
+      getPosition:d=>d.position,
+      getRadius:d=> 10 + Math.min(16, Math.sqrt(Math.max(1,d.holdings))*1.8),
+      radiusUnits:'pixels',
+      stroked:true,
+      getLineWidth:1.2,
+      lineWidthUnits:'pixels',
+      getFillColor:d=>{
+        const t = String(d.type||'');
+        if (t==='whale_trader' || t==='whale') return [0,255,160,160];
+        if (t==='diamond_hands') return [255,215,0,160];
+        if (t==='flipper') return [0,200,255,140];
+        return [0,255,102,140];
+      }
+    });
 
     // Sonar pulses: light ripples on top whales
     const pulses = new ScatterplotLayer({ id:'sonar-pulses', data: ranked.map((o,i)=>({ p:o.position, i })), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, getPosition:d=>d.p, getRadius:d=> 12 + 10*(0.5+0.5*Math.sin(pulseT*2 + d.i)), getFillColor:[0,255,102,30], radiusUnits:'pixels' });
 
-    // Scatter nodes for owners (dots beneath creatures for interaction)
-    const nodesL = new ScatterplotLayer({ id:'wallet-dots', data: owners, pickable:true, autoHighlight:true, onClick: async (info)=>{ if(info?.object){ await openWallet(info.object.address);} }, getPosition:d=>d.position, getRadius:d=> 3 + Math.sqrt(Math.max(1,d.holdings))*1.2, getFillColor:[0,255,102,120], radiusUnits:'pixels' });
-
-    return [ bandsL, currentL, nodesL, creatures, pulses, ...base.filter(Boolean) ];
+    return [ bandsL, currentL, creatureDots, pulses, ...base.filter(Boolean) ];
   }
 
   async function openWallet(addr){
@@ -1295,7 +1176,7 @@ function buildFlowParticles(limit=600){
       const r = await jfetch(`/api/trait-tokens?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`);
       const ids = new Set((r.tokens||[]).map(Number));
       highlightSet = ids;
-      render(nodes, edges, currentMode);
+      render(nodes, edges, effectiveMode(currentMode));
 
       // Trait summary → sidebar (floor + examples) using preset arrays already loaded
       const prices = (presetData?.tokenPrice||[]);
@@ -1348,8 +1229,11 @@ function buildFlowParticles(limit=600){
       const showSales = getChecked('layer-sales', true);
       const showTransfers = getChecked('layer-transfers', true);
       const showMints = getChecked('layer-mints', true);
+      const finitePoint = (p)=> Array.isArray(p) && p.length>=2 && p.every(v=>Number.isFinite(v));
       const segs = flowEdges.slice(0,800).map(e=>{
-        const s = nodes[e.a]?.position, t = nodes[e.b]?.position; if (!s||!t) return null;
+        const s = nodes[e.a]?.position;
+        const t = nodes[e.b]?.position;
+        if (!finitePoint(s) || !finitePoint(t)) return null;
         const w = 0.6 + Math.min(2.4, Math.sqrt(e.count||1));
         const type = (e.type||'transfer');
         if (type==='sale' && !showSales) return null;
@@ -1358,22 +1242,49 @@ function buildFlowParticles(limit=600){
         const c = (type==='sale') ? [255,0,102,180] : (type==='mint') ? [255,255,255,160] : [0,160,255,160];
         return { s, t, w, c };
       }).filter(Boolean);
-      add.push(new ArcLayer({ id:'flows', data:segs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getSourceColor:d=>d.c, getTargetColor:d=>d.c, widthUnits:'pixels', widthMinPixels:2, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }));
+      if (segs.length) {
+        add.push(new ArcLayer({ id:'flows', data:segs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getSourceColor:d=>d.c, getTargetColor:d=>d.c, widthUnits:'pixels', widthMinPixels:2, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }));
+      }
     }
     // Merge with base
     if (add.length) base = base.concat(add);
     // Terrain: price contours (topography) using token last-sale data (CPU-safe)
     try {
-      const t0 = timeline.start || (timelineLimits?.t0||0); const t1 = timeline.end || (timelineLimits?.t1||t0+1); const dt = (t1-t0)||1;
-      const width = (center.clientWidth||1200), height=(center.clientHeight||800);
-      const xs = (ts)=> (ts - t0)/dt * (width-160) + 80;
-      const parr = presetData?.tokenLastSalePrice || presetData?.tokenPrice || [];
-      const tsarr = presetData?.tokenLastSaleTs || presetData?.tokenLastActivity || [];
+      const viewportWidth = center.clientWidth||1200;
+      const viewportHeight = center.clientHeight||800;
+      const priceArr = Array.isArray(presetData?.tokenLastSalePrice) && presetData.tokenLastSalePrice.length
+        ? presetData.tokenLastSalePrice
+        : (presetData?.tokenPrice || []);
+      const tsArr = Array.isArray(presetData?.tokenLastSaleTs) && presetData.tokenLastSaleTs.length
+        ? presetData.tokenLastSaleTs
+        : (presetData?.tokenLastActivity || []);
+      const tsFinite = tsArr.filter(v=>Number.isFinite(v));
+      const tsMin = tsFinite.length ? Math.min(...tsFinite) : null;
+      const tsMax = tsFinite.length ? Math.max(...tsFinite) : null;
+      let rangeStart = Number.isFinite(timeline.start) ? timeline.start : null;
+      let rangeEnd = Number.isFinite(timeline.end) ? timeline.end : null;
+      if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart){
+        rangeStart = Number.isFinite(timelineLimits?.t0) ? timelineLimits.t0 : tsMin;
+        rangeEnd = Number.isFinite(timelineLimits?.t1) ? timelineLimits.t1 : tsMax;
+      }
+      if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart) {
+        rangeStart = tsMin ?? 0;
+        rangeEnd = tsMax ?? (rangeStart + 1);
+      }
+      const dt = (rangeEnd - rangeStart) || 1;
+      const xs = (ts)=> (ts - rangeStart)/dt * (viewportWidth-160) + 80;
+      const priceVals = priceArr.filter(v=>Number.isFinite(v) && v>0);
+      const priceDenom = Math.log1p(Math.max(1, priceVals.length ? Math.max(...priceVals) : 1)) || 1;
       const pts = [];
-      for (let i=0;i<parr.length;i++){
-        const p = parr[i]; const ts = tsarr[i]; if (p==null || !ts) continue;
-        const y = (Math.log1p(Math.max(0,p)) / Math.log1p(Math.max(1, Math.max(...parr.filter(v=>v!=null)))) ) * (height-160) + 80;
-        pts.push([ xs(ts), y ]);
+      for (let i=0;i<priceArr.length;i++){
+        const p = priceArr[i];
+        const ts = tsArr[i];
+        if (!Number.isFinite(ts) || ts < rangeStart || ts > rangeEnd) continue;
+        if (!Number.isFinite(p) || p <= 0) continue;
+        const x = xs(ts);
+        const y = (Math.log1p(Math.max(0,p)) / priceDenom) * (viewportHeight-160) + 80;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        pts.push([x, y]);
       }
       if (typeof ContourLayer==='function' && pts.length>50){
         const thresholds = 10;
@@ -1384,13 +1295,32 @@ function buildFlowParticles(limit=600){
     // Rapids: hour activity as grid (height=volume) with GPU->CPU fallback
     try {
       if (transfersCache && transfersCache.length){
-        const t0 = timeline.start || (timelineLimits?.t0||0); const t1 = timeline.end || (timelineLimits?.t1||t0+1); const dt=(t1-t0)||1;
-        const width = (center.clientWidth||1200), height=(center.clientHeight||800);
-        const xs = (ts)=> (ts - t0)/dt * (width-160) + 80;
-        const pts = transfersCache.map(tr=>({ position:[ xs(tr.timestamp||t0), (Math.log1p(Math.max(0,tr.price||0)))*200, 0 ], w: 1 }));
-        if (typeof GPUGridLayer==='function'){
+        const viewportWidth = center.clientWidth||1200;
+        const viewportHeight = center.clientHeight||800;
+        const tsSeries = transfersCache.map(tr=> tr.timestamp).filter(v=>Number.isFinite(v));
+        const tsMin = tsSeries.length ? Math.min(...tsSeries) : Number.isFinite(timelineLimits?.t0) ? timelineLimits.t0 : null;
+        const tsMax = tsSeries.length ? Math.max(...tsSeries) : Number.isFinite(timelineLimits?.t1) ? timelineLimits.t1 : null;
+        let rangeStart = Number.isFinite(timeline.start) ? timeline.start : tsMin;
+        let rangeEnd = Number.isFinite(timeline.end) ? timeline.end : tsMax;
+        if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart){
+          rangeStart = tsMin ?? (timelineLimits?.t0 ?? 0);
+          rangeEnd = tsMax ?? (timelineLimits?.t1 ?? (rangeStart + 1));
+        }
+        const dt=(rangeEnd - rangeStart) || 1;
+        const xs = (ts)=> (ts - rangeStart)/dt * (viewportWidth-160) + 80;
+        const priceSeries = transfersCache.map(tr=> tr.price).filter(v=>Number.isFinite(v) && v>0);
+        const priceDenom = Math.log1p(Math.max(1, priceSeries.length ? Math.max(...priceSeries) : 1)) || 1;
+        const pts = transfersCache.map(tr=>{
+          const ts = Number.isFinite(tr.timestamp) ? tr.timestamp : rangeStart;
+          if (ts < rangeStart || ts > rangeEnd) return null;
+          const x = xs(ts);
+          const y = (Math.log1p(Math.max(0,tr.price||0)) / priceDenom) * (viewportHeight-160) + 80;
+          if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+          return { position:[ x, y, 0 ], w: 1 };
+        }).filter(Boolean);
+        if (pts.length && typeof GPUGridLayer==='function'){
           add.push(new GPUGridLayer({ id:'activity-rapids', data: pts, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getWeight:d=>d.w, cellSizePixels: 28, extruded:true, elevationScale: 8, pickable:false, colorAggregation:'SUM', getColorValue: v=>v, colorRange:[[0,0,0,0],[255,255,255,180]] }));
-        } else if (typeof ScreenGridLayer==='function'){
+        } else if (pts.length && typeof ScreenGridLayer==='function'){
           add.push(new ScreenGridLayer({ id:'activity-rapids', data: pts, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getWeight:d=>d.w, cellSizePixels: 28, opacity:0.3, colorRange:[[0,0,0,0],[255,255,255,180]] }));
         }
       }

@@ -102,7 +102,7 @@ async function main(){
   // Views to exercise
   const quick = String(process.env.QUICK||'0')==='1';
   const views = quick ? ['ownership', 'trading'] : ['ownership', 'trading', 'traits', 'whales', 'health'];
-  const simple = quick ? ['dots'] : ['dots', 'currents', 'web', 'pulse', 'crown'];
+  const simple = [];
   const previewIds = (process.env.PREVIEW_IDS || '5000,3333,2500,2000,1000,100,2').split(',').map(s=>parseInt(s,10)).filter(n=>!isNaN(n));
   const perViewVariants = quick ? 1 : parseInt(process.env.PREVIEW_VARIANTS || '3', 10);
 

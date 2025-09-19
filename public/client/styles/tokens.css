@@ -16,7 +16,7 @@
   --danger-rgb: 255,59,59;
 
   /* Typography */
-  --font-mono: Menlo, 'Fira Code', 'SFMono-Regular', ui-monospace, monospace;
+  --font-mono: 'IBM Plex Mono', 'Fira Code', 'SFMono-Regular', Menlo, ui-monospace, monospace;
   --fs-10: 10px; --fs-11: 11px; --fs-12: 12px; --fs-14: 14px; --fs-18: 18px;
   --fw-regular: 400; --fw-bold: 700;
 

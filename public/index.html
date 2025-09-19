@@ -5,9 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="app-build" content="20250915-1">
   <title>mammoths.network</title>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+  <link rel="stylesheet" href="/client/styles/fonts.css?v=20250915-1">
   <!-- Deck.gl UMD loaded below; no PIXI -->
   <link rel="stylesheet" href="/client/styles/tokens.css?v=20250915-1">
   <link rel="stylesheet" href="/style.css?v=20250915-1">
@@ -21,7 +19,7 @@
     <div class="header-controls">
       <!-- preset buttons removed (views live in left panel) -->
       <div class="more">
-        <button id="more-btn" class="btn btn--chip tooltipped" title="More" data-tooltip="MORE" aria-haspopup="menu" aria-expanded="false" aria-controls="more-panel"><i class="ri-more-2-fill"></i></button>
+        <button id="more-btn" class="btn btn--chip tooltipped" title="More" data-tooltip="MORE" aria-haspopup="menu" aria-expanded="false" aria-controls="more-panel"><span aria-hidden="true">•••</span></button>
         <div id="more-panel" class="more-panel" role="menu" hidden>
           <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="edges">EDGE LAYERS</button>
           <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="traits">TRAITS</button>
@@ -36,15 +34,8 @@
       <div class="controls-section">
         <!-- VIEW at top; header left-aligned like others -->
         <div class="view-selector panel-view" aria-label="Views" style="margin-bottom: var(--pad-12);">
-          <label class="panel-title" style="text-align:left;">VIEW</label>
-          <div class="view-tabs" role="tablist" aria-label="Simple Views">
-            <button class="tab-btn" data-simple="dots" role="tab">DOTS</button>
-            <button class="tab-btn" data-simple="currents" role="tab">FLOW</button>
-            <button class="tab-btn" data-simple="web" role="tab">WEB</button>
-            <button class="tab-btn" data-simple="pulse" role="tab">PULSE</button>
-            <button class="tab-btn" data-simple="crown" role="tab">CROWN</button>
-          </div>
-          <select id="view" aria-label="Views" class="sr-only" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;">
+          <label class="panel-title" style="text-align:left;" for="view">VIEW</label>
+          <select id="view" aria-label="Views">
             <option value="ownership">OWNERSHIP NETWORK</option>
             <option value="trading">TRADING ACTIVITY</option>
             <option value="traits">TRAIT EXPLORER</option>
@@ -75,7 +66,6 @@
           <h4>DISPLAY</h4>
           <div class="layer-toggle"><label>Ambient Edges</label><input type="checkbox" id="ambient-edges"></div>
           <div class="layer-toggle"><label>Whale Bubbles</label><input type="checkbox" id="layer-bubbles"></div>
-          <!-- Removed: Wash Watch / Desire Paths -->
           <div class="colors">
             <div><span class="sw sw--active"></span>Active</div>
             <div><span class="sw sw--whale"></span>Whale</div>
