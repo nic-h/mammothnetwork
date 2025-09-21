@@ -14,7 +14,6 @@ const MODE = process.env.MODE || 'holders';
 const NODES = Number(process.env.NODES || 10000);
 const EDGE_CAP = Number(process.env.EDGES || 500);
 const DEGREE_CAP = Number(process.env.DEGREE_CAP || 6);
-const TRADE_THRESHOLD = Number(process.env.TRADE_THRESHOLD || 2);
 const ETHOS_MIN = Number(process.env.ETHOS_MIN || 1200);
 
 function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
@@ -68,19 +67,29 @@ function buildHolders(N, cap) {
 function buildTransfers(N, cap) {
   const names = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name.toLowerCase());
   const xfer = ['transfers', 'sales', 'tx', 'events'].find(n => names.includes(n));
-  const pragma = xfer ? db.prepare(`PRAGMA table_info(${xfer})`).all() : [];
-  const cols = pragma.map(c => c.name.toLowerCase());
-  const tokenCol = cols.find(c => ['token_id', 'token', 'id', 'nft_id'].includes(c)) || 'token_id';
-  const timeCol = cols.find(c => ['timestamp', 'block_time', 'time', 'ts'].includes(c));
   if (!xfer) return [];
-  const sql = `SELECT ${tokenCol} AS token_id ${timeCol ? (', '+timeCol+' AS t') : ''} FROM ${xfer} WHERE ${tokenCol}<=? ORDER BY ${tokenCol} ${timeCol ? ', t' : ''}`;
-  const rows = db.prepare(sql).all(N);
-  const byToken = new Map();
-  for (const r of rows) { if (!byToken.has(r.token_id)) byToken.set(r.token_id, []); byToken.get(r.token_id).push(r); }
-  const edges = []; const degree = new Map();
-  for (const list of byToken.values()) {
-    for (let i = 1; i < list.length && edges.length < cap; i++) {
-      degreeCappedPush(edges, list[i-1].token_id, list[i].token_id, degree, DEGREE_CAP);
+  const edges = [];
+  const degree = new Map();
+  const limit = Math.max(cap * 4, cap);
+  const pairs = db.prepare(`
+    SELECT LOWER(from_addr) AS a, LOWER(to_addr) AS b, COUNT(1) AS cnt
+    FROM ${xfer}
+    WHERE from_addr IS NOT NULL AND from_addr<>'' AND to_addr IS NOT NULL AND to_addr<>''
+      AND token_id<=?
+    GROUP BY a,b
+    ORDER BY cnt DESC
+    LIMIT ?
+  `).all(N, limit);
+
+  for (const p of pairs) {
+    const a = getRepToken(p.a, N);
+    const b = getRepToken(p.b, N);
+    if (!a || !b) continue;
+    const before = edges.length;
+    degreeCappedPush(edges, a, b, degree, DEGREE_CAP);
+    if (edges.length > before) {
+      const weight = Math.max(1, Math.min(p.cnt, 10));
+      edges[edges.length - 1][2] = weight;
     }
     if (edges.length >= cap) break;
   }
@@ -115,6 +124,20 @@ function getOwnerTokens(owner, N) {
   return db.prepare('SELECT id FROM tokens WHERE LOWER(owner)=? AND id<=? ORDER BY id').all(owner, N).map(r => r.id);
 }
 
+function getRepToken(owner, N) {
+  if (!owner) return null;
+  const holding = db.prepare(
+    'SELECT id FROM tokens WHERE LOWER(owner)=? AND id<=? ORDER BY id LIMIT 1'
+  ).get(owner, N);
+  if (holding?.id) return holding.id;
+  const traded = db.prepare(
+    `SELECT token_id FROM transfers
+     WHERE (LOWER(from_addr)=? OR LOWER(to_addr)=?) AND token_id<=?
+     ORDER BY timestamp DESC LIMIT 1`
+  ).get(owner, owner, N);
+  return traded?.token_id || null;
+}
+
 function buildWallets(N, cap) {
   const edges = []; const degree = new Map();
 
@@ -140,16 +163,15 @@ function buildWallets(N, cap) {
     WHERE from_addr IS NOT NULL AND from_addr<>'' AND to_addr IS NOT NULL AND to_addr<>''
       AND token_id<=?
     GROUP BY a,b
-    HAVING cnt >= ?
+    HAVING cnt >= 1
     ORDER BY cnt DESC
     LIMIT 1000
-  `).all(N, TRADE_THRESHOLD);
+  `).all(N);
 
   for (const p of pairs) {
-    const aTokens = getOwnerTokens(p.a, N);
-    const bTokens = getOwnerTokens(p.b, N);
-    if (!aTokens.length || !bTokens.length) continue;
-    const a = aTokens[0], b = bTokens[0];
+    const a = getRepToken(p.a, N);
+    const b = getRepToken(p.b, N);
+    if (!a || !b) continue;
     degreeCappedPush(edges, a, b, degree, DEGREE_CAP);
     if (edges.length >= cap) break;
   }
@@ -162,10 +184,10 @@ function buildWallets(N, cap) {
   let added = 0;
   for (const p of pairs) {
     if (high.has(p.a) && high.has(p.b)) {
-      const aTokens = getOwnerTokens(p.a, N);
-      const bTokens = getOwnerTokens(p.b, N);
-      if (!aTokens.length || !bTokens.length) continue;
-      degreeCappedPush(edges, aTokens[0], bTokens[0], degree, DEGREE_CAP);
+      const a = getRepToken(p.a, N);
+      const b = getRepToken(p.b, N);
+      if (!a || !b) continue;
+      degreeCappedPush(edges, a, b, degree, DEGREE_CAP);
       added++;
       if (edges.length >= cap) break;
     }
@@ -202,9 +224,9 @@ function buildWallets(N, cap) {
         for (const k of A) if (B.has(k)) inter++;
         const jac = inter / (A.size + B.size - inter);
         if (jac >= 0.15) {
-          const aTokens = getOwnerTokens(owners[i], N);
-          const bTokens = getOwnerTokens(owners[j], N);
-          if (aTokens.length && bTokens.length) degreeCappedPush(edges, aTokens[0], bTokens[0], degree, DEGREE_CAP);
+          const a = getRepToken(owners[i], N);
+          const b = getRepToken(owners[j], N);
+          if (a && b) degreeCappedPush(edges, a, b, degree, DEGREE_CAP);
         }
       }
     }

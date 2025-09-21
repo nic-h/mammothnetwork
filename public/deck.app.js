@@ -41,8 +41,22 @@ console.log('deck.app: boot');
   function nodeColor(d){
     try {
       const types = presetData?.ownerWalletType || [];
-      const t = Array.isArray(types) ? types[d.ownerIndex] : null;
-      const isWhale = t === 'whale_trader' || t === 'whale';
+      const pnls = presetData?.ownerPnl || [];
+      const t = Array.isArray(types) ? (types[d.ownerIndex] || null) : null;
+      const typeNorm = typeof t === 'string' ? t.toLowerCase() : '';
+      const pnlRaw = Array.isArray(pnls) ? pnls[d.ownerIndex] : null;
+      const pnl = Number.isFinite(Number(pnlRaw)) ? Number(pnlRaw) : null;
+      d.ownerPnl = pnl;
+      const strokePositive = [0, 255, 160, 220];
+      const strokeNegative = [255, 110, 110, 220];
+      d.strokeColor = pnl != null && pnl < 0 ? strokeNegative : strokePositive;
+      let strokeStyle = 'soft';
+      if (typeNorm === 'flipper' || typeNorm === 'flipper_trader') strokeStyle = 'dashed';
+      else if (typeNorm === 'diamond_hands' || typeNorm === 'diamond-hand') strokeStyle = 'solid';
+      else if (typeNorm === 'whale' || typeNorm === 'whale_trader') strokeStyle = 'bold';
+      d.strokeStyle = strokeStyle;
+      d.strokeWidth = strokeStyle === 'bold' ? 1.1 : strokeStyle === 'solid' ? 0.85 : strokeStyle === 'dashed' ? 0.75 : 0.6;
+      const isWhale = typeNorm === 'whale_trader' || typeNorm === 'whale';
       const isFrozen = !!d.frozen;
       const now = Math.floor(Date.now()/1000);
       const daysSince = d.lastActivity ? (now - d.lastActivity)/86400 : Infinity;
@@ -56,20 +70,34 @@ console.log('deck.app: boot');
     }
   }
 
+  function nodeStrokeColor(d){
+    if (Array.isArray(d?.strokeColor) && d.strokeColor.length >= 3) {
+      return d.strokeColor.slice(0, 4);
+    }
+    return [TOKENS.fg[0], TOKENS.fg[1], TOKENS.fg[2], 170];
+  }
+
+  function nodeStrokeWidth(d){
+    const w = Number(d?.strokeWidth);
+    if (Number.isFinite(w)) return w;
+    return 0.5;
+  }
+
 const center = document.querySelector('.center-panel');
   if (!center) { console.error('deck.app: .center-panel not found'); }
   const stage = document.getElementById('stage');
   if (stage) stage.style.display = 'none';
   if (!center) return;
 
-  const {Deck, ScatterplotLayer, LineLayer, TextLayer, PolygonLayer, ArcLayer, ScreenGridLayer, HexagonLayer, HeatmapLayer, PathLayer, PointCloudLayer, GPUGridLayer, ContourLayer, OrthographicView, COORDINATE_SYSTEM, BrushingExtension} = window.deck || {};
+  const {Deck, ScatterplotLayer, LineLayer, TextLayer, PolygonLayer, ArcLayer, ScreenGridLayer, HexagonLayer, HeatmapLayer, PathLayer, PointCloudLayer, GPUGridLayer, ContourLayer, OrthographicView, COORDINATE_SYSTEM, BrushingExtension, PathStyleExtension} = window.deck || {};
   if (!Deck) { console.error('Deck.gl UMD not found'); return; }
 
   const API = {
     graph: '/api/graph',
     preset: '/api/preset-data',
     token: id => `/api/token/${id}`,
-    story: id => `/api/token/${id}/story`
+    story: id => `/api/token/${id}/story`,
+    stats: '/api/stats'
   };
 
   function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
@@ -187,6 +215,7 @@ const center = document.querySelector('.center-panel');
   async function init(){
     startUILoad();
     presetData = await jfetch(API.preset) || null;
+    loadHeaderStats().catch(()=>{});
     let __firstDrawn = false;
     try { window.__mammothDrawnFrame = false; } catch {}
     deckInst = new Deck({
@@ -351,7 +380,29 @@ const center = document.querySelector('.center-panel');
     const pdata = presetData || {};
     nodes = buildNodes(graph.nodes||[], pdata);
     try { window.__mammothNodes = nodes.slice(0, 50); } catch {}
-    if (!nodes || nodes.length===0){ stopUILoad(); console.warn('API returned zero nodes'); return; }
+    if (!nodes || nodes.length===0){
+      // Try fallback: fetch holders mode if current view is empty
+      if (graphMode!=='holders'){
+        try {
+          const params2 = new URLSearchParams({ mode:'holders', nodes:'10000', edges:String(edgesWanted ?? edgeCount) });
+          const graph2 = await jfetch(`${API.graph}?${params2}`) || {nodes:[],edges:[]};
+          const pdata2 = await jfetch(`${API.presetData}?nodes=10000`) || {};
+          const nodes2 = buildNodes(graph2.nodes||[], pdata2);
+          const edges2 = buildEdges(graph2.edges||[], nodes2);
+          if (nodes2 && nodes2.length){
+            render(nodes2, edges2, 'holders');
+            stopUILoad();
+            console.warn(`Mode "${graphMode}" returned 0 nodes — fell back to holders.`);
+            return;
+          }
+        } catch (e){
+          console.error('Fallback to holders failed:', e);
+        }
+      }
+      stopUILoad();
+      console.warn(`Mode "${graphMode}" returned 0 nodes — nothing to render.`);
+      return;
+    }
     edges = buildEdges(graph.edges||[], nodes);
     computeOwnerMetrics(pdata, nodes);
     applyLayout(nodes, graphMode, pdata);
@@ -606,7 +657,8 @@ const center = document.querySelector('.center-panel');
         new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(3, (d.radius||3)*2.4), getFillColor:d=>[d.color[0],d.color[1],d.color[2], Math.round(16 * overlayFade)], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
         // Neighbor edges on click
         (selectedId>0) && new LineLayer({ id:'click-edges', data: buildClickEdges(selectedId), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,180], getWidth:1.2, widthUnits:'pixels', parameters:{ depthTest:false } }),
-        new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=> (d.radius||3), radiusUnits:'pixels', radiusMinPixels:2, radiusMaxPixels:7, stroked:true, getLineWidth:0.5, lineWidthUnits:'pixels', lineWidthMinPixels:0.5, getFillColor:d=>d.color, onClick: handleClick, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 }, extensions:[ new (BrushingExtension||window.deck.BrushingExtension)() ], brushingEnabled:true, brushingRadius:60, ...(nodePositionProps||{}) }),
+        new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=> (d.radius||3), radiusUnits:'pixels', radiusMinPixels:2, radiusMaxPixels:7, stroked:true, getLineWidth:nodeStrokeWidth, lineWidthUnits:'pixels', lineWidthMinPixels:0.5, getLineColor:nodeStrokeColor, getFillColor:d=>d.color, onClick: handleClick, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 }, extensions:[ new (BrushingExtension||window.deck.BrushingExtension)() ], brushingEnabled:true, brushingRadius:60, ...(nodePositionProps||{}) }),
+        mode==='transfers' && buildTradingOutlineLayer(nodes),
         // Subtle pulse rings for recently active tokens
         (showOverlays) && new ScatterplotLayer({ id:'pulses', data: nodes.filter(n=>recentActive(n)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> (d.radius||4) * (1.6 + 0.4*Math.sin(pulseT*2 + (d.id||0))), getLineColor:[TOKENS.fgBright[0], TOKENS.fgBright[1], TOKENS.fgBright[2], Math.max(0, Math.min(255, overlayAlpha))], lineWidthMinPixels:1, radiusUnits:'pixels', updateTriggers:{ getRadius: [pulseT] }, parameters:{ depthTest:false } }),
         (selObj) && new ScatterplotLayer({ id:'selection-ring', data:[selObj], coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(10,(d.radius||4)+8), getFillColor:[0,0,0,0], getLineColor:[TOKENS.fg[0], TOKENS.fg[1], TOKENS.fg[2], Math.max(140, Math.min(255, overlayAlpha+100))], lineWidthMinPixels:2, stroked:true, filled:false, radiusUnits:'pixels' })
@@ -689,9 +741,10 @@ const center = document.querySelector('.center-panel');
       radiusMinPixels: 2,
       radiusMaxPixels: 7,
       stroked: true,
-      getLineWidth: 0.5,
+      getLineWidth: nodeStrokeWidth,
       lineWidthUnits: 'pixels',
       lineWidthMinPixels: 0.5,
+      getLineColor: nodeStrokeColor,
       getFillColor: d => d.color,
       onClick: handleClick,
       parameters: { blend: true, depthTest: false, blendFunc: [770, 1], blendEquation: 32774 },
@@ -740,6 +793,48 @@ const center = document.querySelector('.center-panel');
     }
 
     return layers.filter(Boolean);
+  }
+
+  function buildTradingOutlineLayer(nodes){
+    try {
+      if (!Array.isArray(nodes) || !nodes.length) return null;
+      if (typeof PathLayer !== 'function') return null;
+      const DashExt = PathStyleExtension || window.deck?.PathStyleExtension;
+      if (typeof DashExt !== 'function') return null;
+      const dashed = nodes.filter(n => n && n.strokeStyle === 'dashed' && Array.isArray(n.position));
+      if (!dashed.length) return null;
+      const data = dashed.map(n => {
+        const radius = Math.max(2.8, (n.radius || 3) + 2.2);
+        const segments = 28;
+        const path = [];
+        for (let i = 0; i <= segments; i++) {
+          const ang = (i / segments) * Math.PI * 2;
+          path.push([
+            n.position[0] + Math.cos(ang) * radius,
+            n.position[1] + Math.sin(ang) * radius,
+            0
+          ]);
+        }
+        return { path, color: nodeStrokeColor(n) };
+      });
+      if (!data.length) return null;
+      return new PathLayer({
+        id: 'trading-outline-dashed',
+        data,
+        coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+        getPath: d => d.path,
+        getColor: d => d.color,
+        widthUnits: 'pixels',
+        widthMinPixels: 1,
+        getWidth: 1,
+        dashArray: [6, 4],
+        dashJustified: true,
+        parameters: { depthTest: false },
+        extensions: [ new DashExt({ dash: true }) ]
+      });
+    } catch {
+      return null;
+    }
   }
 
   function ensurePositionAttribute(){
@@ -1024,6 +1119,35 @@ const center = document.querySelector('.center-panel');
   function startUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount++; el.hidden=false; }
   function stopUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount=Math.max(0,loadCount-1); if(loadCount===0) el.hidden=true; }
 
+  async function loadHeaderStats(){
+    try {
+      const stats = await jfetch(API.stats);
+      if (!stats) return;
+      const supplyVal = stats?.supply ?? stats?.tokens ?? null;
+      const holdersVal = stats?.holders ?? null;
+      const floorVal = stats?.floor ?? null;
+      const parts = [];
+      if (supplyVal != null) parts.push(`Supply: ${Number(supplyVal).toLocaleString()}`);
+      if (holdersVal != null) parts.push(`Holders: ${Number(holdersVal).toLocaleString()}`);
+      const floorFmt = formatTia(floorVal);
+      if (floorFmt != null) parts.push(`Floor: ${floorFmt} TIA`);
+      if (!parts.length) return;
+      const logo = document.querySelector('.logo-wrap');
+      if (!logo) return;
+      let statsEl = document.getElementById('header-stats');
+      if (!statsEl) {
+        statsEl = document.createElement('div');
+        statsEl.id = 'header-stats';
+        statsEl.className = 'small-meta';
+        statsEl.style.marginLeft = 'var(--pad-12)';
+        statsEl.style.opacity = '0.75';
+        statsEl.style.whiteSpace = 'nowrap';
+        logo.appendChild(statsEl);
+      }
+      statsEl.textContent = parts.join(' | ');
+    } catch {}
+  }
+
 function computeConstellationPaths(nodes, pdata){
     const tk = pdata?.tokenTraitKey||[]; const freq = new Map(); tk.forEach(k=>{ if (k>=0) freq.set(k,(freq.get(k)||0)+1); });
     const groups = new Map(); nodes.forEach(n=>{ const k=tk[n.tokenId]; const f=freq.get(k)||0; if (k>=0 && f>=3 && f<=30){ if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(n); } });
@@ -1088,28 +1212,52 @@ function buildFlowParticles(limit=600){
       }
       // If we have richer local paths from DB, prefer them
       try { if (t && (t.thumbnail_local || t.image_local) && thumb){ thumb.style.display='block'; thumb.src = `/${t.thumbnail_local||t.image_local}`; } } catch {}
-      // Pull story + listings + wallet meta
-      const [story, listings, walletMeta] = await Promise.all([
+      // Pull story + listings + wallet meta + similar tokens
+      const [story, listings, walletMeta, similar] = await Promise.all([
         jfetch(API.story(id)),
         jfetch(`/api/token/${id}/listings`),
-        t.owner ? jfetch(`/api/wallet/${t.owner}/meta`) : null
+        t.owner ? jfetch(`/api/wallet/${t.owner}/meta`) : null,
+        jfetch(`/api/token/${id}/similar-advanced`)
       ]);
-      const birth = story?.birth_date? (timeAgo(Number(story.birth_date)*1000)+' ago') : '--';
+      const birth = story?.birth_date ? (timeAgo(Number(story.birth_date) * 1000) + ' ago') : '--';
       const owners = story?.total_owners ?? '--';
-      const peak = story?.peak_price!=null? (Math.round(story.peak_price*100)/100 + ' TIA') : '--';
-      const ethos = (walletMeta && typeof walletMeta.ethos_score==='number') ? Math.round(walletMeta.ethos_score) : (t?.ethos?.score!=null? Math.round(t.ethos.score): null);
-      const realized = walletMeta?.realized_pnl_tia != null ? Math.round(walletMeta.realized_pnl_tia*100)/100 : null;
-      const buyVol = walletMeta?.buy_volume_tia != null ? Math.round(walletMeta.buy_volume_tia*100)/100 : null;
-      const sellVol = walletMeta?.sell_volume_tia != null ? Math.round(walletMeta.sell_volume_tia*100)/100 : null;
-      const lastBuy = (t?.last_buy_price!=null) ? (Math.round(Number(t.last_buy_price)*100)/100 + ' TIA') : '--';
-      const lastSale = (t?.last_sale_price!=null) ? (Math.round(Number(t.last_sale_price)*100)/100 + ' TIA') : '--';
+      const peak = formatTiaLabel(story?.peak_price);
+      const ethosScore = Number.isFinite(Number(walletMeta?.ethos_score)) ? Math.round(Number(walletMeta.ethos_score)) : (Number.isFinite(Number(t?.ethos?.score)) ? Math.round(Number(t.ethos.score)) : null);
+      const realizedLabel = formatTiaLabel(walletMeta?.realized_pnl_tia);
+      const buyVolLabel = formatTiaLabel(walletMeta?.buy_volume_tia);
+      const sellVolLabel = formatTiaLabel(walletMeta?.sell_volume_tia);
+      const lastBuy = formatTiaLabel(t?.last_buy_price);
+      const lastSale = formatTiaLabel(t?.last_sale_price);
       const holdDays = t.hold_days!=null ? Math.round(Number(t.hold_days)) : '--';
       const traitsRows = (t.traits||[]).slice(0,18).map(a=>`<div class='label'>${a.trait_type}</div><div class='value'>${a.trait_value}</div>`).join('');
-      const listingRows = (listings?.listings||[]).slice(0,6).map(l=>`<div class='label'>${l.platform||l.marketplace||'MARKET'}</div><div class='value'>${(l.price!=null? (Math.round(l.price*100)/100+' TIA') : '--')}</div>`).join('');
-      const ethosCard = (ethos!=null) ? `
+      const listingsArr = Array.isArray(listings?.listings) ? listings.listings : [];
+      const listingRows = listingsArr.slice(0,6).map(l=>{
+        const price = formatTiaLabel(l?.price_tia ?? l?.price);
+        return `<div class='label'>${l?.platform || l?.marketplace || 'MARKET'}</div><div class='value'>${price}</div>`;
+      }).join('');
+      let bestAskValue = null;
+      for (const entry of listingsArr){
+        const status = (entry?.status || '').toLowerCase();
+        if (status && !['active','listed','live','open'].includes(status)) continue;
+        const val = formatTia(entry?.price_tia ?? entry?.price);
+        if (val == null) continue;
+        if (bestAskValue == null || val < bestAskValue) bestAskValue = val;
+      }
+      const bestAskLine = bestAskValue != null ? `<div class='listing-meta'>Best ask: ${bestAskValue} TIA</div>` : '';
+      const credScore = Number.isFinite(Number(walletMeta?.ethos_score)) ? Math.round(Number(walletMeta.ethos_score)) : null;
+      const credLine = credScore != null ? `<div class='small-meta'>Cred: ${credScore}</div>` : '';
+      const similarArr = Array.isArray(similar?.similar) ? similar.similar : [];
+      const similarLinks = similarArr
+        .map(s => Number(s?.token_id ?? s?.id ?? s))
+        .filter(n => Number.isFinite(n) && n > 0 && n !== id)
+        .slice(0, 6)
+        .map(n => `<a href="#" class="similar-link" data-token="${n}">#${n}</a>`)
+        .join(', ');
+      const similarLine = similarLinks ? `<div class='small-meta'>Similar: ${similarLinks}</div>` : '';
+      const ethosCard = (ethosScore != null) ? `
         <div class='card'>
           <div class='label'>ETHOS</div>
-          <div class='big-number'>${ethos}</div>
+          <div class='big-number'>${ethosScore}</div>
         </div>` : `
         <div class='card'>
           <div class='label'>ETHOS</div>
@@ -1120,23 +1268,26 @@ function buildFlowParticles(limit=600){
         <div class='token-title'>MAMMOTH #${String(id).padStart(4,'0')}</div>
         <div class='section-label'>OWNER</div>
         <div class='address'>${(t?.owner||'').slice(0,6)}...${(t?.owner||'').slice(-4)}</div>
+        ${credLine}
+        ${similarLine}
         <div class='card2'>
           ${ethosCard}
           <div class='card'><div class='label'>HOLDINGS</div><div class='big-number'>${walletMeta?.total_holdings ?? '--'}</div></div>
         </div>
         <div class='card2'>
-          <div class='card'><div class='label'>REALIZED PNL</div><div class='big-number'>${realized!=null? (realized+' TIA') : '--'}</div></div>
+          <div class='card'><div class='label'>REALIZED PNL</div><div class='big-number'>${realizedLabel}</div></div>
           <div class='card'><div class='label'>TRADES</div><div class='big-number'>${walletMeta?.trade_count ?? '--'}</div></div>
         </div>
         <div class='card2'>
-          <div class='card'><div class='label'>SPEND</div><div class='big-number'>${buyVol!=null? (buyVol+' TIA') : '--'}</div></div>
-          <div class='card'><div class='label'>REVENUE</div><div class='big-number'>${sellVol!=null? (sellVol+' TIA') : '--'}</div></div>
+          <div class='card'><div class='label'>SPEND</div><div class='big-number'>${buyVolLabel}</div></div>
+          <div class='card'><div class='label'>REVENUE</div><div class='big-number'>${sellVolLabel}</div></div>
         </div>
         <div class='section-label'>STORY</div>
         <div class='card2'>
           <div class='card'><div class='label'>LAST BUY</div><div class='big-number'>${lastBuy}</div></div>
           <div class='card'><div class='label'>LAST SALE</div><div class='big-number'>${lastSale}</div></div>
         </div>
+        ${bestAskLine}
         <div class='card2'>
           <div class='card'><div class='label'>BIRTH</div><div class='big-number'>${birth}</div></div>
           <div class='card'><div class='label'>OWNERS</div><div class='big-number'>${owners}</div></div>
@@ -1150,6 +1301,16 @@ function buildFlowParticles(limit=600){
         <div class='section-label'>TRAITS</div>
         <div class='traits-table'>${traitsRows}</div>
       `;
+      if (similarLinks) {
+        const links = detailsEl.querySelectorAll('.similar-link');
+        links.forEach(link => {
+          link.addEventListener('click', evt => {
+            evt.preventDefault();
+            const tok = Number(link.dataset.token);
+            if (tok > 0) focusSelect(tok);
+          });
+        });
+      }
       // HISTORY feed (compact) if story.events exists
       try {
         const feed = Array.isArray(story?.events) ? story.events.slice(0,10) : [];
@@ -1181,6 +1342,17 @@ function buildFlowParticles(limit=600){
   function timeAgo(ms){
     const s = Math.max(1, Math.floor((Date.now()-ms)/1000));
     const d = Math.floor(s/86400); if (d>=1) return `${d} day${d>1?'s':''}`; const h=Math.floor(s/3600); if (h>=1) return `${h} hour${h>1?'s':''}`; const m=Math.floor(s/60); if (m>=1) return `${m} min${m>1?'s':''}`; return `${s}s`;
+  }
+
+  function formatTia(value){
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    return Math.round(num * 100) / 100;
+  }
+
+  function formatTiaLabel(value){
+    const val = formatTia(value);
+    return val != null ? `${val} TIA` : '--';
   }
 
   // Helpers
@@ -1267,14 +1439,22 @@ function buildFlowParticles(limit=600){
       const holdingsArr = Array.isArray(ownerHoldings) ? ownerHoldings : [];
       const buyArr = Array.isArray(pdata?.ownerBuyVol) ? pdata.ownerBuyVol : [];
       const sellArr = Array.isArray(pdata?.ownerSellVol) ? pdata.ownerSellVol : [];
+      const activeMode = effectiveMode(currentMode);
       for (const n of nodes){
         const oi = n.ownerIndex;
         const hold = Math.max(0, Number(holdingsArr[oi] ?? 0));
         const buy = Math.max(0, Number(buyArr[oi] ?? 0));
         const sell = Math.max(0, Number(sellArr[oi] ?? 0));
-        const sum = hold + buy + sell;
-        const metric = Math.log10(Math.max(1, sum));
-        n.radius = clamp(2 + metric, 2, 7);
+        if (activeMode === 'whales') {
+          const vol = buy + sell;
+          const metric = Math.log10(Math.max(1, vol));
+          n.tradeVolume = vol;
+          n.radius = clamp(2.5 + metric * 1.5, 2.5, 11);
+        } else {
+          const sum = hold + buy + sell;
+          const metric = Math.log10(Math.max(1, sum));
+          n.radius = clamp(2 + metric, 2, 7);
+        }
       }
     } catch {}
   }
@@ -1914,8 +2094,10 @@ function buildFlowParticles(limit=600){
       const detailsEl = document.getElementById('details');
       const thumb = document.getElementById('thumb'); if (thumb) thumb.style.display='none';
       const ethos = meta?.ethos_score!=null? Math.round(meta.ethos_score): 'N/A';
+      const credLine = Number.isFinite(Number(meta?.ethos_score)) ? `<div class='small-meta'>Cred: ${Math.round(Number(meta.ethos_score))}</div>` : '';
       detailsEl.innerHTML = `
         <div class='token-title'>${meta.ens_name || addr}</div>
+        ${credLine}
         <div class='section-label'>HOLDINGS</div>
         <div class='big-number'>${meta.total_holdings ?? '--'}</div>
         <div class='card2'>

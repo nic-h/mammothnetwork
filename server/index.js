@@ -336,6 +336,20 @@ function getOwnerTokens(dbRef, owner, N) {
   return dbRef.prepare('SELECT id FROM tokens WHERE LOWER(owner)=? AND id<=? ORDER BY id').all(owner, N).map(r => r.id);
 }
 
+function getRepToken(dbRef, owner, N) {
+  if (!owner) return null;
+  const holding = dbRef.prepare(
+    'SELECT id FROM tokens WHERE LOWER(owner)=? AND id<=? ORDER BY id LIMIT 1'
+  ).get(owner, N);
+  if (holding?.id) return holding.id;
+  const traded = dbRef.prepare(
+    `SELECT token_id FROM transfers
+     WHERE (LOWER(from_addr)=? OR LOWER(to_addr)=?) AND token_id<=?
+     ORDER BY timestamp DESC LIMIT 1`
+  ).get(owner, owner, N);
+  return traded?.token_id || null;
+}
+
 function degreeLimitedPush(edges, a, b, degree, cap) {
   if (a === b) return false;
   if ((degree.get(a) || 0) >= cap) return false;
@@ -371,15 +385,15 @@ function buildEdgesFromWallets(N, maxEdges) {
     FROM transfers
     WHERE from_addr IS NOT NULL AND from_addr<>'' AND to_addr IS NOT NULL AND to_addr<>'' AND token_id<=?
     GROUP BY a,b
-    HAVING cnt >= 2
+    HAVING cnt >= 1
     ORDER BY cnt DESC
     LIMIT 1000
   `).all(N);
   for (const p of pairs) {
-    const aTokens = getOwnerTokens(db, p.a, N);
-    const bTokens = getOwnerTokens(db, p.b, N);
-    if (!aTokens.length || !bTokens.length) continue;
-    degreeLimitedPush(edges, aTokens[0], bTokens[0], degree, 6);
+    const aTok = getRepToken(db, p.a, N);
+    const bTok = getRepToken(db, p.b, N);
+    if (!aTok || !bTok) continue;
+    degreeLimitedPush(edges, aTok, bTok, degree, 6);
     if (edges.length >= maxEdges) break;
   }
   return edges;
@@ -483,10 +497,8 @@ app.get('/api/transfer-edges', (req, res) => {
       const a = (r.a || '').toLowerCase();
       const b = (r.b || '').toLowerCase();
       if (!a || !b) continue;
-      const aTokens = getOwnerTokens(db, a, N);
-      const bTokens = getOwnerTokens(db, b, N);
-      const aTok = aTokens[0] || null;
-      const bTok = bTokens[0] || null;
+      const aTok = getRepToken(db, a, N);
+      const bTok = getRepToken(db, b, N);
       if (!aTok || !bTok) continue;
       let type = 'transfer';
       if (r.mints > 0 && r.sales === 0) type = 'mint';
@@ -506,15 +518,29 @@ app.get('/api/stats', (req, res) => {
   if (haveDb && db) {
     try {
       const tokenTable = detectTokenTable();
-      const tokenCount = tokenTable ? db.prepare(`SELECT COUNT(1) as c FROM ${tokenTable}`).get().c : null;
-      const holdersRow = db.prepare('SELECT holders as h FROM collection_stats WHERE id=1').get?.();
-      const holders = holdersRow ? holdersRow.h : null;
-      return res.json({ haveDb: true, tokens: tokenCount, holders });
+      const tokenCountRow = tokenTable
+        ? db.prepare(`SELECT COUNT(1) as c FROM ${tokenTable}`).get()
+        : null;
+      const statsRow = db.prepare('SELECT total_supply, holders, floor_price FROM collection_stats WHERE id=1').get?.();
+      const supplyRaw = statsRow?.total_supply ?? tokenCountRow?.c ?? null;
+      const holdersRow = statsRow?.holders != null
+        ? { c: statsRow.holders }
+        : db.prepare('SELECT COUNT(DISTINCT LOWER(owner)) AS c FROM tokens WHERE owner IS NOT NULL AND owner<>""').get?.();
+      const holders = holdersRow?.c ?? null;
+      let floor = statsRow?.floor_price ?? null;
+      if (floor == null) {
+        const floorRow = db.prepare('SELECT MIN(last_sale_price) AS floor FROM tokens WHERE last_sale_price IS NOT NULL AND last_sale_price > 0').get?.();
+        floor = floorRow?.floor ?? null;
+      }
+      const supply = supplyRaw != null ? Number(supplyRaw) : null;
+      const holdersCount = holders != null ? Number(holders) : null;
+      const floorPrice = floor != null ? Number(floor) : null;
+      return res.json({ haveDb: true, tokens: tokenCountRow?.c ?? null, supply, holders: holdersCount, floor: floorPrice });
     } catch (e) {
       // fallthrough
     }
   }
-  res.json({ haveDb: false, tokens: 10000 });
+  res.json({ haveDb: false, tokens: 10000, supply: 10000, holders: null, floor: null });
 });
 
 // API: Minimal activity stub (placeholder for Modularium)
