@@ -96,8 +96,7 @@ const center = document.querySelector('.center-panel');
     graph: '/api/graph',
     preset: '/api/preset-data',
     token: id => `/api/token/${id}`,
-    story: id => `/api/token/${id}/story`,
-    stats: '/api/stats'
+    story: id => `/api/token/${id}/story`
   };
 
   function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
@@ -215,7 +214,6 @@ const center = document.querySelector('.center-panel');
   async function init(){
     startUILoad();
     presetData = await jfetch(API.preset) || null;
-    loadHeaderStats().catch(()=>{});
     let __firstDrawn = false;
     try { window.__mammothDrawnFrame = false; } catch {}
     deckInst = new Deck({
@@ -1119,34 +1117,6 @@ const center = document.querySelector('.center-panel');
   function startUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount++; el.hidden=false; }
   function stopUILoad(){ const el=document.getElementById('top-loader'); if(!el) return; loadCount=Math.max(0,loadCount-1); if(loadCount===0) el.hidden=true; }
 
-  async function loadHeaderStats(){
-    try {
-      const stats = await jfetch(API.stats);
-      if (!stats) return;
-      const supplyVal = stats?.supply ?? stats?.tokens ?? null;
-      const holdersVal = stats?.holders ?? null;
-      const floorVal = stats?.floor ?? null;
-      const parts = [];
-      if (supplyVal != null) parts.push(`Supply: ${Number(supplyVal).toLocaleString()}`);
-      if (holdersVal != null) parts.push(`Holders: ${Number(holdersVal).toLocaleString()}`);
-      const floorFmt = formatTia(floorVal);
-      if (floorFmt != null) parts.push(`Floor: ${floorFmt} TIA`);
-      if (!parts.length) return;
-      const logo = document.querySelector('.logo-wrap');
-      if (!logo) return;
-      let statsEl = document.getElementById('header-stats');
-      if (!statsEl) {
-        statsEl = document.createElement('div');
-        statsEl.id = 'header-stats';
-        statsEl.className = 'small-meta';
-        statsEl.style.marginLeft = 'var(--pad-12)';
-        statsEl.style.opacity = '0.75';
-        statsEl.style.whiteSpace = 'nowrap';
-        logo.appendChild(statsEl);
-      }
-      statsEl.textContent = parts.join(' | ');
-    } catch {}
-  }
 
 function computeConstellationPaths(nodes, pdata){
     const tk = pdata?.tokenTraitKey||[]; const freq = new Map(); tk.forEach(k=>{ if (k>=0) freq.set(k,(freq.get(k)||0)+1); });
@@ -1213,12 +1183,12 @@ function buildFlowParticles(limit=600){
       // If we have richer local paths from DB, prefer them
       try { if (t && (t.thumbnail_local || t.image_local) && thumb){ thumb.style.display='block'; thumb.src = `/${t.thumbnail_local||t.image_local}`; } } catch {}
       // Pull story + listings + wallet meta + similar tokens
-      const [story, listings, walletMeta, similar] = await Promise.all([
-        jfetch(API.story(id)),
-        jfetch(`/api/token/${id}/listings`),
-        t.owner ? jfetch(`/api/wallet/${t.owner}/meta`) : null,
-        jfetch(`/api/token/${id}/similar-advanced`)
-      ]);
+    const [story, listings, walletMeta, similar] = await Promise.all([
+      jfetch(API.story(id)),
+      jfetch(`/api/token/${id}/listings`),
+      t.owner ? jfetch(`/api/wallet/${t.owner}/meta`) : null,
+      jfetch(`/api/token/${id}/similar-advanced`)
+    ]);
       const birth = story?.birth_date ? (timeAgo(Number(story.birth_date) * 1000) + ' ago') : '--';
       const owners = story?.total_owners ?? '--';
       const peak = formatTiaLabel(story?.peak_price);
