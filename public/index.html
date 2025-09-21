@@ -33,7 +33,7 @@
       <div class="controls-section">
         <!-- VIEW at top; header left-aligned like others -->
         <div class="view-selector panel-view" aria-label="Views" style="margin-bottom: var(--pad-12);">
-          <div class="panel-title" style="text-align:left;">VIEW</div>
+          <label class="panel-title" style="text-align:left;" for="view">VIEW</label>
           <select id="view" aria-label="Views" hidden>
             <option value="dots">DOTS — OWNERSHIP STATE</option>
             <option value="flow">FLOW — MARKET FLOWS</option>
@@ -47,7 +47,7 @@
             <button type="button" class="view-btn" data-view-btn="rhythm">RHYTHM — TIME × PRICE</button>
           </div>
         </div>
-        <div class="mode-selector">
+        <div class="mode-selector" hidden>
           <label for="mode">MODE</label>
           <select id="mode">
             <option value="holders">HOLDERS</option>
@@ -97,16 +97,10 @@
               <div class="layer-toggle"><label>Mints</label><input type="checkbox" id="layer-mints"></div>
             </div>
           </div>
-          <div class="edge-group" data-group="analysis">
-            <div class="edge-group-header" role="button" tabindex="0" aria-expanded="false" aria-controls="analysis-body">ANALYSIS <span class="twist">▶</span></div>
-            <div id="analysis-body" class="edge-group-body">
-              <div class="layer-toggle"><label>High Value</label><input type="checkbox" id="layer-value"></div>
-            </div>
-          </div>
         </div>
       </div>
       <div class="traits-section">
-        <div class="panel-title traits-header" role="button" tabindex="0" aria-expanded="false" aria-controls="traits-body"><span class="twist">▶</span> TRAITS</div>
+        <div class="panel-title traits-header" role="button" tabindex="0" aria-expanded="false" aria-controls="traits-body">TRAITS <span class="twist">▶</span></div>
         <div id="traits-body" class="traits-body">
           <button id="clear-filters" class="btn btn--preset preset-btn" style="width:100%;margin-bottom: var(--pad-12);">CLEAR FILTERS</button>
           <div id="traits-container"></div>

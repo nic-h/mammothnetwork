@@ -89,6 +89,19 @@ const center = document.querySelector('.center-panel');
   if (stage) stage.style.display = 'none';
   if (!center) return;
 
+  try {
+    const logoWrap = document.querySelector('.logo-wrap');
+    if (logoWrap) {
+      const statusDot = logoWrap.querySelector('.status-dot');
+      logoWrap.innerHTML = '';
+      const brand = document.createElement('div');
+      brand.className = 'logo';
+      brand.textContent = 'Mammoths.network';
+      logoWrap.appendChild(brand);
+      if (statusDot) logoWrap.appendChild(statusDot);
+    }
+  } catch {}
+
   const {Deck, ScatterplotLayer, LineLayer, TextLayer, PolygonLayer, ArcLayer, ScreenGridLayer, HexagonLayer, HeatmapLayer, PathLayer, PointCloudLayer, GPUGridLayer, ContourLayer, OrthographicView, COORDINATE_SYSTEM, PathStyleExtension} = window.deck || {};
   if (!Deck) { console.error('Deck.gl UMD not found'); return; }
 
@@ -145,6 +158,7 @@ const center = document.querySelector('.center-panel');
   let heatmapLoading = false;
   // Binary attribute backing store for node positions (auto-resized per render)
   let positionAttribute = null;
+  const traitsFallback = new Map(); // type -> Map(value -> count)
 
   // UI toggles reflect left panel checkboxes
   const ui = {
@@ -509,6 +523,57 @@ const center = document.querySelector('.center-panel');
         radius: 2,
       };
     }).map(d=>{ const c=nodeColor(d); d.baseColor=c.slice(); d.color=c.slice(); return d; });
+  }
+
+  function addTraitsToFallback(list){
+    if (!Array.isArray(list)) return;
+    for (const entry of list){
+      const type = String(entry?.trait_type || entry?.type || '').trim();
+      const value = String(entry?.trait_value || entry?.value || '').trim();
+      if (!type || !value) continue;
+      if (!traitsFallback.has(type)) traitsFallback.set(type, new Map());
+      const bucket = traitsFallback.get(type);
+      bucket.set(value, (bucket.get(value) || 0) + 1);
+    }
+  }
+
+  function getFallbackTraitGroups(){
+    const groups = [];
+    traitsFallback.forEach((bucket, type) => {
+      const values = Array.from(bucket.entries())
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => b.count - a.count);
+      groups.push({ type, values });
+    });
+    groups.sort((a, b) => a.type.localeCompare(b.type));
+    return groups;
+  }
+
+  function renderTraitGroups(container, groups){
+    groups.forEach(group => {
+      const type = String(group?.type || '').trim();
+      if (!type) return;
+      const wrap = document.createElement('div'); wrap.className='trait-group';
+      const header = document.createElement('div'); header.className='trait-header'; header.innerHTML = `${type} <span class="twist">▶</span>`;
+      const valuesEl = document.createElement('div'); valuesEl.className='trait-values'; valuesEl.style.display = 'none';
+      const list = Array.isArray(group?.values) ? group.values : [];
+      list.forEach(item => {
+        const value = String(item?.value ?? item?.[0] ?? '').trim();
+        const count = Number(item?.count ?? item?.[1] ?? 0);
+        if (!value) return;
+        const val = document.createElement('div');
+        val.className = 'trait-value';
+        val.textContent = count ? `${value} (${count})` : value;
+        val.dataset.type = type;
+        val.dataset.value = value;
+        val.addEventListener('click', onTraitClick);
+        valuesEl.appendChild(val);
+      });
+      header.addEventListener('click', ()=>{ const open = valuesEl.style.display!=='block'; valuesEl.style.display=open?'block':'none'; const twist = header.querySelector('.twist'); if (twist) twist.textContent = open ? '▼' : '▶'; });
+      wrap.appendChild(header);
+      wrap.appendChild(valuesEl);
+      container.appendChild(wrap);
+    });
   }
 
   function buildEdges(apiEdges, nodes){
@@ -1223,7 +1288,10 @@ function buildFlowParticles(limit=600){
       const lastBuy = formatTiaLabel(t?.last_buy_price);
       const lastSale = formatTiaLabel(t?.last_sale_price);
       const holdDays = t.hold_days!=null ? Math.round(Number(t.hold_days)) : '--';
-      const traitsRows = (t.traits||[]).slice(0,18).map(a=>`<div class='label'>${a.trait_type}</div><div class='value'>${a.trait_value}</div>`).join('');
+      const traitsArray = Array.isArray(t?.traits) ? t.traits : [];
+      const traitsRows = traitsArray.slice(0,18).map(a=>`<div class='label'>${a.trait_type}</div><div class='value'>${a.trait_value}</div>`).join('');
+      addTraitsToFallback(traitsArray);
+      buildTraitsUI();
       const listingsArr = Array.isArray(listings?.listings) ? listings.listings : [];
       const listingRows = listingsArr.slice(0,6).map(l=>{
         const price = formatTiaLabel(l?.price_tia ?? l?.price);
@@ -2106,26 +2174,19 @@ function buildFlowParticles(limit=600){
     const container = document.getElementById('traits-container');
     if (!container) return;
     container.innerHTML = '';
-    const r = await jfetch(`/api/traits?v=${Date.now()}`);
-    if (!r || !r.ok) return;
-    const j = await r.json(); const groups = j.traits || [];
-    if (!groups.length){
+    let groups = [];
+    try {
+      const data = await jfetch(`/api/traits?v=${Date.now()}`);
+      if (data && Array.isArray(data.traits)) groups = data.traits;
+    } catch {}
+    if (!Array.isArray(groups) || !groups.length) {
+      groups = getFallbackTraitGroups();
+    }
+    if (!Array.isArray(groups) || !groups.length) {
       container.innerHTML = `<div class='small-meta'>Traits dataset not available.</div>`;
       return;
     }
-    for (const g of groups){
-      const wrap = document.createElement('div'); wrap.className='trait-group';
-      const header = document.createElement('div'); header.className='trait-header'; header.innerHTML = `<span class="twist">▶</span> ${g.type}`;
-      const values = document.createElement('div'); values.className='trait-values';
-      for (const v of g.values || []){
-        const val = document.createElement('div'); val.className='trait-value'; val.textContent = `${v.value} (${v.count})`;
-        val.dataset.type = g.type; val.dataset.value = v.value;
-        val.addEventListener('click', onTraitClick);
-        values.appendChild(val);
-      }
-      header.addEventListener('click', ()=>{ const open = values.style.display!=='block'; values.style.display=open?'block':'none'; header.querySelector('.twist').textContent = open?'▼':'▶'; });
-      wrap.appendChild(header); wrap.appendChild(values); container.appendChild(wrap);
-    }
+    renderTraitGroups(container, groups);
   }
 
   async function onTraitClick(e){

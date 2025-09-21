@@ -32,7 +32,7 @@ button { font: inherit; }
 
 .logo-wrap { display: flex; align-items: center; gap: var(--pad-8); padding-left: var(--pad-16); }
 .logo {
-  font-weight: 700;
+  font-weight: var(--fw-regular);
   font-size: var(--fs-18);
   font-family: 'Fira Code', var(--font-mono);
   animation: logo-glow 3s ease-in-out infinite;
@@ -41,21 +41,17 @@ button { font: inherit; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg); box-shadow: 0 0 8px rgba(var(--green-rgb), .75); }
 
 .header-controls {
-  grid-column: 2 / 4;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--pad-16);
+  grid-column: 2;
+  display: flex;
+  justify-content: flex-start;
   padding-right: var(--pad-16);
-  min-width: 0;
+  width: var(--col-left);
 }
 .header-actions { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: var(--pad-8); }
 
 #search {
-  grid-column: 2;            /* was 3 */
-  justify-self: start;       /* align left */
-  width: var(--col-left);    /* cap to left panel width */
-  max-width: var(--col-left);
+  width: 100%;
+  max-width: 100%;
   margin: 0;                 /* remove extra right margin */
   height: var(--ctl-h);
   padding: 0 var(--pad-8);
@@ -167,6 +163,10 @@ input[type="checkbox"]:checked::after{
   letter-spacing: .08em;
   cursor: pointer;
   transition: background 160ms ease, box-shadow 160ms ease;
+  width: 100%;
+  min-height: var(--ctl-h);
+  display: flex;
+  align-items: center;
 }
 
 .view-btn.active {
@@ -207,7 +207,7 @@ input[type="checkbox"]:checked::after{
 .edge-group.open .edge-group-header .twist, .traits-section.open .traits-header .twist { transform: rotate(90deg); }
 
 /* Right Panel */
-#thumb { width: 100%; max-width: 100%; border: 1px solid rgba(var(--green-rgb), .15); margin-bottom: var(--pad-12); }
+#thumb { width: 100%; max-width: 100%; border: none; margin-bottom: var(--pad-12); }
 #details { border: 1px solid rgba(var(--green-rgb), .12); background: rgba(0,0,0,.2); padding: var(--pad-16); word-break: break-word; }
 .card { border: 1px solid rgba(var(--green-rgb), .15); background: var(--card-bg); padding: var(--pad-8); }
 .card2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pad-12); margin: var(--pad-12) 0; }
