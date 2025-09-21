@@ -149,6 +149,31 @@ input[type="checkbox"]:checked::after{
 .layer-toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--pad-8); }
 .layer-toggle label { text-transform: uppercase; font-size: var(--fs-10); letter-spacing: .08em; }
 
+.view-buttons {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--pad-6);
+  margin-top: var(--pad-8);
+}
+
+.view-btn {
+  border: var(--border);
+  background: var(--card-bg);
+  color: var(--fg);
+  padding: var(--pad-8);
+  text-align: left;
+  font-size: var(--fs-11);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  cursor: pointer;
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.view-btn.active {
+  background: rgba(var(--green-rgb), .15);
+  box-shadow: 0 0 10px rgba(var(--green-rgb), .35);
+}
+
 .colors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pad-6); font-size: var(--fs-10); text-transform: uppercase; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: var(--pad-6); box-shadow: 0 0 6px rgba(var(--green-rgb), .4); }
 .sw--active { background: var(--fg); }

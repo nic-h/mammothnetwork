@@ -26,16 +26,6 @@
         spellcheck="false"
         title="Search token, ENS, or wallet"
       >
-      <div class="header-actions">
-        <div class="more">
-          <button id="more-btn" class="btn btn--chip tooltipped" title="More" data-tooltip="MORE" aria-haspopup="menu" aria-expanded="false" aria-controls="more-panel"><span aria-hidden="true">•••</span></button>
-          <div id="more-panel" class="more-panel" role="menu" hidden>
-            <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="edges">EDGE LAYERS</button>
-            <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="traits">TRAITS</button>
-            <button class="menu-item" role="menuitem" tabindex="-1" data-action="ambient">AMBIENT EDGES</button>
-          </div>
-        </div>
-      </div>
     </div>
   </header>
   <div class="main-container">
@@ -43,18 +33,19 @@
       <div class="controls-section">
         <!-- VIEW at top; header left-aligned like others -->
         <div class="view-selector panel-view" aria-label="Views" style="margin-bottom: var(--pad-12);">
-          <label class="panel-title" style="text-align:left;" for="view">VIEW</label>
-          <select id="view" aria-label="Views">
+          <div class="panel-title" style="text-align:left;">VIEW</div>
+          <select id="view" aria-label="Views" hidden>
             <option value="dots">DOTS — OWNERSHIP STATE</option>
             <option value="flow">FLOW — MARKET FLOWS</option>
             <option value="tree">TREE — LIFECYCLE</option>
             <option value="rhythm">RHYTHM — TIME × PRICE</option>
-            <option value="ownership">OWNERSHIP NETWORK</option>
-            <option value="trading">TRADING ACTIVITY</option>
-            <option value="traits">TRAIT EXPLORER</option>
-            <option value="whales">WHALE WATCH</option>
-            <option value="health">COLLECTION HEALTH</option>
           </select>
+          <div class="view-buttons" id="view-buttons" role="group" aria-label="Views">
+            <button type="button" class="view-btn active" data-view-btn="dots">DOTS — OWNERSHIP STATE</button>
+            <button type="button" class="view-btn" data-view-btn="flow">FLOW — MARKET FLOWS</button>
+            <button type="button" class="view-btn" data-view-btn="tree">TREE — LIFECYCLE</button>
+            <button type="button" class="view-btn" data-view-btn="rhythm">RHYTHM — TIME × PRICE</button>
+          </div>
         </div>
         <div class="mode-selector">
           <label for="mode">MODE</label>

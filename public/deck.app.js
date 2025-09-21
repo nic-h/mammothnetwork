@@ -89,7 +89,7 @@ const center = document.querySelector('.center-panel');
   if (stage) stage.style.display = 'none';
   if (!center) return;
 
-  const {Deck, ScatterplotLayer, LineLayer, TextLayer, PolygonLayer, ArcLayer, ScreenGridLayer, HexagonLayer, HeatmapLayer, PathLayer, PointCloudLayer, GPUGridLayer, ContourLayer, OrthographicView, COORDINATE_SYSTEM, BrushingExtension, PathStyleExtension} = window.deck || {};
+  const {Deck, ScatterplotLayer, LineLayer, TextLayer, PolygonLayer, ArcLayer, ScreenGridLayer, HexagonLayer, HeatmapLayer, PathLayer, PointCloudLayer, GPUGridLayer, ContourLayer, OrthographicView, COORDINATE_SYSTEM, PathStyleExtension} = window.deck || {};
   if (!Deck) { console.error('Deck.gl UMD not found'); return; }
 
   const API = {
@@ -278,21 +278,49 @@ const center = document.querySelector('.center-panel');
     } catch {}
   }
 
+  async function handleViewChange(v){
+    if (!v) return;
+    setActiveViewButton(v);
+    if (SIMPLE_VIEW_NAMES.has(v)) {
+      await applySimpleView(v);
+      return;
+    }
+    currentSimpleView = null;
+    if (v==='ownership') await loadMode('holders', edgeCount);
+    else if (v==='trading') await loadMode('transfers', edgeCount);
+    else if (v==='traits') await loadMode('traits', edgeCount);
+    else if (v==='whales') await loadMode('wallets', edgeCount);
+    else if (v==='health') await loadMode('health', edgeCount);
+  }
+
+  function setActiveViewButton(name){
+    const buttons = document.querySelectorAll('[data-view-btn]');
+    buttons.forEach(btn => {
+      const key = btn.getAttribute('data-view-btn');
+      btn.classList.toggle('active', key === name);
+    });
+    const viewEl = document.getElementById('view');
+    if (viewEl) viewEl.value = name;
+  }
+
   function bindViewControls(){
     const viewEl = document.getElementById('view');
     if (viewEl && !viewEl.dataset.deckBound){
       viewEl.dataset.deckBound='1';
       viewEl.addEventListener('change', async ()=>{
-        const v = viewEl.value;
-        if (SIMPLE_VIEW_NAMES.has(v)) { await applySimpleView(v); return; }
-        currentSimpleView = null;
-        if (v==='ownership') await loadMode('holders', edgeCount);
-        else if (v==='trading') await loadMode('transfers', edgeCount);
-        else if (v==='traits') await loadMode('traits', edgeCount);
-        else if (v==='whales') await loadMode('wallets', edgeCount);
-        else if (v==='health') await loadMode('health', edgeCount);
+        handleViewChange(viewEl.value);
       });
     }
+    const viewButtons = document.querySelectorAll('[data-view-btn]');
+    viewButtons.forEach(btn => {
+      if (btn.dataset.deckBound) return;
+      btn.dataset.deckBound = '1';
+      btn.addEventListener('click', ()=>{
+        const v = btn.getAttribute('data-view-btn');
+        handleViewChange(v);
+      });
+    });
+    setActiveViewButton(viewEl?.value || 'dots');
     // Mode select (fallback)
     const modeEl = document.getElementById('mode');
     if (modeEl && !modeEl.dataset.deckBound){
@@ -655,7 +683,7 @@ const center = document.querySelector('.center-panel');
         new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(3, (d.radius||3)*2.4), getFillColor:d=>[d.color[0],d.color[1],d.color[2], Math.round(16 * overlayFade)], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
         // Neighbor edges on click
         (selectedId>0) && new LineLayer({ id:'click-edges', data: buildClickEdges(selectedId), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,180], getWidth:1.2, widthUnits:'pixels', parameters:{ depthTest:false } }),
-        new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=> (d.radius||3), radiusUnits:'pixels', radiusMinPixels:2, radiusMaxPixels:7, stroked:true, getLineWidth:nodeStrokeWidth, lineWidthUnits:'pixels', lineWidthMinPixels:0.5, getLineColor:nodeStrokeColor, getFillColor:d=>d.color, onClick: handleClick, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 }, extensions:[ new (BrushingExtension||window.deck.BrushingExtension)() ], brushingEnabled:true, brushingRadius:60, ...(nodePositionProps||{}) }),
+        new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=> (d.radius||3), radiusUnits:'pixels', radiusMinPixels:2, radiusMaxPixels:7, stroked:true, getLineWidth:nodeStrokeWidth, lineWidthUnits:'pixels', lineWidthMinPixels:0.5, getLineColor:nodeStrokeColor, getFillColor:d=>d.color, onClick: handleClick, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 }, ...(nodePositionProps||{}) }),
         mode==='transfers' && buildTradingOutlineLayer(nodes),
         // Subtle pulse rings for recently active tokens
         (showOverlays) && new ScatterplotLayer({ id:'pulses', data: nodes.filter(n=>recentActive(n)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> (d.radius||4) * (1.6 + 0.4*Math.sin(pulseT*2 + (d.id||0))), getLineColor:[TOKENS.fgBright[0], TOKENS.fgBright[1], TOKENS.fgBright[2], Math.max(0, Math.min(255, overlayAlpha))], lineWidthMinPixels:1, radiusUnits:'pixels', updateTriggers:{ getRadius: [pulseT] }, parameters:{ depthTest:false } }),
@@ -745,10 +773,7 @@ const center = document.querySelector('.center-panel');
       getLineColor: nodeStrokeColor,
       getFillColor: d => d.color,
       onClick: handleClick,
-      parameters: { blend: true, depthTest: false, blendFunc: [770, 1], blendEquation: 32774 },
-      extensions: [ new (BrushingExtension||window.deck.BrushingExtension)() ],
-      brushingEnabled: true,
-      brushingRadius: 60
+      parameters: { blend: true, depthTest: false, blendFunc: [770, 1], blendEquation: 32774 }
     };
     layers.push(new ScatterplotLayer(nodePositionProps ? { ...baseScatterProps, ...nodePositionProps } : baseScatterProps));
 
@@ -886,9 +911,8 @@ const center = document.querySelector('.center-panel');
 
   function bindShortcuts(){
     window.addEventListener('keydown', (e)=>{
-      const viewEl = document.getElementById('view'); if (!viewEl) return;
-      const map = { '1':'ownership','2':'trading','3':'traits','4':'whales','5':'health' };
-      if (map[e.key]){ viewEl.value = map[e.key]; viewEl.dispatchEvent(new Event('change')); }
+      const map = { '1':'dots','2':'flow','3':'tree','4':'rhythm' };
+      if (map[e.key]){ handleViewChange(map[e.key]); }
       if (e.key==='r' || e.key==='R'){ deckInst?.setProps({initialViewState:{target:[0,0,0], zoom:0}}); }
     });
   }
@@ -1183,12 +1207,12 @@ function buildFlowParticles(limit=600){
       // If we have richer local paths from DB, prefer them
       try { if (t && (t.thumbnail_local || t.image_local) && thumb){ thumb.style.display='block'; thumb.src = `/${t.thumbnail_local||t.image_local}`; } } catch {}
       // Pull story + listings + wallet meta + similar tokens
-    const [story, listings, walletMeta, similar] = await Promise.all([
-      jfetch(API.story(id)),
-      jfetch(`/api/token/${id}/listings`),
-      t.owner ? jfetch(`/api/wallet/${t.owner}/meta`) : null,
-      jfetch(`/api/token/${id}/similar-advanced`)
-    ]);
+      const [story, listings, walletMeta, similar] = await Promise.all([
+        jfetch(API.story(id)),
+        jfetch(`/api/token/${id}/listings`),
+        t.owner ? jfetch(`/api/wallet/${t.owner}/meta`) : null,
+        jfetch(`/api/token/${id}/similar-advanced`)
+      ]);
       const birth = story?.birth_date ? (timeAgo(Number(story.birth_date) * 1000) + ' ago') : '--';
       const owners = story?.total_owners ?? '--';
       const peak = formatTiaLabel(story?.peak_price);
@@ -1342,8 +1366,7 @@ function buildFlowParticles(limit=600){
       const cfg = SIMPLE_VIEW_CONFIG[key];
       if (!cfg) return;
       currentSimpleView = key;
-      const viewEl = document.getElementById('view');
-      if (viewEl) viewEl.value = key;
+      setActiveViewButton(key);
       const modeEl = document.getElementById('mode');
       if (modeEl && cfg.modeSelect) modeEl.value = cfg.modeSelect;
       if (cfg.toggles){
@@ -2086,6 +2109,10 @@ function buildFlowParticles(limit=600){
     const r = await jfetch(`/api/traits?v=${Date.now()}`);
     if (!r || !r.ok) return;
     const j = await r.json(); const groups = j.traits || [];
+    if (!groups.length){
+      container.innerHTML = `<div class='small-meta'>Traits dataset not available.</div>`;
+      return;
+    }
     for (const g of groups){
       const wrap = document.createElement('div'); wrap.className='trait-group';
       const header = document.createElement('div'); header.className='trait-header'; header.innerHTML = `<span class="twist">▶</span> ${g.type}`;
