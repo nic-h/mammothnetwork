@@ -22,11 +22,20 @@ console.log('deck.app: boot');
   }
   const effectiveMode = (mode) => (mode === 'health' ? 'holders' : mode);
 
+  // Deck palette mirrors public/client/styles/tokens.css so the canvas matches the UI
+  const TOKENS = {
+    fg: [0, 255, 102],            // --fg
+    fgDim: [0, 204, 0],           // --fg-dim
+    fgBright: [51, 255, 102],     // --fg-bright (#33ff66)
+    blue: [68, 136, 255],         // --blue (#4488ff)
+    gray: [102, 102, 102]         // --gray (#666666)
+  };
+
   const COLORS = {
-    active: [0, 255, 102, 180],
-    whale: [0, 255, 102, 220],
-    frozen: [68, 136, 255, 210],
-    dormant: [102, 102, 102, 160]
+    active: [...TOKENS.fg, 190],
+    whale: [...TOKENS.fgBright, 220],
+    frozen: [...TOKENS.blue, 210],
+    dormant: [...TOKENS.gray, 170]
   };
 
   function nodeColor(d){
@@ -86,7 +95,6 @@ const center = document.querySelector('.center-panel');
   let highlightSet = null; // wallet highlight filter
   let edgeCount = 200; // default UI slider value
   let ownerCenters = null; // computed per owner (holders view)
-  let ownerOceanPos = null; // computed per owner (whales view)
   let ownerHoldings = null;
   const ownerLabels = new Map(); // addr -> label (ENS or short address)
   let hasFittedOnce = false; // fit view after first render
@@ -104,8 +112,12 @@ const center = document.querySelector('.center-panel');
   const dnaCache = new Map();
   // Cache for body temperature heatmap (7x24 grid)
   let heatmapCache = null;
-  // Cache for wallet relationships
-  let whalesRelationships = null;
+  // Activity caches for rhythm view (interval -> buckets)
+  const rhythmActivity = new Map();
+  const rhythmActivityPending = new Map();
+  let heatmapLoading = false;
+  // Binary attribute backing store for node positions (auto-resized per render)
+  let positionAttribute = null;
 
   // UI toggles reflect left panel checkboxes
   const ui = {
@@ -119,6 +131,51 @@ const center = document.querySelector('.center-panel');
     get bubbles(){ return getChecked('layer-bubbles', true); },
   };
 
+  const SIMPLE_VIEW_CONFIG = {
+    dots: {
+      baseMode: 'holders',
+      modeSelect: 'holders',
+      toggles: {
+        'layer-ownership': true,
+        'layer-transfers': false,
+        'layer-sales': false,
+        'layer-trades': false
+      }
+    },
+    flow: {
+      baseMode: 'holders',
+      modeSelect: 'holders',
+      toggles: {
+        'layer-ownership': true,
+        'layer-transfers': true,
+        'layer-sales': true,
+        'layer-trades': true
+      }
+    },
+    tree: {
+      baseMode: 'wallets',
+      modeSelect: 'wallets',
+      toggles: {
+        'layer-ownership': true,
+        'layer-transfers': false,
+        'layer-sales': false,
+        'layer-trades': false
+      }
+    },
+    rhythm: {
+      baseMode: 'transfers',
+      modeSelect: 'transfers',
+      toggles: {
+        'layer-ownership': true,
+        'layer-transfers': true,
+        'layer-sales': true,
+        'layer-trades': true
+      }
+    }
+  };
+  const SIMPLE_VIEW_NAMES = new Set(Object.keys(SIMPLE_VIEW_CONFIG));
+  let currentSimpleView = null;
+
   // Minimal hover handler to avoid runtime errors in simple views
   function onHoverThrottled(info){ /* no-op; selection handled onClick */ }
 
@@ -130,6 +187,8 @@ const center = document.querySelector('.center-panel');
   async function init(){
     startUILoad();
     presetData = await jfetch(API.preset) || null;
+    let __firstDrawn = false;
+    try { window.__mammothDrawnFrame = false; } catch {}
     deckInst = new Deck({
       canvas: 'deck-canvas',
       controller: true,
@@ -137,7 +196,13 @@ const center = document.querySelector('.center-panel');
       pickingRadius: 6,
       views:[ new (OrthographicView||window.deck.OrthographicView)({ id:'ortho' }) ],
       initialViewState:{ target:[0,0,0], zoom:0 },
-      onViewStateChange: ({viewState}) => { currentZoom = viewState.zoom; }
+      onViewStateChange: ({viewState}) => { currentZoom = viewState.zoom; },
+      onAfterRender: () => {
+        if (!__firstDrawn && Array.isArray(nodes) && nodes.length > 0) {
+          __firstDrawn = true;
+          try { window.__mammothDrawnFrame = true; } catch {}
+        }
+      }
     });
     try { window.deckInst = deckInst; } catch {}
     // no DPR clamps; Deck manages device pixels
@@ -192,6 +257,8 @@ const center = document.querySelector('.center-panel');
       viewEl.dataset.deckBound='1';
       viewEl.addEventListener('change', async ()=>{
         const v = viewEl.value;
+        if (SIMPLE_VIEW_NAMES.has(v)) { await applySimpleView(v); return; }
+        currentSimpleView = null;
         if (v==='ownership') await loadMode('holders', edgeCount);
         else if (v==='trading') await loadMode('transfers', edgeCount);
         else if (v==='traits') await loadMode('traits', edgeCount);
@@ -203,7 +270,10 @@ const center = document.querySelector('.center-panel');
     const modeEl = document.getElementById('mode');
     if (modeEl && !modeEl.dataset.deckBound){
       modeEl.dataset.deckBound='1';
-      modeEl.addEventListener('change', ()=>{ loadMode(modeEl.value||'holders', edgeCount); });
+      modeEl.addEventListener('change', ()=>{
+        currentSimpleView = null;
+        loadMode(modeEl.value||'holders', edgeCount);
+      });
     }
   }
 
@@ -271,8 +341,11 @@ const center = document.querySelector('.center-panel');
   async function loadMode(mode, edgesWanted){
     currentMode = mode;
     const graphMode = effectiveMode(mode);
-    const full = new URLSearchParams(location.search).has('full');
+    const usp = new URLSearchParams(location.search);
+    const full = usp.has('full');
+    const forceReload = usp.has('force');
     const params = new URLSearchParams({ mode: graphMode, nodes:'10000', edges: full ? '5000' : String(edgesWanted ?? edgeCount) });
+    if (forceReload) params.set('force', '1');
     startUILoad();
     const graph = await jfetch(`${API.graph}?${params}`) || {nodes:[],edges:[]};
     const pdata = presetData || {};
@@ -315,37 +388,48 @@ const center = document.querySelector('.center-panel');
     };
     animReq = requestAnimationFrame(tick);
     stopUILoad();
-    try { if ((!selectedId || selectedId<0) && nodes && nodes.length){ focusSelect(nodes[Math.floor(nodes.length*0.5)].id); } } catch {}
   }
 
   // Expose tiny control API for automated tests/screenshots
   try {
     window.mammoths = {
       focusToken: (id)=>{ try { focusSelect(Number(id)); } catch {} },
+      setSimpleView: (name)=>{ try { return applySimpleView(name); } catch {} }
     };
   } catch {}
 
   function buildNodes(apiNodes, pdata){
-    const ownerIndex = pdata.ownerIndex||[]; const ownerEthos = pdata.ownerEthos||[];
-    const tokenLastActivity = pdata.tokenLastActivity||[]; const tokenPrice=pdata.tokenPrice||[]; const rarity=pdata.rarity||[];
+    const ownerIndex = pdata.ownerIndex||[];
+    const ownerEthos = pdata.ownerEthos||[];
+    const tokenLastActivity = pdata.tokenLastActivity||[];
+    const tokenPrice = pdata.tokenPrice||[];
+    const rarity = pdata.rarity||[];
+    const tokenLastSalePrice = pdata.tokenLastSalePrice || [];
+    const tokenSaleCount = pdata.tokenSaleCount || [];
+    const tokenLastSaleTs = pdata.tokenLastSaleTs || [];
     return apiNodes.map((n,i)=>{
       const idx = (n.id-1>=0)?(n.id-1):i;
       const rawOi = ownerIndex[idx];
       // Fallback grouping when DB ownerIndex is missing: spread into 12 clusters
       const oi = (rawOi!=null && rawOi>=0) ? rawOi : (i % 12);
       const ethos=oi>=0?(ownerEthos[oi]||0):0;
+      const baseColor = COLORS.active.slice();
+      const lastSalePrice = Number.isFinite(tokenLastSalePrice[idx]) ? tokenLastSalePrice[idx] : (tokenPrice[idx]||0);
       return {
         id: n.id, tokenId: idx,
         position: [0,0,0],
         ownerIndex: oi,
         lastActivity: tokenLastActivity[idx]||0,
         price: tokenPrice[idx]||0,
+        lastSalePrice,
+        lastSaleTs: tokenLastSaleTs[idx]||0,
+        saleCount: tokenSaleCount[idx]||0,
         rarity: rarity[idx]||0.5,
         frozen: !!n.frozen,
         dormant: !!n.dormant,
-        color: [0,255,102,180],
-        baseColor: [0,255,102,180],
-        radius: 2.5,
+        color: baseColor.slice(),
+        baseColor,
+        radius: 2,
       };
     }).map(d=>{ const c=nodeColor(d); d.baseColor=c.slice(); d.color=c.slice(); return d; });
   }
@@ -356,7 +440,7 @@ const center = document.querySelector('.center-panel');
     return (apiEdges||[]).slice(0,cap).map(e=>{
       const a = Array.isArray(e)?e[0]:e.a; const b = Array.isArray(e)?e[1]:e.b; const ia = (a-1); const ib=(b-1);
       const na = nodes[ia]; const nb = nodes[ib]; if (!na||!nb) return null;
-      return { sourceIndex: ia, targetIndex: ib, color:[0,255,102,40], width:1 };
+      return { sourceIndex: ia, targetIndex: ib, color:[TOKENS.fgDim[0], TOKENS.fgDim[1], TOKENS.fgDim[2]], width:1 };
     }).filter(Boolean);
   }
 
@@ -413,7 +497,19 @@ const center = document.querySelector('.center-panel');
       const priceMax = parr.reduce((max,val)=> (Number.isFinite(val) && val>max) ? val : max, 1);
       const vmaxLog = Math.log1p(Math.max(1, priceMax));
       const ly = (p)=>{ const v=Math.log1p(Math.max(0, p||0)); const y = (1 - v/(vmaxLog||1))*(h-160) + 80; return y; };
-      basePositions = nodes.map(d=>{ const t=tarrRaw[d.tokenId] ?? t0; const p=parr[d.tokenId] ?? 0; const pos=[lx(t), ly(p), 0]; d.position=pos; d.radius=3+(p?Math.min(6,Math.sqrt(p)):2); return pos.slice(); });
+      basePositions = nodes.map(d=>{
+        const idx = d.tokenId;
+        const t = tarrRaw[idx] ?? t0;
+        const p = parr[idx] ?? 0;
+        const pos=[lx(t), ly(p), 0];
+        d.position = pos;
+        d.timelineTs = t;
+        d.lastSalePrice = p;
+        const saleC = Number(pdata.tokenSaleCount?.[idx] ?? d.saleCount ?? 0);
+        d.saleCount = saleC;
+        d.radius = clamp(2.2 + Math.min(5, Math.sqrt(Math.max(1, saleC))), 2, 9);
+        return pos.slice();
+      });
     } else {
       // Default grid
       const grid=100; nodes.forEach((d,i)=>{ d.position=[(i%grid)*20-1000, Math.floor(i/grid)*20-1000, 0]; }); basePositions = nodes.map(d=>d.position.slice());
@@ -425,44 +521,102 @@ const center = document.querySelector('.center-panel');
 
   function render(nodes, edges, mode){
     const w = center.clientWidth||1200, h=center.clientHeight||800;
-    const grid = makeGridLines(w, h, 50);
-    const holdersHulls = (mode==='holders' && ui.bubbles) ? computeHulls(nodes, presetData) : [];
-    // Zoom gates to reduce GPU work when zoomed out
-    const showEdges = (mode==='holders' && ui.ownership && ui.ambient && (currentZoom==null || currentZoom>=0.4));
-    const showOverlays = (currentZoom==null || currentZoom>=0.6);
-    const showHulls = (currentZoom==null || currentZoom>=0.8);
+    // Zoom-derived fades instead of hard gating so layers ease in/out smoothly
+    const zoomNorm = (currentZoom==null)
+      ? 1
+      : clamp((currentZoom - (-2)) / (4 - (-2)), 0, 1); // deck orthographic zoom typically spans ~[-2,4]
+    const overlayFade = (currentZoom==null)
+      ? 1
+      : clamp((currentZoom - (-1)) / (4 - (-1)), 0, 1);
+    const simpleFlow = currentSimpleView === 'flow';
+    const simpleDots = currentSimpleView === 'dots';
+    const simpleTree = currentSimpleView === 'tree';
+    const simpleRhythm = currentSimpleView === 'rhythm';
+
+    const showEdges = (mode==='holders' && ui.ownership && ui.ambient && !simpleFlow);
+    const showFlows = (mode==='holders' && (ui.transfers || simpleFlow));
+    const showOverlays = overlayFade > 0;
+    const showHulls = overlayFade > 0;
+    const baseEdgeAlpha = 180 + (zoomNorm * 40);
+    const edgeAlpha = Math.round(baseEdgeAlpha * zoomNorm);
+    const overlayAlpha = Math.round(160 * overlayFade);
     // Apply highlight filter dimming
     if (highlightSet && highlightSet.size){ nodes.forEach(n=>{ const on = highlightSet.has(n.id); const c=n.baseColor.slice(); c[3] = on? Math.max(160, c[3]||160) : 35; n.color=c; }); }
     else { nodes.forEach(n=> n.color = n.baseColor.slice()); }
 
+    const computeEdgeColor = (edge)=>{
+      const base = Array.isArray(edge?.color) ? edge.color : null;
+      const r = base?.[0] ?? TOKENS.fgBright[0];
+      const g = base?.[1] ?? TOKENS.fgBright[1];
+      const b = base?.[2] ?? TOKENS.fgBright[2];
+      const baseAlpha = clamp(base?.[3] ?? baseEdgeAlpha, 0, 255);
+      const alpha = Math.round(baseAlpha * zoomNorm);
+      return [r, g, b, alpha];
+    };
+
     // Selection ring data (persistent after click)
     const selObj = selectedId>0 ? nodes.find(n=>n && n.id===selectedId) : null;
 
-    let layers = [
-      // Grid lines behind everything
-      new LineLayer({ id:'grid', data:grid, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,25], getWidth:1, widthUnits:'pixels' }),
-      // Ownership hull rings gated by zoom (soft fill + stroke)
-      (showHulls && holdersHulls.length) && new PolygonLayer({ id:'hulls', data:holdersHulls, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPolygon:d=>d.path, stroked:true, filled:true, getFillColor:[0,255,102,10], getLineColor:[0,255,102,45], getLineWidth:1, lineWidthUnits:'pixels' }),
-      // Fancy ownership multi-rings (top owners), also gated by zoom
-      (showHulls && mode==='holders' && ui.bubbles) && new PolygonLayer({ id:'owner-rings', data: buildOwnerRings(), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, stroked:true, filled:false, getPolygon:d=>d.path, getLineColor:d=>d.color, getLineWidth:d=>d.width, lineWidthUnits:'pixels', parameters:{ depthTest:false }, updateTriggers:{ getLineColor: [pulseT] } }),
-      // Optional density underlay (GPU aggregator)
-      (Array.isArray(nodes) && nodes.length) && new (ScreenGridLayer||window.deck.ScreenGridLayer)({ id:'density', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, cellSizePixels:12, gpuAggregation:true, opacity:0.35, minColor:[0,0,0,0], maxColor:[0,255,0,255], pickable:false, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
-      // Ownership edges (thicker, additive blending)
-      showEdges && new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0], getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0], getColor:d=> d.color||[0,255,0,140], widthUnits:'pixels', widthMinPixels:2, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
-      new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(3, (d.radius||3)*2.4), getFillColor:d=>[d.color[0],d.color[1],d.color[2], 12], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
-      // Neighbor edges on click
-      (selectedId>0) && new LineLayer({ id:'click-edges', data: buildClickEdges(selectedId), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,180], getWidth:1.2, widthUnits:'pixels', parameters:{ depthTest:false } }),
-      new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=> (d.radius||3), radiusUnits:'pixels', radiusMinPixels:2, radiusMaxPixels:7, stroked:true, getLineWidth:0.5, lineWidthUnits:'pixels', lineWidthMinPixels:0.5, getFillColor:d=>d.color, onClick: handleClick, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 }, extensions:[ new (BrushingExtension||window.deck.BrushingExtension)() ], brushingEnabled:true, brushingRadius:60 }),
-      // Subtle pulse rings for recently active tokens
-      (showOverlays) && new ScatterplotLayer({ id:'pulses', data: nodes.filter(n=>recentActive(n)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> (d.radius||4) * (1.6 + 0.4*Math.sin(pulseT*2 + (d.id||0))), getLineColor:[0,255,102,140], lineWidthMinPixels:1, radiusUnits:'pixels', updateTriggers:{ getRadius: [pulseT] }, parameters:{ depthTest:false } }),
-      (selObj) && new ScatterplotLayer({ id:'selection-ring', data:[selObj], coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(10,(d.radius||4)+8), getFillColor:[0,0,0,0], getLineColor:[0,255,102,220], lineWidthMinPixels:2, stroked:true, filled:false, radiusUnits:'pixels' })
-    ];
+    ensurePositionAttribute();
+    const nodePositionProps = positionAttribute ? { attributes: { instancePositions: positionAttribute } } : null;
+
+    let layers = [];
+    if (mode==='holders'){
+      layers = buildOwnershipDotLayers({
+        nodes,
+        edges,
+        selObj,
+        showEdges,
+        overlayAlpha,
+        edgeColorFn: computeEdgeColor,
+        nodePositionProps,
+        showOverlays,
+        showFlows,
+        zoomNorm
+      });
+    } else {
+      const grid = makeGridLines(w, h, 50);
+      const holdersHulls = (mode==='holders' && ui.bubbles) ? computeHulls(nodes, presetData) : [];
+      const showSalesFlows = getChecked('layer-sales', true);
+      const showTransferFlows = getChecked('layer-transfers', true);
+      const showMintFlows = getChecked('layer-mints', true);
+      const flowCap = Math.max(1, Math.min(edgeCount || 200, 400));
+      const flowLayer = (showFlows && Array.isArray(flowEdges) && flowEdges.length)
+        ? buildMarketFlowLayer({
+            id: 'flows-market',
+            flows: flowEdges,
+            nodes,
+            zoomNorm,
+            maxEdges: flowCap,
+            filters: { sale: showSalesFlows, transfer: showTransferFlows, mint: showMintFlows }
+          })
+        : null;
+      layers = [
+        // Grid lines behind everything
+        new LineLayer({ id:'grid', data:grid, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[TOKENS.fg[0], TOKENS.fg[1], TOKENS.fg[2], 25], getWidth:1, widthUnits:'pixels' }),
+        // Ownership hull rings gated by zoom (soft fill + stroke)
+        (showHulls && holdersHulls.length) && new PolygonLayer({ id:'hulls', data:holdersHulls, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPolygon:d=>d.path, stroked:true, filled:true, getFillColor:[TOKENS.fgDim[0], TOKENS.fgDim[1], TOKENS.fgDim[2], 14], getLineColor:[TOKENS.fg[0], TOKENS.fg[1], TOKENS.fg[2], 55], getLineWidth:1, lineWidthUnits:'pixels' }),
+        // Fancy ownership multi-rings (top owners), also gated by zoom
+        (showHulls && mode==='holders' && ui.bubbles) && new PolygonLayer({ id:'owner-rings', data: buildOwnerRings(), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, stroked:true, filled:false, getPolygon:d=>d.path, getLineColor:d=>d.color, getLineWidth:d=>d.width, lineWidthUnits:'pixels', parameters:{ depthTest:false }, updateTriggers:{ getLineColor: [pulseT] } }),
+        // Optional density underlay (GPU aggregator)
+        (Array.isArray(nodes) && nodes.length) && new (ScreenGridLayer||window.deck.ScreenGridLayer)({ id:'density', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, cellSizePixels:12, gpuAggregation:true, opacity:0.35, minColor:[0,0,0,0], maxColor:[TOKENS.fg[0], TOKENS.fg[1], TOKENS.fg[2], 255], pickable:false, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
+        // Ownership edges (thicker, additive blending)
+        showEdges && new LineLayer({ id:'edges', data:edges, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>nodes[d.sourceIndex]?.position||[0,0,0], getTargetPosition:d=>nodes[d.targetIndex]?.position||[0,0,0], getColor:computeEdgeColor, widthUnits:'pixels', widthMinPixels:2.5, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
+        flowLayer,
+        new ScatterplotLayer({ id:'glow', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(3, (d.radius||3)*2.4), getFillColor:d=>[d.color[0],d.color[1],d.color[2], Math.round(16 * overlayFade)], radiusUnits:'pixels', parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }),
+        // Neighbor edges on click
+        (selectedId>0) && new LineLayer({ id:'click-edges', data: buildClickEdges(selectedId), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,180], getWidth:1.2, widthUnits:'pixels', parameters:{ depthTest:false } }),
+        new ScatterplotLayer({ id:'nodes', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, autoHighlight:true, highlightColor:[255,255,255,80], getPosition:d=>d.position, getRadius:d=> (d.radius||3), radiusUnits:'pixels', radiusMinPixels:2, radiusMaxPixels:7, stroked:true, getLineWidth:0.5, lineWidthUnits:'pixels', lineWidthMinPixels:0.5, getFillColor:d=>d.color, onClick: handleClick, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 }, extensions:[ new (BrushingExtension||window.deck.BrushingExtension)() ], brushingEnabled:true, brushingRadius:60, ...(nodePositionProps||{}) }),
+        // Subtle pulse rings for recently active tokens
+        (showOverlays) && new ScatterplotLayer({ id:'pulses', data: nodes.filter(n=>recentActive(n)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, stroked:true, filled:false, getPosition:d=>d.position, getRadius:d=> (d.radius||4) * (1.6 + 0.4*Math.sin(pulseT*2 + (d.id||0))), getLineColor:[TOKENS.fgBright[0], TOKENS.fgBright[1], TOKENS.fgBright[2], Math.max(0, Math.min(255, overlayAlpha))], lineWidthMinPixels:1, radiusUnits:'pixels', updateTriggers:{ getRadius: [pulseT] }, parameters:{ depthTest:false } }),
+        (selObj) && new ScatterplotLayer({ id:'selection-ring', data:[selObj], coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius:d=>Math.max(10,(d.radius||4)+8), getFillColor:[0,0,0,0], getLineColor:[TOKENS.fg[0], TOKENS.fg[1], TOKENS.fg[2], Math.max(140, Math.min(255, overlayAlpha+100))], lineWidthMinPixels:2, stroked:true, filled:false, radiusUnits:'pixels' })
+      ].filter(Boolean);
+    }
     // View-specific adds
     try {
-      if (mode==='holders') layers = makeHoldersLayers(layers);
       if (mode==='traits' && ui.traits) layers = makeTraitsLayers(layers);
-      if (mode==='wallets') layers = makeWalletsLayers(layers);
-      if (mode==='transfers') layers = makeTransfersLayers(layers);
+      if (mode==='wallets' || mode==='whales') layers = makeWalletsLayers(layers, { zoomNorm, zoom: currentZoom });
+      if (mode==='transfers') layers = makeTransfersLayers(layers, { zoomNorm, zoom: currentZoom });
       if (mode==='transfers' && timelineLimits){
         // Scanning line at current time
         const t0=timelineLimits.t0||0, t1=timelineLimits.t1||1; const w=center.clientWidth||1200; const h=center.clientHeight||800;
@@ -479,13 +633,134 @@ const center = document.querySelector('.center-panel');
     }
     // LOD: stronger gating for heavy visuals
     const lodEdges = true;
-    const showFx = currentZoom >= 0.8;     // glow/pulses only when quite close
-    const showDots = currentZoom >= 0.25;  // particles only when close
     if (!lodEdges) layers = layers.filter(l=> l && l.id!=='edges');
-    if (!showFx) layers = layers.filter(l=> l && l.id!=='glow' && l.id!=='pulses');
-    if (effectiveMode(currentMode)==='transfers' && !showDots) layers = layers.filter(l=> l && l.id!=='flow-dots');
     deckInst.setProps({ layers });
-    if (!hasFittedOnce) { try { fitViewToNodes(nodes); hasFittedOnce = true; } catch {} }
+    if (!hasFittedOnce) {
+      try {
+        if (fitViewToNodes(nodes)) {
+          hasFittedOnce = true;
+        }
+      } catch {}
+    }
+  }
+
+  function buildOwnershipDotLayers({ nodes, edges, selObj, showEdges, overlayAlpha, edgeColorFn, nodePositionProps, showOverlays, showFlows, zoomNorm = 1 }){
+    const layers = [];
+    if (showEdges && Array.isArray(edges) && edges.length){
+      layers.push(new LineLayer({
+        id: 'edges',
+        data: edges,
+        coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+        getSourcePosition: d => nodes[d.sourceIndex]?.position || [0,0,0],
+        getTargetPosition: d => nodes[d.targetIndex]?.position || [0,0,0],
+        getColor: edgeColorFn,
+        widthUnits: 'pixels',
+        widthMinPixels: 1.4,
+        parameters: { depthTest: false }
+      }));
+    }
+
+    if (showFlows && Array.isArray(flowEdges) && flowEdges.length){
+      const showSales = getChecked('layer-sales', true);
+      const showTransfers = getChecked('layer-transfers', true);
+      const showMints = getChecked('layer-mints', true);
+      const cap = Math.max(1, Math.min(edgeCount || 200, 400));
+      const flowLayer = buildMarketFlowLayer({
+        id: 'flows-market',
+        flows: flowEdges,
+        nodes,
+        zoomNorm,
+        maxEdges: cap,
+        filters: { sale: showSales, transfer: showTransfers, mint: showMints }
+      });
+      if (flowLayer) layers.push(flowLayer);
+    }
+
+    const baseScatterProps = {
+      id: 'nodes',
+      data: nodes,
+      coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 255, 255, 80],
+      getPosition: d => d.position,
+      getRadius: d => d.radius || 2,
+      radiusUnits: 'pixels',
+      radiusMinPixels: 2,
+      radiusMaxPixels: 7,
+      stroked: true,
+      getLineWidth: 0.5,
+      lineWidthUnits: 'pixels',
+      lineWidthMinPixels: 0.5,
+      getFillColor: d => d.color,
+      onClick: handleClick,
+      parameters: { blend: true, depthTest: false, blendFunc: [770, 1], blendEquation: 32774 },
+      extensions: [ new (BrushingExtension||window.deck.BrushingExtension)() ],
+      brushingEnabled: true,
+      brushingRadius: 60
+    };
+    layers.push(new ScatterplotLayer(nodePositionProps ? { ...baseScatterProps, ...nodePositionProps } : baseScatterProps));
+
+    if (showOverlays){
+      const recent = nodes.filter(recentActive);
+      if (recent.length){
+        layers.push(new ScatterplotLayer({
+          id: 'pulse-outline',
+          data: recent,
+          coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+          pickable: false,
+          stroked: true,
+          filled: false,
+          getPosition: d => d.position,
+          getRadius: d => (d.radius || 2) + 2,
+          radiusUnits: 'pixels',
+          getLineColor: [0, 255, 102, 140],
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 1,
+          updateTriggers: { getRadius: [pulseT] },
+          parameters: { depthTest: false }
+        }));
+      }
+    }
+
+    if (selObj){
+      layers.push(new ScatterplotLayer({
+        id: 'selection-ring',
+        data: [selObj],
+        coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+        getPosition: d => d.position,
+        getRadius: d => Math.max(10, (d.radius || 4) + 8),
+        getFillColor: [0, 0, 0, 0],
+        getLineColor: [TOKENS.fg[0], TOKENS.fg[1], TOKENS.fg[2], Math.max(140, Math.min(255, overlayAlpha + 100))],
+        lineWidthMinPixels: 2,
+        stroked: true,
+        filled: false,
+        radiusUnits: 'pixels'
+      }));
+    }
+
+    return layers.filter(Boolean);
+  }
+
+  function ensurePositionAttribute(){
+    try {
+      const count = Array.isArray(nodes) ? nodes.length : 0;
+      if (!count){ positionAttribute = null; return; }
+      const expected = count * 3;
+      if (!positionAttribute || !positionAttribute.value || positionAttribute.value.length !== expected){
+        positionAttribute = { value: new Float32Array(expected), size: 3 };
+      }
+      const arr = positionAttribute.value;
+      for (let i=0;i<count;i++){
+        const p = nodes[i].position || [0,0,0];
+        const o = i*3;
+        arr[o] = p[0] ?? 0;
+        arr[o+1] = p[1] ?? 0;
+        arr[o+2] = p[2] ?? 0;
+      }
+    } catch {
+      positionAttribute = null;
+    }
   }
 
   function animateHolders(t){
@@ -610,7 +885,7 @@ const center = document.querySelector('.center-panel');
 
   function recentActive(n){
     const last = Number(n.lastActivity||0); if (!last) return false;
-    const days = (Date.now()/1000 - last) / 86400; return days < 7; // last week
+    const hours = (Date.now()/1000 - last) / 3600; return hours < 24;
   }
 
   function computeHulls(nodes, pdata){
@@ -656,11 +931,93 @@ const center = document.querySelector('.center-panel');
 
   async function fetchFlowEdges(nodes){
     try {
-      const r = await jfetch('/api/transfer-edges?limit=1000&nodes=10000');
-      // Map representative tokens to node indices
-      const mapIndex = new Map(); nodes.forEach((n,i)=>mapIndex.set(n.tokenId+1, i));
-      return r.map(e=>({ a: mapIndex.get(e.a), b: mapIndex.get(e.b), count: e.count||1, type: (e.type||'transfer') })).filter(x=>x.a!=null && x.b!=null);
-    } catch { return null; }
+      const response = await jfetch('/api/transfer-edges?limit=1000&nodes=10000');
+      if (!Array.isArray(response) || !Array.isArray(nodes)) return null;
+
+      const idToIndex = new Map();
+      nodes.forEach((node, idx) => {
+        if (!node) return;
+        const idVariants = [node.id, node.tokenId, node.tokenId != null ? node.tokenId + 1 : null];
+        for (const key of idVariants){
+          if (key == null) continue;
+          const num = Number(key);
+          if (Number.isFinite(num)) idToIndex.set(num, idx);
+        }
+      });
+
+      const toIndex = (key) => {
+        const num = Number(key);
+        if (!Number.isFinite(num)) return null;
+        const idx = idToIndex.get(num);
+        return (idx != null && nodes[idx]) ? idx : null;
+      };
+
+      const toPoint = (key) => {
+        const idx = toIndex(key);
+        if (idx == null) return null;
+        const p = nodes[idx]?.position;
+        if (!Array.isArray(p)) return null;
+        return [p[0] ?? 0, p[1] ?? 0, p[2] ?? 0];
+      };
+
+      const mapPath = (raw) => {
+        if (!Array.isArray(raw) || raw.length < 2) return null;
+        const out = [];
+        for (const step of raw){
+          let pos = null;
+          if (Array.isArray(step)){
+            const finite = step.every(v => Number.isFinite(v));
+            if (finite && step.length >= 2){
+              const [x, y, z = 0] = step;
+              pos = [x, y, z];
+            } else if (step.length === 1 && Number.isFinite(step[0])){
+              pos = toPoint(step[0]);
+            }
+          } else if (typeof step === 'number'){
+            pos = toPoint(step);
+          } else if (step && typeof step === 'object'){
+            const tokenId = Number(step.tokenId ?? step.id);
+            if (Number.isFinite(tokenId)){
+              pos = toPoint(tokenId);
+            } else if (Number.isFinite(step.x) && Number.isFinite(step.y)){
+              const z = Number.isFinite(step.z) ? step.z : 0;
+              pos = [step.x, step.y, z];
+            }
+          }
+          if (pos) out.push(pos);
+        }
+        return out.length >= 2 ? out : null;
+      };
+
+      return response.map(edge => {
+        const sourceIndex = toIndex(edge?.a);
+        const targetIndex = toIndex(edge?.b);
+        if (sourceIndex == null || targetIndex == null) return null;
+
+        const valueTia = Number(edge?.value_tia ?? edge?.valueTia ?? 0);
+        const valueUsd = Number(edge?.value_usd ?? edge?.valueUsd ?? 0);
+        const count = Number(edge?.count ?? edge?.cnt ?? 0);
+        const weightRaw = Number.isFinite(valueTia) && valueTia > 0
+          ? valueTia
+          : (Number.isFinite(valueUsd) && valueUsd > 0 ? valueUsd : count || 1);
+        const weight = Math.max(1e-6, weightRaw);
+        const type = (edge?.type || 'transfer').toString().toLowerCase();
+        const path = mapPath(edge?.path);
+
+        return {
+          sourceIndex,
+          targetIndex,
+          type,
+          count: count || 0,
+          weight,
+          valueTia: Number.isFinite(valueTia) ? valueTia : 0,
+          valueUsd: Number.isFinite(valueUsd) ? valueUsd : 0,
+          path
+        };
+      }).filter(Boolean);
+    } catch {
+      return null;
+    }
   }
 
   // UI loading bar helpers
@@ -828,6 +1185,32 @@ function buildFlowParticles(limit=600){
 
   // Helpers
   function getChecked(id, fallback){ try { const el=document.getElementById(id); if (!el) return !!fallback; return !!el.checked; } catch { return !!fallback; } }
+  function setCheckbox(id, value){
+    try {
+      const el = document.getElementById(id);
+      if (!el || typeof value !== 'boolean') return;
+      if (el.checked === value) return;
+      el.checked = value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch {}
+  }
+  async function applySimpleView(name){
+    try {
+      const key = (name||'').toString().toLowerCase();
+      const cfg = SIMPLE_VIEW_CONFIG[key];
+      if (!cfg) return;
+      currentSimpleView = key;
+      const viewEl = document.getElementById('view');
+      if (viewEl) viewEl.value = key;
+      const modeEl = document.getElementById('mode');
+      if (modeEl && cfg.modeSelect) modeEl.value = cfg.modeSelect;
+      if (cfg.toggles){
+        Object.entries(cfg.toggles).forEach(([id, val])=> setCheckbox(id, !!val));
+      }
+      await loadMode(cfg.baseMode || 'holders', edgeCount);
+      try { render(nodes, edges, effectiveMode(currentMode)); } catch {}
+    } catch {}
+  }
   async function highlightWallet(address){
     try {
       const r = await jfetch(`/api/wallet/${address}`);
@@ -874,6 +1257,25 @@ function buildFlowParticles(limit=600){
         // Recompute color now that owner metrics are available
         const nc = nodeColor(n); n.baseColor = nc.slice(); n.color = nc.slice();
       });
+      updateNodeSizing(pdata);
+    } catch {}
+  }
+
+  function updateNodeSizing(pdata){
+    try {
+      if (!Array.isArray(nodes) || !nodes.length) return;
+      const holdingsArr = Array.isArray(ownerHoldings) ? ownerHoldings : [];
+      const buyArr = Array.isArray(pdata?.ownerBuyVol) ? pdata.ownerBuyVol : [];
+      const sellArr = Array.isArray(pdata?.ownerSellVol) ? pdata.ownerSellVol : [];
+      for (const n of nodes){
+        const oi = n.ownerIndex;
+        const hold = Math.max(0, Number(holdingsArr[oi] ?? 0));
+        const buy = Math.max(0, Number(buyArr[oi] ?? 0));
+        const sell = Math.max(0, Number(sellArr[oi] ?? 0));
+        const sum = hold + buy + sell;
+        const metric = Math.log10(Math.max(1, sum));
+        n.radius = clamp(2 + metric, 2, 7);
+      }
     } catch {}
   }
 
@@ -893,150 +1295,6 @@ function buildFlowParticles(limit=600){
     if (effectiveMode(currentMode)==='holders') try { render(nodes, edges, effectiveMode(currentMode)); } catch {}
   }
 
-  function makeHoldersLayers(base){
-    try {
-      // 0) Atmosphere: recent-activity heat haze (last 7 days only)
-      const recent = nodes.filter(n=>{ const t=n.lastActivity||0; return t && (Date.now()/1000 - t) < 7*86400; }).map(n=>({ position:n.position, w:1 }));
-      const heat = (recent.length && typeof HeatmapLayer==='function') ? new HeatmapLayer({ id:'activity-haze', data: recent, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getWeight:d=>d.w, radiusPixels: 28, intensity: 0.6, threshold: 0.03, colorRange:[[0,0,0,0],[0,128,51,80],[0,255,102,160]] }) : null;
-
-      // 1) Density heat map using token positions weighted by owner trading volume (buy+sell)
-      const buy = presetData?.ownerBuyVol || []; const sell = presetData?.ownerSellVol || [];
-      const volPoints = nodes.map(n=>{ const oi=n.ownerIndex; const v=(buy[oi]||0)+(sell[oi]||0); return { position:n.position, w: Math.max(0, v) }; });
-      const hexCls = HexagonLayer || ScreenGridLayer;
-      const density = new hexCls({
-        id: 'ownership-density',
-        data: volPoints,
-        getPosition: d => d.position,
-        radius: 120,
-        coverage: 0.7,
-        elevationScale: 40,
-        extruded: true,
-        getColorWeight: d => d.w,
-        getElevationWeight: d => d.w,
-        colorRange: [[0,0,0,0],[0,255,102,80],[0,255,102,160]]
-      });
-      // 2) Owner cores (whale suns)
-      const cores = (function(){ const out=[]; if(!ownerCenters) return out; for (let i=0;i<ownerCenters.length;i++){ const c=ownerCenters[i]; if(!c) continue; const h=ownerHoldings?.[i]||0; const size = 4 + Math.sqrt(h)*1.2; const addr=(presetData?.owners?.[i]||'').toLowerCase(); const lab=(ownerLabels.get(addr)) || (addr? addr.slice(0,6)+'...'+addr.slice(-4) : ''); out.push({ idx:i, position:c, size, label: lab }); } return out; })();
-      const coreLayer = new ScatterplotLayer({ id:'owner-cores', data: cores, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:true, onHover: info=>{ hoveredOwner = info?.object?.idx ?? -1; render(nodes,edges,currentMode); }, onClick: info=>{ if(info?.object){ collapseOwner = info.object.idx; collapsePhase=0; } }, getPosition:d=>d.position, getRadius:d=>d.size*3.5, getFillColor:[0,255,102,60], radiusUnits:'pixels' });
-      const coreLabels = new TextLayer({ id:'owner-labels', data: cores.slice(0, Math.min(cores.length, 40)), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>[d.position[0], d.position[1]-22, 0], getText:d=>d.label, getSize: 12, getColor:[0,255,102,200], fontFamily:'IBM Plex Mono', billboard:true });
-      // 3) Tokens with orbital motion around owner center
-      const tokens = new ScatterplotLayer({
-        id: 'token-orbits',
-        data: nodes,
-        pickable: true,
-        autoHighlight: true,
-        highlightColor: [255,255,255,80],
-        getPosition: d => [ d.ownerX + Math.cos(d.orbit)*d.orbitRadius, d.ownerY + Math.sin(d.orbit)*d.orbitRadius, 0 ],
-        getRadius: d => (ownerHoldings?.[d.ownerIndex]||0) > 20 ? 8 : 4,
-        getFillColor: d => {
-          const ethos = (presetData?.ownerEthos?.[d.ownerIndex]||0);
-          return ethos>800 ? [255,215,0,200] : d.color;
-        },
-        radiusUnits:'pixels',
-        onClick: handleClick
-      });
-      // 4) Ownership connections (owner center -> orbiting token)
-      const hasArc = typeof ArcLayer === 'function';
-      const arcsData = nodes.slice(0, Math.min(nodes.length, 6000)).map(d=>({ s: [d.ownerX, d.ownerY, 0], t: [ d.ownerX + Math.cos(d.orbit)*d.orbitRadius, d.ownerY + Math.sin(d.orbit)*d.orbitRadius, 0 ] }));
-      const arcs = hasArc ? new ArcLayer({ id:'ownership-links', data: arcsData, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getSourceColor:[0,255,102,180], getTargetColor:[0,255,102,10], getWidth:1 }) : null;
-      // 5) Wallet trading highways between owners (curved arcs colored by type)
-      let highways = null;
-      try {
-        if (Array.isArray(flowEdges) && flowEdges.length && ownerCenters && Array.isArray(presetData?.ownerIndex)){
-          const ownerIdxArr = presetData.ownerIndex || [];
-          const toSegs = flowEdges.slice(0,800).map(e=>{
-            const ta = Number(e.a), tb = Number(e.b);
-            const oiA = ownerIdxArr[(ta-1)|0];
-            const oiB = ownerIdxArr[(tb-1)|0];
-            const sa = ownerCenters?.[oiA]; const sb = ownerCenters?.[oiB];
-            if (!sa || !sb) return null;
-            const w = 0.6 + Math.min(2.4, Math.sqrt(e.count||1));
-            const c = (e.type==='mint') ? [0,215,255,180] : (e.type==='sale') ? [255,215,0,180] : [0,255,102,160];
-            return { s: sa, t: sb, w, c };
-          }).filter(Boolean);
-          highways = new ArcLayer({ id:'wallet-highways', data: toSegs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getSourceColor:d=>d.c, getTargetColor:[0,0,0,0], getWidth:d=>d.w, widthUnits:'pixels' });
-        }
-      } catch {}
-
-      // 6) Whale identification beacons (TextLayer markers) for known whale types
-      const types = presetData?.ownerWalletType || [];
-      const whales = []; for (let i=0;i<(ownerCenters?.length||0);i++){ const t=String(types[i]||'').toLowerCase(); if (t==='whale_trader' || t==='diamond_hands'){ const sym = t==='whale_trader' ? '⚡' : '◆'; const vol=(buy[i]||0)+(sell[i]||0); const pos=ownerCenters[i]; if (pos) whales.push({ position:[pos[0], pos[1]-28, 0], text:sym, size: Math.min(24, 10+Math.sqrt(Math.max(1,vol))) }); } }
-      const beacons = new TextLayer({ id:'whale-beacons', data: whales, getPosition:d=>d.position, getText:d=>d.text, getSize:d=>d.size, getColor:[0,255,102,220], billboard:true, fontFamily:'IBM Plex Mono', outlineColor:[0,0,0,200], outlineWidth:2 });
-
-      // Gating by toggles
-      const showOwn = getChecked('layer-ownership', true);
-      const showBub = getChecked('layer-bubbles', true);
-      const out = [ heat, density ];
-      if (showOwn && highways) out.push(highways);
-      out.push(coreLayer, coreLabels, tokens);
-      if (showOwn && arcs) out.push(arcs);
-      out.push(beacons);
-      return [ ...out.filter(Boolean), ...base.filter(Boolean) ];
-    } catch { return base; }
-  }
-
-  function makeTraitsLayers(base){
-    const tk = presetData?.tokenTraitKey || [];
-    const traitKeys = presetData?.traitKeys || [];
-    const groups = new Map();
-    nodes.forEach(n=>{ const k=tk[n.tokenId]; if (k>=0){ if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(n); }});
-    const keys = Array.from(groups.keys());
-    const clusterPos = new Map();
-    const step = 220; keys.forEach((k,i)=>{ const ang=i*0.6; const r=220 + Math.sqrt(i)*step; clusterPos.set(k, [Math.cos(ang)*r, Math.sin(ang)*r, 0]); });
-    // Place tokens inside cluster (already improved layout elsewhere)
-    nodes.forEach(n=>{ const k=tk[n.tokenId]; const c = clusterPos.get(k) || [0,0,0]; const z=(n.rarity||0)*50; n.position = [ c[0] + ((n.tokenId%20)-10)*12, c[1] + (Math.floor(n.tokenId/20)%10 -5)*12, z]; n.radius = (n.rarity>0.9)?8:4; });
-
-    // Galaxy background: approximate Voronoi territories using soft circles sized inversely to frequency
-    const freq = new Map(); keys.forEach(k=>{ freq.set(k, (groups.get(k)||[]).length); });
-    const territoriesData = keys.map(k=>{ const c = clusterPos.get(k)||[0,0,0]; const f = freq.get(k)||1; const r = Math.max(40, Math.min(240, 200/Math.sqrt(f))); const rare = f<10; const col = rare? [255,215,0,60] : [0,255,102,30]; return { center:c, r, col }; });
-    const territories = new PolygonLayer({ id:'trait-territories', data: territoriesData, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPolygon:d=> circlePath(d.center[0], d.center[1], d.r, 40), stroked:false, filled:true, getFillColor:d=>d.col, parameters:{ depthTest:false } });
-
-    // Points layer
-    const points = (typeof PointCloudLayer==='function') ? new PointCloudLayer({ id:'trait-clusters', data:nodes, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getNormal:[0,0,1], getColor:d=> d.rarity>0.95 ? [255,0,255,220] : d.color, pointSize:3, material:{ ambient:0.5, diffuse:1, shininess:30, specularColor:[0,255,102] }, pickable:true, onClick:handleClick }) : new ScatterplotLayer({ id:'trait-clusters', data:nodes, getPosition:d=>[d.position[0],d.position[1],0], getRadius:d=>d.radius, getFillColor:d=> d.rarity>0.95 ? [255,0,255,200] : d.color, radiusUnits:'pixels', pickable:true, onClick:handleClick });
-
-    // Constellation lines within each trait family (by trait type)
-    const byType = new Map();
-    keys.forEach(k=>{ const key = String(traitKeys[k]||''); const i = key.indexOf(':'); const type = i>0? key.slice(0,i) : key; if(!byType.has(type)) byType.set(type, []); byType.get(type).push(k); });
-    const famLines = [];
-    for (const [type, arr] of byType.entries()){
-      const centers = arr.map(k=>({ k, p: clusterPos.get(k)||[0,0,0], f: freq.get(k)||1 }));
-      if (centers.length<3) continue;
-      // sort around centroid
-      let sx=0,sy=0; centers.forEach(o=>{ sx+=o.p[0]; sy+=o.p[1]; }); const cx=sx/centers.length, cy=sy/centers.length;
-      centers.sort((a,b)=> Math.atan2(a.p[1]-cy,a.p[0]-cx) - Math.atan2(b.p[1]-cy,b.p[0]-cx));
-      for (let i=0;i<centers.length;i++){ const a=centers[i].p; const b=centers[(i+1)%centers.length].p; famLines.push({ s:a, t:b }); }
-    }
-    const family = new LineLayer({ id:'trait-families', data:famLines, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getColor:[0,255,102,80], getWidth:0.8, widthUnits:'pixels' });
-
-    // DNA strands: similarity connections between rare tokens (fetch-once cache)
-    const byId = new Map(nodes.map(n=>[n.id, n]));
-    const dnaSegs = [];
-    try {
-      // sample rare tokens from rare groups (freq<10)
-      const rareGroups = keys.filter(k=> (freq.get(k)||0) < 10).slice(0, 20);
-      const sample = [];
-      for (const k of rareGroups){ const list = (groups.get(k)||[]); for (let i=0;i<Math.min(4, list.length); i++){ sample.push(list[i]); } }
-      for (const n of sample){
-        if (!dnaCache.has(n.id)){
-          jfetch(`/api/token/${n.id}/similar-advanced`).then(j=>{ if (j && Array.isArray(j.similar)) dnaCache.set(n.id, j.similar); });
-        }
-        const sims = dnaCache.get(n.id) || [];
-        for (const s of sims){ const other = byId.get(Number(s.token_id)); if (!other) continue; const a=n.position, b=other.position; const sim=Number(s.similarity)||0.6; const mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2 - 20; const path=[a, [mx,my,0], b]; const col=[255,215,0, Math.round(80+sim*120)]; const w= 0.5 + sim*2.0; dnaSegs.push({ path, col, w }); }
-      }
-    } catch {}
-    const dna = (dnaSegs.length && typeof PathLayer==='function') ? new PathLayer({ id:'dna-strands', data: dnaSegs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPath:d=>d.path, getColor:d=>d.col, getWidth:d=>d.w, widthUnits:'pixels', parameters:{ depthTest:false } }) : null;
-    // Particles flowing along DNA (animated)
-    const dnaDots = (dnaSegs.length) ? new ScatterplotLayer({ id:'dna-dots', data: dnaSegs.slice(0,200).map((d,i)=>({ d, i })), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:o=>{ const t=( (pulseT*0.3 + (o.i%10)/10) % 1 ); const a=o.d.path[0], m=o.d.path[1], b=o.d.path[2]; const x=(1-t)*(1-t)*a[0] + 2*(1-t)*t*m[0] + t*t*b[0]; const y=(1-t)*(1-t)*a[1] + 2*(1-t)*t*m[1] + t*t*b[1]; return [x,y,0]; }, getRadius:1.8, getFillColor:[255,215,0,200], radiusUnits:'pixels', pickable:false, updateTriggers:{ getPosition:[pulseT] }, parameters:{ depthTest:false } }) : null;
-
-    // Labels: show only when sufficiently zoomed
-    const labelsData = (currentZoom>=0.2) ? keys.map(k=>({ k, center: clusterPos.get(k)||[0,0,0] })) : [];
-    const labels = new TextLayer({ id:'trait-labels', data: labelsData, getPosition:d=>d.center, getText:d=> traitKeys[d.k]||('Trait '+d.k), getSize:14, getColor:[0,255,102,200], fontFamily:'IBM Plex Mono', getPixelOffset:[0,-20] });
-
-    // Rare particle sparkles
-    const rare = new ScatterplotLayer({ id:'rare-spark', data: nodes.filter(n=> (n.rarity||0)>0.95), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getRadius: d=> 2 + 1.2*Math.max(0, Math.sin(pulseT*3 + (d.id||0)*0.3)), getFillColor:[255,0,255,220], radiusUnits:'pixels', pickable:false, updateTriggers:{ getRadius: [pulseT] } });
-    return [ territories, family, dna, dnaDots, rare, points, ...base ];
-  }
-
   function helixPath(list){
     if (!list || list.length<3) return [];
     const c = list.reduce((acc,n)=>{acc[0]+=n.position[0];acc[1]+=n.position[1];return acc;},[0,0]); c[0]/=list.length; c[1]/=list.length;
@@ -1045,88 +1303,608 @@ function buildFlowParticles(limit=600){
     return path;
   }
 
-  function makeWalletsLayers(base){
-    // Build ocean positions: X by volume, Y by avg hold days
-    const ownersArr = presetData?.owners || [];
-    const buy = presetData?.ownerBuyVol || []; const sell = presetData?.ownerSellVol || [];
-    const avgHold = presetData?.ownerAvgHoldDays || [];
-    const type = presetData?.ownerWalletType || [];
-    const holdings = ownerHoldings || [];
-    const width = (center.clientWidth||1200), height=(center.clientHeight||800); const padX=100, padY=100;
-    const x0=padX, x1=width-padX, y0=padY, y1=height-padY;
-    const vols = ownersArr.map((_,i)=> (buy[i]||0)+(sell[i]||0));
-    const maxVol = Math.max(1, ...vols);
-    const maxHold = Math.max(1, ...avgHold.filter(v=>v!=null).map(Number));
-    ownerOceanPos = new Array(ownersArr.length);
-    for (let i=0;i<ownersArr.length;i++){
-      const v = Math.max(0, vols[i]||0) / maxVol;
-      const h = Math.max(0, Math.min(1, Number(avgHold[i]||0)/maxHold));
-      const x = x0 + v*(x1-x0);
-      const y = y0 + (1-h)*(y1-y0); // deep holders lower (larger y)
-      ownerOceanPos[i] = [x,y,0];
-    }
-
-    const owners = ownersArr.map((addr,i)=>({ address: addr, position: ownerOceanPos[i]||[0,0,0], vol: vols[i]||0, avgHold: avgHold[i]||0, holdings: holdings[i]||0, type: (type[i]||'').toString().toLowerCase() }));
-    const ranked = owners.slice().sort((a,b)=> (b.holdings - a.holdings)).slice(0,12);
-
-    // Ocean depth bands (thermoclines)
-    const bandsData = [];
-    const bands = 4; for (let k=0;k<bands;k++){ const yTop = y0 + k*(y1-y0)/bands; const yBot = y0 + (k+1)*(y1-y0)/bands; const alpha = 20 + k*10; bandsData.push({ poly: [[x0,yTop,0],[x1,yTop,0],[x1,yBot,0],[x0,yBot,0]], col:[0,100,80, alpha] }); }
-    const bandsL = new PolygonLayer({ id:'ocean-bands', data: bandsData, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPolygon:d=>d.poly, stroked:false, filled:true, getFillColor:d=>d.col, parameters:{ depthTest:false } });
-
-    // Ocean currents: wallet relationships
-    if (!whalesRelationships){ try { whalesRelationships = jfetch('/api/wallet-relationships?min_trades=3'); } catch {} }
-    let currentL = null;
+  function buildLifecycleTree({ zoom = 0, zoomNorm = 1 }){
+    const result = { nodes: [], edges: [], labels: [] };
     try {
-      // Resolve async cache to concrete rows if it’s a promise and ready
-      if (whalesRelationships && typeof whalesRelationships.then==='function'){
-        whalesRelationships = null; // avoid double awaiting during layer construction
-        // lazy background load
-        jfetch('/api/wallet-relationships?min_trades=3').then(j=>{ whalesRelationships = j||{relationships:[]}; render(nodes, edges, effectiveMode(currentMode)); });
+      if (!Array.isArray(nodes) || !nodes.length || !presetData) return result;
+      const owners = Array.isArray(presetData?.owners) ? presetData.owners : [];
+      if (!owners.length) return result;
+      const ownerTypesRaw = Array.isArray(presetData?.ownerWalletType) ? presetData.ownerWalletType : [];
+      const buyVol = Array.isArray(presetData?.ownerBuyVol) ? presetData.ownerBuyVol : [];
+      const sellVol = Array.isArray(presetData?.ownerSellVol) ? presetData.ownerSellVol : [];
+      const width = center?.clientWidth || 1200;
+      const height = center?.clientHeight || 800;
+      const cx = width / 2;
+      const cy = height / 2;
+      const dim = Math.max(400, Math.min(width, height));
+      const rootRadius = clamp(dim * 0.18, 80, 260);
+      const level1Radius = clamp(dim * 0.34, rootRadius + 40, rootRadius + 240);
+      const level2Radius = clamp(dim * 0.48, level1Radius + 50, level1Radius + 280);
+      const nowSec = Date.now() / 1000;
+      const ownerTypes = owners.map((_, i) => (ownerTypesRaw[i] || '').toString().toLowerCase());
+      const holdings = Array.isArray(ownerHoldings) ? ownerHoldings : [];
+
+      const tokensByOwner = new Map();
+      nodes.forEach(token => {
+        const oi = token.ownerIndex;
+        if (oi == null || oi < 0) return;
+        if (!tokensByOwner.has(oi)) tokensByOwner.set(oi, []);
+        tokensByOwner.get(oi).push(token);
+      });
+
+      let whaleIndices = owners
+        .map((_, idx) => ((ownerTypes[idx] === 'whale' || ownerTypes[idx] === 'whale_trader') ? idx : -1))
+        .filter(idx => idx >= 0);
+      if (!whaleIndices.length){
+        whaleIndices = owners
+          .map((_, idx) => ({ idx, weight: holdings[idx] || 0 }))
+          .sort((a,b)=> (b.weight - a.weight))
+          .slice(0, Math.min(8, owners.length))
+          .map(o=>o.idx);
       }
-      const data = (whalesRelationships && whalesRelationships.relationships) ? whalesRelationships.relationships : [];
-      const map = new Map(ownersArr.map((a,i)=>[(a||'').toLowerCase(), i]));
-      const paths = [];
-      for (const r of data){
-        const a = map.get((r.wallet_a||r.walletA||'').toLowerCase());
-        const b = map.get((r.wallet_b||r.walletB||'').toLowerCase());
-        if (a==null || b==null) continue; const pa=ownerOceanPos[a], pb=ownerOceanPos[b]; if (!pa||!pb) continue;
-        const vol = Number(r.total_volume||r.volume||r.trade_volume||0); const cnt = Number(r.trade_count||r.count||1);
-        const mx=(pa[0]+pb[0])/2, my=(pa[1]+pb[1])/2 + 30; const path=[pa, [mx,my,0], pb];
-        const w= 0.5 + Math.min(3, Math.log1p(vol || cnt));
-        const c=[0,180,200,120];
-        paths.push({ path, w, c });
+      if (!whaleIndices.length) return result;
+
+      const angleStep = (Math.PI * 2) / whaleIndices.length;
+      const baseAngleOffset = -Math.PI / 2;
+      const baseSpread = Math.min(Math.PI / 1.8, angleStep * 0.9 + 0.3);
+      const activeLimit = zoom < 1.05 ? 14 : (zoom < 1.5 ? 40 : 120);
+      const leafLimit = zoom < 1.05 ? 28 : (zoom < 1.5 ? 90 : 260);
+
+      const shortAddress = (addr) => {
+        if (!addr || typeof addr !== 'string') return '—';
+        const lower = addr.toLowerCase();
+        const cached = ownerLabels.get(lower);
+        if (cached) return cached;
+        if (lower.length <= 10) return lower;
+        return `${lower.slice(0, 6)}...${lower.slice(-4)}`;
+      };
+
+      const tokenStatus = (token) => {
+        const frozen = !!token.frozen;
+        const last = Number(token.lastActivity || 0);
+        const daysSince = last > 0 ? (nowSec - last) / 86400 : Infinity;
+        const dormant = !frozen && (!!token.dormant || daysSince >= 90);
+        return { frozen, dormant };
+      };
+
+      const bundleList = (list, limit, classifier) => {
+        const arr = Array.isArray(list) ? list.slice() : [];
+        if (!arr.length) return [];
+        arr.sort((a,b)=> Number(b.lastActivity || 0) - Number(a.lastActivity || 0));
+        const buckets = [];
+        if (arr.length <= limit){
+          for (const token of arr){
+            const status = classifier ? classifier([token]) : {};
+            buckets.push({
+              ids: [token.id],
+              primaryId: token.id,
+              tokens: [token],
+              weight: 1,
+              status
+            });
+          }
+          return buckets;
+        }
+        const size = Math.max(1, Math.ceil(arr.length / limit));
+        for (let i=0;i<arr.length;i+=size){
+          const chunk = arr.slice(i, i+size);
+          const status = classifier ? classifier(chunk) : {};
+          buckets.push({
+            ids: chunk.map(t=>t.id),
+            primaryId: chunk[0]?.id,
+            tokens: chunk,
+            weight: chunk.length,
+            status
+          });
+        }
+        return buckets;
+      };
+
+      whaleIndices.forEach((ownerIdx, order) => {
+        if (result.edges.length >= 1500) return;
+        const angle = baseAngleOffset + order * angleStep;
+        const rootPos = [
+          cx + Math.cos(angle) * rootRadius,
+          cy + Math.sin(angle) * rootRadius,
+          0
+        ];
+        const addressRaw = owners[ownerIdx] || '';
+        const addressLower = addressRaw.toLowerCase();
+        const ownedTokens = tokensByOwner.get(ownerIdx) || [];
+        const rootWeight = Math.max(1, (holdings[ownerIdx] || 0) + Number(buyVol[ownerIdx] || 0) + Number(sellVol[ownerIdx] || 0));
+        const rootNode = {
+          id: `tree-root-${ownerIdx}`,
+          level: 0,
+          angle,
+          position: rootPos,
+          ownerIndex: ownerIdx,
+          address: addressLower,
+          addressRaw,
+          tokens: ownedTokens.map(t=>t.id),
+          frozen: false,
+          dormant: false,
+          whale: true,
+          weight: rootWeight,
+          displayRadius: clamp(6 + Math.log1p(rootWeight), 6, 12),
+          label: shortAddress(addressRaw)
+        };
+        result.nodes.push(rootNode);
+        result.labels.push({ position: [rootPos[0], rootPos[1] - 18, 0], label: rootNode.label, ownerIndex });
+
+        const activeTokens = [];
+        const frozenTokens = [];
+        const dormantTokens = [];
+        for (const token of ownedTokens){
+          const status = tokenStatus(token);
+          if (status.frozen) frozenTokens.push(token);
+          else if (status.dormant) dormantTokens.push(token);
+          else activeTokens.push(token);
+        }
+
+        const classifyActive = () => ({ frozen: false, dormant: false });
+        const classifyInactive = (chunk) => {
+          let frozenCount = 0;
+          let dormantCount = 0;
+          for (const tok of chunk){
+            const status = tokenStatus(tok);
+            if (status.frozen) frozenCount++;
+            else if (status.dormant) dormantCount++;
+          }
+          return {
+            frozen: frozenCount >= dormantCount && frozenCount > 0,
+            dormant: dormantCount > 0 && dormantCount >= frozenCount
+          };
+        };
+
+        const activeBuckets = bundleList(activeTokens, activeLimit, classifyActive);
+        const inactiveBuckets = bundleList([...frozenTokens, ...dormantTokens], leafLimit, classifyInactive);
+
+        const activeSpread = activeBuckets.length > 1
+          ? baseSpread
+          : baseSpread * 0.45;
+
+        const activeNodes = [];
+        activeBuckets.forEach((bucket, idx) => {
+          if (result.edges.length >= 1500) return;
+          const offset = activeBuckets.length <= 1
+            ? 0
+            : ((idx / (activeBuckets.length - 1)) - 0.5) * activeSpread;
+          const nodeAngle = angle + offset;
+          const pos = [
+            cx + Math.cos(nodeAngle) * level1Radius,
+            cy + Math.sin(nodeAngle) * level1Radius,
+            0
+          ];
+          const node = {
+            id: `tree-active-${ownerIdx}-${idx}`,
+            level: 1,
+            position: pos,
+            angle: nodeAngle,
+            ownerIndex,
+            tokens: bucket.ids,
+            primaryTokenId: bucket.primaryId,
+            frozen: false,
+            dormant: false,
+            aggregated: bucket.weight > 1,
+            weight: bucket.weight,
+            displayRadius: clamp(bucket.weight > 1 ? 4 + Math.log1p(bucket.weight) : 4, 3.5, 8)
+          };
+          activeNodes.push(node);
+          result.nodes.push(node);
+          result.edges.push({ s: rootPos, t: pos, w: bucket.weight, type: 'active', ownerIndex });
+        });
+
+        const parents = activeNodes.length ? activeNodes : [rootNode];
+        const leavesPerParent = parents.map(()=>[]);
+        inactiveBuckets.forEach((bucket, idx) => {
+          const target = parents.length ? (idx % parents.length) : 0;
+          leavesPerParent[target].push(bucket);
+        });
+
+        parents.forEach((parentNode, parentIdx) => {
+          if (result.edges.length >= 1500) return;
+          const assigned = leavesPerParent[parentIdx];
+          if (!assigned || !assigned.length) return;
+          const leafSpread = assigned.length > 1 ? baseSpread * 0.65 : baseSpread * 0.4;
+          assigned.forEach((bucket, leafIdx) => {
+            if (result.edges.length >= 1500) return;
+            const offset = assigned.length <= 1
+              ? 0
+              : ((leafIdx / (assigned.length - 1)) - 0.5) * leafSpread;
+            const leafAngle = parentNode.angle + offset;
+            const pos = [
+              cx + Math.cos(leafAngle) * level2Radius,
+              cy + Math.sin(leafAngle) * level2Radius,
+              0
+            ];
+            const frozenFlag = !!bucket.status?.frozen;
+            const dormantFlag = !frozenFlag && !!bucket.status?.dormant;
+            const node = {
+              id: `tree-leaf-${ownerIdx}-${parentIdx}-${leafIdx}`,
+              level: 2,
+              position: pos,
+              angle: leafAngle,
+              ownerIndex,
+              tokens: bucket.ids,
+              primaryTokenId: bucket.primaryId,
+              frozen: frozenFlag,
+              dormant: dormantFlag,
+              aggregated: bucket.weight > 1,
+              weight: bucket.weight,
+              displayRadius: clamp(bucket.weight > 1 ? 3 + Math.log1p(bucket.weight) : 3, 2.5, 6)
+            };
+            result.nodes.push(node);
+            result.edges.push({ s: parentNode.position, t: pos, w: bucket.weight, type: frozenFlag ? 'frozen' : 'dormant', ownerIndex });
+          });
+        });
+      });
+
+      return result;
+    } catch {
+      return result;
+    }
+  }
+
+  function makeWalletsLayers(base, opts = {}){
+    try {
+      const zoomNorm = Number.isFinite(opts?.zoomNorm) ? opts.zoomNorm : 1;
+      const zoom = Number.isFinite(opts?.zoom) ? opts.zoom : currentZoom;
+      const tree = buildLifecycleTree({ zoom, zoomNorm });
+      if (!tree || !tree.nodes.length) return base;
+
+      const fade = clamp(0.55 + zoomNorm * 0.45, 0.35, 1);
+
+      const branches = new LineLayer({
+        id: 'tree-branches',
+        data: tree.edges,
+        coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+        getSourcePosition: d => d.s,
+        getTargetPosition: d => d.t,
+        getWidth: d => 1 + Math.min(3, Math.log1p(Math.max(1e-6, d.w || 1))),
+        widthUnits: 'pixels',
+        getColor: d => {
+          const alpha = Math.round(140 * fade);
+          if (d.type === 'frozen') return [68, 136, 255, alpha];
+          if (d.type === 'dormant') return [110, 110, 110, Math.round(alpha * 0.9)];
+          return [90, 180, 120, alpha];
+        },
+        parameters: { depthTest: false }
+      });
+
+      const handleTreeClick = async (info) => {
+        const obj = info?.object;
+        if (!obj) return;
+        try {
+          if (obj.level === 0 && obj.addressRaw){
+            await openWallet(obj.addressRaw);
+            return;
+          }
+          const primary = obj.primaryTokenId || (Array.isArray(obj.tokens) ? obj.tokens[0] : null);
+          if (primary) focusSelect(primary);
+        } catch {}
+      };
+
+      const nodeLayer = new ScatterplotLayer({
+        id: 'tree-nodes',
+        data: tree.nodes,
+        coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+        pickable: true,
+        autoHighlight: true,
+        highlightColor: [255, 255, 255, 110],
+        getPosition: d => d.position,
+        getRadius: d => d.displayRadius ?? (d.level === 0 ? 6 : d.level === 1 ? 4 : 3),
+        radiusUnits: 'pixels',
+        stroked: true,
+        getLineWidth: 0.75,
+        lineWidthUnits: 'pixels',
+        getFillColor: d => {
+          if (d.level === 0) return [0, 255, 160, Math.round(210 * fade)];
+          if (d.frozen) return [68, 136, 255, Math.round(220 * fade)];
+          if (d.dormant) return [102, 102, 102, Math.round(205 * fade)];
+          return [0, 255, 102, Math.round(210 * fade)];
+        },
+        onClick: handleTreeClick,
+        parameters: { depthTest: false }
+      });
+
+      const layersOut = [branches, nodeLayer];
+
+      if (tree.labels.length && typeof TextLayer === 'function' && zoom >= 2){
+        layersOut.push(new TextLayer({
+          id: 'tree-labels',
+          data: tree.labels,
+          coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+          getPosition: d => d.position,
+          getText: d => d.label,
+          getSize: 16,
+          getColor: [255, 255, 255, Math.round(220 * fade)],
+          fontFamily: 'IBM Plex Mono, monospace',
+          getTextAnchor: 'middle',
+          getAlignmentBaseline: 'bottom',
+          getPixelOffset: [0, -8],
+          outlineColor: [0, 0, 0, 160],
+          outlineWidth: 2
+        }));
       }
-      if (paths.length) currentL = new PathLayer({ id:'ocean-currents', data: paths, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPath:d=>d.path, getColor:d=>d.c, getWidth:d=>d.w, widthUnits:'pixels' });
+
+      return layersOut;
+    } catch {
+      return base;
+    }
+  }
+
+  function getRhythmBuckets(interval='hour'){
+    try {
+      if (rhythmActivity.has(interval)) return rhythmActivity.get(interval);
+      if (!rhythmActivityPending.has(interval)){
+        const promise = jfetch(`/api/activity?interval=${interval}`).then(res => {
+          rhythmActivityPending.delete(interval);
+          const buckets = Array.isArray(res?.buckets)
+            ? res.buckets.filter(b => Number.isFinite(b?.t))
+            : [];
+          rhythmActivity.set(interval, buckets);
+          try { render(nodes, edges, effectiveMode(currentMode)); } catch {}
+          return buckets;
+        }).catch(()=>{
+          rhythmActivityPending.delete(interval);
+        });
+        rhythmActivityPending.set(interval, promise);
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  function rhythmDotColor(d, fade){
+    const base = Array.isArray(d?.color) ? d.color : COLORS.active;
+    const mix = (v)=> clamp(Math.round(40 + v * 0.65), 0, 255);
+    const r = mix(base[0] ?? 0);
+    const g = mix(base[1] ?? 0);
+    const b = mix(base[2] ?? 0);
+    const alpha = clamp(Math.round((base[3] ?? 200) * fade), 40, 235);
+    return [r, g, b, alpha];
+  }
+
+  function rhythmDotStroke(d, fade){
+    const base = Array.isArray(d?.color) ? d.color : COLORS.active;
+    const r = clamp(Math.round((base[0] ?? 0) * 0.75 + 30), 0, 255);
+    const g = clamp(Math.round((base[1] ?? 0) * 0.75 + 30), 0, 255);
+    const b = clamp(Math.round((base[2] ?? 0) * 0.75 + 30), 0, 255);
+    const alpha = clamp(Math.round((base[3] ?? 180) * Math.max(0.35, fade * 0.9)), 40, 230);
+    return [r, g, b, alpha];
+  }
+
+  function ensureHeatmap(){
+    try {
+      if (heatmapCache || heatmapLoading) return;
+      heatmapLoading = true;
+      jfetch('/api/heatmap').then(j=>{
+        heatmapCache = j || { grid: [] };
+        heatmapLoading = false;
+        try { render(nodes, edges, effectiveMode(currentMode)); } catch {}
+      }).catch(()=>{ heatmapLoading = false; });
     } catch {}
+  }
 
-    const creatureDots = new ScatterplotLayer({
-      id:'sea-creatures',
-      data: owners,
-      coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
-      pickable:true,
-      autoHighlight:true,
-      highlightColor:[255,255,255,120],
-      onClick: async (info)=>{ if(info?.object){ await openWallet(info.object.address);} },
-      getPosition:d=>d.position,
-      getRadius:d=> 10 + Math.min(16, Math.sqrt(Math.max(1,d.holdings))*1.8),
-      radiusUnits:'pixels',
-      stroked:true,
-      getLineWidth:1.2,
-      lineWidthUnits:'pixels',
-      getFillColor:d=>{
-        const t = String(d.type||'');
-        if (t==='whale_trader' || t==='whale') return [0,255,160,160];
-        if (t==='diamond_hands') return [255,215,0,160];
-        if (t==='flipper') return [0,200,255,140];
-        return [0,255,102,140];
+  function buildRhythmLayers({ zoom = 0, zoomNorm = 1 }){
+    const before = [];
+    const after = [];
+    try {
+      if (!Array.isArray(nodes) || !nodes.length) return { before, after };
+      const width = center?.clientWidth || 1200;
+      const height = center?.clientHeight || 800;
+      const x0 = 80;
+      const x1 = width - 80;
+      const y0 = 80;
+      const y1 = height - 80;
+      let t0 = timelineLimits?.t0;
+      let t1 = timelineLimits?.t1;
+      if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0){
+        const arr = Array.isArray(presetData?.tokenLastActivity)
+          ? presetData.tokenLastActivity.filter(v => Number.isFinite(v))
+          : [];
+        if (arr.length){
+          t0 = Math.min(...arr);
+          t1 = Math.max(...arr);
+        } else {
+          const now = Math.floor(Date.now()/1000);
+          t1 = now;
+          t0 = now - 86400;
+        }
       }
-    });
+      const dt = (t1 - t0) || 1;
+      const priceArr = Array.isArray(presetData?.tokenLastSalePrice) && presetData.tokenLastSalePrice.length
+        ? presetData.tokenLastSalePrice
+        : (presetData?.tokenPrice || []);
+      const priceMax = priceArr.reduce((max,val)=> (Number.isFinite(val) && val>max) ? val : max, 1);
+      const vmaxLog = Math.log1p(Math.max(1, priceMax));
+      const mapX = (sec)=>{
+        const ratio = (sec - t0) / dt;
+        const clamped = clamp(ratio, 0, 1);
+        return x0 + clamped * (x1 - x0);
+      };
+      const mapY = (price)=>{
+        const v = Math.log1p(Math.max(0, price || 0));
+        const ratio = vmaxLog > 0 ? (v / vmaxLog) : 0;
+        return y0 + (1 - ratio) * (y1 - y0);
+      };
 
-    // Sonar pulses: light ripples on top whales
-    const pulses = new ScatterplotLayer({ id:'sonar-pulses', data: ranked.map((o,i)=>({ p:o.position, i })), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, pickable:false, getPosition:d=>d.p, getRadius:d=> 12 + 10*(0.5+0.5*Math.sin(pulseT*2 + d.i)), getFillColor:[0,255,102,30], radiusUnits:'pixels' });
+      // Heatmap backdrop (zoomed out)
+      if (zoomNorm < 0.45){
+        if (!heatmapCache) ensureHeatmap();
+        const grid = heatmapCache?.grid;
+        if (Array.isArray(grid) && grid.length){
+          const cellWidth = (x1 - x0) / 24;
+          const cellHeight = (y1 - y0) / 7;
+          let maxW = 0;
+          const cells = [];
+          for (let r=0;r<grid.length;r++){
+            const row = grid[r] || [];
+            for (let c=0;c<24;c++){
+              const cell = row[c] || { count:0, volume:0 };
+              const weight = Number(cell.count||0) + Number(cell.volume||0) * 0.2;
+              if (weight <= 0) continue;
+              if (weight > maxW) maxW = weight;
+              const x = x0 + c * cellWidth;
+              const y = y0 + r * cellHeight;
+              cells.push({
+                path: [
+                  [x, y, 0],
+                  [x + cellWidth, y, 0],
+                  [x + cellWidth, y + cellHeight, 0],
+                  [x, y + cellHeight, 0]
+                ],
+                weight
+              });
+            }
+          }
+          if (cells.length && maxW>0){
+            before.push(new PolygonLayer({
+              id: 'rhythm-heatmap',
+              data: cells,
+              coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+              stroked: false,
+              filled: true,
+              getPolygon: d => d.path,
+              getFillColor: d => {
+                const ratio = clamp(d.weight / maxW, 0, 1);
+                const alpha = Math.round(45 + ratio * 55);
+                return [40, 120, 90, alpha];
+              },
+              parameters: { depthTest: false }
+            }));
+          }
+        }
+      }
 
-    return [ bandsL, currentL, creatureDots, pulses, ...base.filter(Boolean) ];
+      // Activity buckets (adaptive interval)
+      const interval = (zoomNorm < 0.4) ? 'day' : 'hour';
+      const buckets = getRhythmBuckets(interval);
+      if (Array.isArray(buckets) && buckets.length > 1){
+        const metrics = buckets.map(b => {
+          const vol = Number(b.volume || 0);
+          const cnt = Number(b.count || 0);
+          return Number.isFinite(vol) && vol>0 ? vol : cnt;
+        });
+        const maxMetric = metrics.reduce((m,v)=> (Number.isFinite(v) && v>m) ? v : m, 0);
+        if (maxMetric > 0){
+          const pathPoints = [];
+          const pointData = [];
+          buckets.forEach((bucket, idx) => {
+            const metric = metrics[idx] || 0;
+            if (metric <= 0) return;
+            const sec = Number(bucket.t) / 1000;
+            if (!Number.isFinite(sec)) return;
+            const x = mapX(sec);
+            if (!Number.isFinite(x)) return;
+            const ratio = clamp(metric / maxMetric, 0, 1);
+            const y = y1 - ratio * (y1 - y0) * 0.35;
+            pathPoints.push([x, y, 0]);
+            pointData.push({ position:[x, y, 0], ratio, bucket });
+          });
+          const lineFade = clamp(0.35 + zoomNorm * 0.65, 0.35, 1);
+          if (pathPoints.length > 1 && typeof PathLayer === 'function'){
+            after.push(new PathLayer({
+              id: 'rhythm-volume-line',
+              data: [{ path: pathPoints }],
+              coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+              getPath: d => d.path,
+              getColor: [90, 200, 150, Math.round(150 * lineFade)],
+              getWidth: 2,
+              widthUnits: 'pixels',
+              parameters: { depthTest: false }
+            }));
+          }
+          if (pointData.length){
+            after.push(new ScatterplotLayer({
+              id: 'rhythm-volume-points',
+              data: pointData,
+              coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+              pickable: false,
+              getPosition: d => d.position,
+              getRadius: d => 2.5 + d.ratio * 10,
+              radiusUnits: 'pixels',
+              stroked: false,
+              getFillColor: d => [90, 200, 150, Math.round(120 * clamp(d.ratio, 0.2, 1))],
+              parameters: { depthTest: false }
+            }));
+          }
+        }
+      }
+
+      // Transfer particles (subtle motion)
+      try {
+        if (getChecked('layer-trades', true)){
+          const particleLimit = Math.round(200 + zoomNorm * 400);
+          const particles = buildFlowParticles(clamp(particleLimit, 100, 700));
+          if (particles.length){
+            after.push(new ScatterplotLayer({
+              id: 'rhythm-trace',
+              data: particles,
+              coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+              pickable: false,
+              getPosition: d => d.p,
+              getRadius: d => 1.4 + Math.min(2.6, Math.sqrt(Math.max(0, d.price || 0)) * 0.25),
+              radiusUnits: 'pixels',
+              getFillColor: [0, 255, 102, Math.round(90 + 80 * zoomNorm)],
+              parameters: { depthTest: false },
+              updateTriggers: { getPosition: [pulseT] }
+            }));
+          }
+        }
+      } catch {}
+
+      // Flow bundles (optional)
+      if (Array.isArray(flowEdges) && flowEdges.length){
+        const showSales = getChecked('layer-sales', true);
+        const showTransfers = getChecked('layer-transfers', true);
+        const showMints = getChecked('layer-mints', true);
+        const cap = Math.max(1, Math.min(edgeCount || 200, 400));
+        const flowLayer = buildMarketFlowLayer({
+          id: 'rhythm-flows',
+          flows: flowEdges,
+          nodes,
+          zoomNorm,
+          maxEdges: cap,
+          filters: { sale: showSales, transfer: showTransfers, mint: showMints }
+        });
+        if (flowLayer) after.push(flowLayer);
+      }
+
+      // Token dots (primary chronograph layer)
+      const pointFade = clamp(0.35 + zoomNorm * 0.65, 0.35, 1);
+      after.push(new ScatterplotLayer({
+        id: 'rhythm-dots',
+        data: nodes,
+        coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+        pickable: true,
+        autoHighlight: true,
+        highlightColor: [255, 255, 255, 90],
+        getPosition: d => d.position,
+        getRadius: d => {
+          const saleC = Number(d.saleCount || 0);
+          const base = 2 + Math.min(5, Math.sqrt(Math.max(1, saleC)));
+          const scale = 0.85 + zoomNorm * 0.4;
+          return base * scale;
+        },
+        radiusUnits: 'pixels',
+        radiusMinPixels: 1.6,
+        radiusMaxPixels: 10,
+        stroked: true,
+        getLineWidth: 0.7,
+        lineWidthUnits: 'pixels',
+        getFillColor: d => rhythmDotColor(d, pointFade),
+        getLineColor: d => rhythmDotStroke(d, pointFade),
+        onClick: handleClick,
+        parameters: { depthTest: false, blend: true, blendFunc: [770, 1], blendEquation: 32774 },
+        updateTriggers: { getFillColor: [pointFade], getRadius: [zoomNorm] }
+      }));
+
+      return { before, after };
+    } catch {
+      return { before, after };
+    }
   }
 
   async function openWallet(addr){
@@ -1213,150 +1991,155 @@ function buildFlowParticles(limit=600){
   }
 
   function fitViewToNodes(list){
-    if (!list || !list.length) return;
-    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
-    for (const n of list){ const p=n.position; if (!p) continue; if (p[0]<minX) minX=p[0]; if (p[1]<minY) minY=p[1]; if (p[0]>maxX) maxX=p[0]; if (p[1]>maxY) maxY=p[1]; }
-    const w = center.clientWidth||1200, h=center.clientHeight||800; const pad = 120;
-    const contentW = Math.max(1, maxX-minX), contentH = Math.max(1, maxY-minY);
-    const scale = Math.min((w-pad*2)/contentW, (h-pad*2)/contentH);
-    const zoom = Math.log2(scale);
-    const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
-    deckInst.setProps({ viewState: { target:[cx,cy,0], zoom } });
+    try {
+      if (!list || !list.length) return false;
+      const w = center?.clientWidth || 0;
+      const h = center?.clientHeight || 0;
+      const pad = 120;
+      if (!(w > pad * 2 && h > pad * 2)) return false;
+
+      let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+      for (const n of list){
+        const p = n?.position;
+        if (!p) continue;
+        if (p[0] < minX) minX = p[0];
+        if (p[1] < minY) minY = p[1];
+        if (p[0] > maxX) maxX = p[0];
+        if (p[1] > maxY) maxY = p[1];
+      }
+      if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return false;
+
+      const contentW = Math.max(1, maxX - minX);
+      const contentH = Math.max(1, maxY - minY);
+      const scale = Math.min((w - pad * 2) / contentW, (h - pad * 2) / contentH);
+      if (!Number.isFinite(scale) || scale <= 0) return false;
+
+      const zoom = Math.log2(scale) - 0.5;
+      if (!Number.isFinite(zoom)) return false;
+
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      deckInst.setProps({ viewState: { target: [cx, cy, 0], zoom } });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // Transfers view helpers
-  function makeTransfersLayers(base){
-    const add = [];
-    if (flowEdges && flowEdges.length){
-      const showSales = getChecked('layer-sales', true);
-      const showTransfers = getChecked('layer-transfers', true);
-      const showMints = getChecked('layer-mints', true);
-      const finitePoint = (p)=> Array.isArray(p) && p.length>=2 && p.every(v=>Number.isFinite(v));
-      const segs = flowEdges.slice(0,800).map(e=>{
-        const s = nodes[e.a]?.position;
-        const t = nodes[e.b]?.position;
-        if (!finitePoint(s) || !finitePoint(t)) return null;
-        const w = 0.6 + Math.min(2.4, Math.sqrt(e.count||1));
-        const type = (e.type||'transfer');
-        if (type==='sale' && !showSales) return null;
-        if (type==='mint' && !showMints) return null;
-        if (type==='transfer' && !showTransfers) return null;
-        const c = (type==='sale') ? [255,0,102,180] : (type==='mint') ? [255,255,255,160] : [0,160,255,160];
-        return { s, t, w, c };
-      }).filter(Boolean);
-      if (segs.length) {
-        add.push(new ArcLayer({ id:'flows', data:segs, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getSourcePosition:d=>d.s, getTargetPosition:d=>d.t, getSourceColor:d=>d.c, getTargetColor:d=>d.c, widthUnits:'pixels', widthMinPixels:2, parameters:{ blend:true, depthTest:false, blendFunc:[770,1], blendEquation:32774 } }));
+  function buildMarketFlowLayer({ id = 'flows', flows, nodes, zoomNorm = 1, maxEdges = 300, filters = {} }){
+    try {
+      if (!Array.isArray(flows) || !flows.length || !Array.isArray(nodes)) return null;
+      const saleEnabled = filters.sale !== false;
+      const transferEnabled = filters.transfer !== false;
+      const mintEnabled = filters.mint !== false;
+      const mixedEnabled = filters.mixed != null ? !!filters.mixed : (saleEnabled || transferEnabled);
+
+      const filtered = [];
+      for (const edge of flows){
+        if (!edge) continue;
+        const type = (edge.type || 'transfer').toString().toLowerCase();
+        const srcNode = nodes[edge.sourceIndex];
+        const tgtNode = nodes[edge.targetIndex];
+        if (!srcNode || !tgtNode || !Array.isArray(srcNode.position) || !Array.isArray(tgtNode.position)) continue;
+        if (type === 'sale' && !saleEnabled) continue;
+        if (type === 'transfer' && !transferEnabled) continue;
+        if (type === 'mint' && !mintEnabled) continue;
+        if (type === 'mixed' && !mixedEnabled) continue;
+        filtered.push(edge);
       }
+      if (!filtered.length) return null;
+
+      const limit = Math.max(1, Math.min(maxEdges, filtered.length));
+      const data = filtered.slice(0, limit);
+      const hasPath = data.some(e => Array.isArray(e.path) && e.path.length >= 2);
+      const usePath = hasPath && typeof PathLayer === 'function';
+      const FlowLayerCtor = usePath ? PathLayer : ArcLayer;
+      if (typeof FlowLayerCtor !== 'function') return null;
+
+      const fade = clamp(0.25 + zoomNorm * 0.75, 0, 1);
+      const fallbackPath = (edge) => {
+        const s = nodes[edge.sourceIndex]?.position;
+        const t = nodes[edge.targetIndex]?.position;
+        if (!Array.isArray(s) || !Array.isArray(t)) return null;
+        const sp = [s[0] ?? 0, s[1] ?? 0, s[2] ?? 0];
+        const tp = [t[0] ?? 0, t[1] ?? 0, t[2] ?? 0];
+        return [sp, tp];
+      };
+
+      const colorForEdge = (edge) => {
+        const type = (edge.type || '').toString().toLowerCase();
+        let base;
+        if (type === 'sale') base = [255, 32, 64, 180];
+        else if (type === 'mint') base = [255, 255, 255, 180];
+        else if (type === 'transfer') base = [32, 128, 255, 160];
+        else if (type === 'mixed') base = [160, 96, 255, 170];
+        else base = [TOKENS.fg[0], TOKENS.fg[1], TOKENS.fg[2], 140];
+        const alpha = Math.round(base[3] * fade);
+        return [base[0], base[1], base[2], alpha];
+      };
+
+      const props = {
+        id,
+        data,
+        coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN,
+        widthUnits: 'pixels',
+        widthMinPixels: 1,
+        parameters: { blend: true, depthTest: false, blendFunc: [770, 1], blendEquation: 32774 },
+        getWidth: edge => {
+          const w = Math.sqrt(Math.max(1e-6, Number(edge.weight || edge.count || 1)));
+          return 1 + Math.min(4, w);
+        }
+      };
+
+      if (usePath){
+        Object.assign(props, {
+          getPath: edge => edge.path || fallbackPath(edge) || [],
+          capRounded: true,
+          jointRounded: true,
+          dashJustified: true,
+          getDashArray: edge => (edge.type === 'mint') ? [4, 3] : [1, 0],
+          getColor: colorForEdge,
+          updateTriggers: { getColor: [zoomNorm] }
+        });
+      } else {
+        Object.assign(props, {
+          getSourcePosition: edge => nodes[edge.sourceIndex]?.position || [0,0,0],
+          getTargetPosition: edge => nodes[edge.targetIndex]?.position || [0,0,0],
+          getSourceColor: colorForEdge,
+          getTargetColor: colorForEdge,
+          updateTriggers: { getSourceColor: [zoomNorm], getTargetColor: [zoomNorm] }
+        });
+      }
+
+      return new FlowLayerCtor(props);
+    } catch {
+      return null;
     }
-    // Merge with base
-    if (add.length) base = base.concat(add);
-    // Terrain: price contours (topography) using token last-sale data (CPU-safe)
-    try {
-      const viewportWidth = center.clientWidth||1200;
-      const viewportHeight = center.clientHeight||800;
-      const priceArr = Array.isArray(presetData?.tokenLastSalePrice) && presetData.tokenLastSalePrice.length
-        ? presetData.tokenLastSalePrice
-        : (presetData?.tokenPrice || []);
-      const tsArr = Array.isArray(presetData?.tokenLastSaleTs) && presetData.tokenLastSaleTs.length
-        ? presetData.tokenLastSaleTs
-        : (presetData?.tokenLastActivity || []);
-      const tsFinite = tsArr.filter(v=>Number.isFinite(v));
-      const tsMin = tsFinite.length ? Math.min(...tsFinite) : null;
-      const tsMax = tsFinite.length ? Math.max(...tsFinite) : null;
-      let rangeStart = Number.isFinite(timeline.start) ? timeline.start : null;
-      let rangeEnd = Number.isFinite(timeline.end) ? timeline.end : null;
-      if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart){
-        rangeStart = Number.isFinite(timelineLimits?.t0) ? timelineLimits.t0 : tsMin;
-        rangeEnd = Number.isFinite(timelineLimits?.t1) ? timelineLimits.t1 : tsMax;
-      }
-      if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart) {
-        rangeStart = tsMin ?? 0;
-        rangeEnd = tsMax ?? (rangeStart + 1);
-      }
-      const dt = (rangeEnd - rangeStart) || 1;
-      const xs = (ts)=> (ts - rangeStart)/dt * (viewportWidth-160) + 80;
-      const priceVals = priceArr.filter(v=>Number.isFinite(v) && v>0);
-      const priceDenom = Math.log1p(Math.max(1, priceVals.length ? Math.max(...priceVals) : 1)) || 1;
-      const pts = [];
-      for (let i=0;i<priceArr.length;i++){
-        const p = priceArr[i];
-        const ts = tsArr[i];
-        if (!Number.isFinite(ts) || ts < rangeStart || ts > rangeEnd) continue;
-        if (!Number.isFinite(p) || p <= 0) continue;
-        const x = xs(ts);
-        const y = (Math.log1p(Math.max(0,p)) / priceDenom) * (viewportHeight-160) + 80;
-        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-        pts.push([x, y]);
-      }
-      if (typeof ContourLayer==='function' && pts.length>50){
-        const thresholds = 10;
-        add.push(new ContourLayer({ id:'price-contours', data: pts.map(p=>({position:[p[0],p[1],0]})), coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, cellSize: 40, thresholds, gpuAggregation:false, contours: [{threshold:1, strokeWidth:1, strokeColor:[0,255,102,80]}]}));
-      }
-    } catch {}
+  }
 
-    // Rapids: hour activity as grid (height=volume) with GPU->CPU fallback
+  function makeTransfersLayers(base, opts = {}){
     try {
-      if (transfersCache && transfersCache.length){
-        const viewportWidth = center.clientWidth||1200;
-        const viewportHeight = center.clientHeight||800;
-        const tsSeries = transfersCache.map(tr=> tr.timestamp).filter(v=>Number.isFinite(v));
-        const tsMin = tsSeries.length ? Math.min(...tsSeries) : Number.isFinite(timelineLimits?.t0) ? timelineLimits.t0 : null;
-        const tsMax = tsSeries.length ? Math.max(...tsSeries) : Number.isFinite(timelineLimits?.t1) ? timelineLimits.t1 : null;
-        let rangeStart = Number.isFinite(timeline.start) ? timeline.start : tsMin;
-        let rangeEnd = Number.isFinite(timeline.end) ? timeline.end : tsMax;
-        if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart){
-          rangeStart = tsMin ?? (timelineLimits?.t0 ?? 0);
-          rangeEnd = tsMax ?? (timelineLimits?.t1 ?? (rangeStart + 1));
-        }
-        const dt=(rangeEnd - rangeStart) || 1;
-        const xs = (ts)=> (ts - rangeStart)/dt * (viewportWidth-160) + 80;
-        const priceSeries = transfersCache.map(tr=> tr.price).filter(v=>Number.isFinite(v) && v>0);
-        const priceDenom = Math.log1p(Math.max(1, priceSeries.length ? Math.max(...priceSeries) : 1)) || 1;
-        const pts = transfersCache.map(tr=>{
-          const ts = Number.isFinite(tr.timestamp) ? tr.timestamp : rangeStart;
-          if (ts < rangeStart || ts > rangeEnd) return null;
-          const x = xs(ts);
-          const y = (Math.log1p(Math.max(0,tr.price||0)) / priceDenom) * (viewportHeight-160) + 80;
-          if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-          return { position:[ x, y, 0 ], w: 1 };
-        }).filter(Boolean);
-        if (pts.length && typeof GPUGridLayer==='function'){
-          add.push(new GPUGridLayer({ id:'activity-rapids', data: pts, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getWeight:d=>d.w, cellSizePixels: 28, extruded:true, elevationScale: 8, pickable:false, colorAggregation:'SUM', getColorValue: v=>v, colorRange:[[0,0,0,0],[255,255,255,180]] }));
-        } else if (pts.length && typeof ScreenGridLayer==='function'){
-          add.push(new ScreenGridLayer({ id:'activity-rapids', data: pts, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.position, getWeight:d=>d.w, cellSizePixels: 28, opacity:0.3, colorRange:[[0,0,0,0],[255,255,255,180]] }));
+      const zoomNorm = Number.isFinite(opts?.zoomNorm) ? opts.zoomNorm : 1;
+      const zoom = Number.isFinite(opts?.zoom) ? opts.zoom : currentZoom;
+      const retained = [];
+      let selectionLayer = null;
+      if (Array.isArray(base)){
+        for (const layer of base){
+          if (!layer) continue;
+          const id = layer.id;
+          if (id === 'nodes' || id === 'glow' || id === 'pulses' || id === 'density') continue;
+          if (id === 'selection-ring'){ selectionLayer = layer; continue; }
+          retained.push(layer);
         }
       }
-    } catch {}
-
-    // Avoid wallet-positioned flows; use timeline-plane particles
-    try {
-      const showTrades = getChecked('layer-trades', true);
-      if (showTrades){
-        const dots = buildFlowParticles(800);
-        if (dots && dots.length) add.unshift(new ScatterplotLayer({ id:'flow-dots', data:dots, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, getPosition:d=>d.p, getRadius:d=> 2.0 + Math.min(4, Math.sqrt(d.price||0)), getFillColor:[0,255,102,140], radiusUnits:'pixels', pickable:false, updateTriggers:{ getPosition:[pulseT] } }));
-      }
-    } catch {}
-    // Trips layer (if available)
-    try { const TripsLayer = (window.deck && (window.deck.TripsLayer || window.deck?.GeoLayers?.TripsLayer)) || window.TripsLayer || null; if (TripsLayer){ add.unshift(makeTripsLayer()); } } catch {}
-    // Keep a light heat overlay if desired (retained but lower priority)
-    // Price spikes shockwaves (approx)
-    try {
-      if (transfersCache && timeline.value!=null){
-        const now = timeline.value;
-        const events = transfersCache.filter(tr=> (tr.price||0) > 2 && (now - tr.timestamp) < 3600*12); // 12h ripple window
-        const waves = [];
-        for (const e of events){
-          const center = ownerCenters?.[ (presetData?.owners||[]).indexOf((e.to||'').toLowerCase()) ] || [0,0,0];
-          const age = Math.max(0, now - (e.timestamp||now));
-          const r = 50 + age * 5; // wave expands over time
-          waves.push({ c:center, r });
-        }
-        if (waves.length){
-          add.unshift(new PolygonLayer({ id:'price-spikes', data:waves, coordinateSystem: COORDINATE_SYSTEM?.CARTESIAN, stroked:true, filled:false, getPolygon:d=> circlePath(d.c[0], d.c[1], d.r, 64), getLineColor:[255,0,102,100], getLineWidth:2, lineWidthUnits:'pixels', parameters:{ depthTest:false } }));
-        }
-      }
-    } catch {}
-    return [ ...add, ...base ];
+      const rhythm = buildRhythmLayers({ zoom, zoomNorm });
+      const combined = [...rhythm.before, ...retained, ...rhythm.after];
+      if (selectionLayer) combined.push(selectionLayer);
+      return combined;
+    } catch {
+      return base;
+    }
   }
 
   function makeTripsLayer(){

@@ -63,24 +63,26 @@ node jobs/precompute-layouts.js
 ```
 Full pipeline: `npm run jobs:all` (adds listings, edges similarity, etc.).
 
-## 8) Force render
+## 8) Force render / first frame
 - Use the top‑right search: type a token id (e.g. `724`) and press Enter.
 - Or DevTools console:
 ```
 window.mammoths?.focusToken?.(724)
 ```
 You should see a selection ring and the right panel populated.
+- Deck exposes `window.__mammothDrawnFrame`. If it never becomes `true`, the canvas has not drawn; re-check data jobs or console errors.
 
 ## 9) Screenshots (prove it)
 ```
 npm ci && npx playwright install
 PREVIEW_IDS=1000,724,1472 PREVIEW_VARIANTS=1 node scripts/ui.screenshots.js
 ```
-The script forces a selection and waits until the sidebar and image are present before capture.
+- Script opens `${BASE}?force=1`, waits for `window.__mammothDrawnFrame === true`, and samples the WebGL buffer—blank canvases fail fast.
+- Ensure `npm run db:migrate && npm run jobs:all` completed before running screenshots.
 
 ## 10) Common fixes
 - Restart server after code changes: `npm run dev`.
-- `force=1` bypasses caches: `GET /api/graph?mode=holders&nodes=10000&edges=200&force=1`.
+- `force=1` bypasses caches: `GET /api/graph?mode=holders&nodes=10000&edges=200&force=1` (and also the UI via `?force=1`).
 - If `/api/precomputed/*` respond with HTML, your old server process is still running.
 - If images don’t show, confirm files in `data/thumbnails/` and check the `image_local/thumbnail_local` columns in `tokens`.
 
@@ -89,4 +91,3 @@ Please include:
 - Output of steps 1–4
 - Browser console errors (if any)
 - `server.log` tail and OS/browser versions
-

@@ -35,9 +35,12 @@ Local setup
 2. `npm run db:migrate`
 3. Populate (reads `.env` automatically):
    - `set -a; source .env; set +a`
-   - `npm run jobs:all`
+   - `npm run jobs:all` *(takes ~8 minutes; fills tokens, transfers, similarity, listings)*
 4. `PORT=3001 npm run dev` (or use 3000)
-5. Open: `http://localhost:3001`
+5. Open: `http://localhost:3001?force=1`
+   - `force=1` bypasses cached graphs so the first load matches fresh DB contents.
+6. First-frame guard: the UI sets `window.__mammothDrawnFrame=true` after Deck renders visible nodes.
+   - If the canvas stays empty, check DevTools console and ensure the DB jobs completed.
 
 Environment
 - Required: `CONTRACT_ADDRESS`, `MODULARIUM_API`, `ETHOS_API`
@@ -193,7 +196,9 @@ Preview & Dev
 - Optional: preselect a token with `?token=5000`
 
 Screenshots
+- Prep once per run: `npm run db:migrate && npm run jobs:all && npm run dev`
 - Generate 1440px desktop previews for each view: `npm run test:ui`
+  - The script now opens `${BASE}?force=1`, waits for `window.__mammothDrawnFrame === true`, and samples the WebGL buffer before saving. Blank canvases will fail the wait.
 - Configure variants: `PREVIEW_IDS=5000,3333,2500 PREVIEW_VARIANTS=3 npm run test:ui`
 - Images are saved to `artifacts/ui/`
 

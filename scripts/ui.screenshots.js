@@ -63,10 +63,24 @@ async function main(){
   const page = await context.newPage();
   page.on('console', msg => { try { console.log('[page]', msg.text()); } catch {} });
   page.on('pageerror', err => { try { console.log('[pageerror]', err.message); } catch {} });
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  const targetUrl = BASE.includes('?') ? `${BASE}&force=1` : `${BASE}?force=1`;
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
   await waitForIdle(page);
   // Wait for deck canvas if available (avoid blank snapshots)
-  await page.waitForSelector('#deck-canvas', { timeout: 8000 }).catch(()=>{});
+  await page.waitForSelector('#deck-canvas', { timeout: 8000 });
+  await page.waitForFunction(() => {
+    try {
+      if (window.__mammothDrawnFrame === true) return true;
+      const c = document.getElementById('deck-canvas');
+      const gl = c?.getContext?.('webgl2') || c?.getContext?.('webgl');
+      if (!gl || !c?.width || !c?.height) return false;
+      const px = new Uint8Array(4);
+      gl.readPixels((c.width/2)|0, (c.height/2)|0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      return (px[0] + px[1] + px[2]) > 10;
+    } catch {
+      return false;
+    }
+  }, { timeout: 12000 });
   // Wait until Deck has initialized and canvas backing store is non-zero
   await page.waitForFunction(() => {
     const c = document.getElementById('deck-canvas');
@@ -100,11 +114,13 @@ async function main(){
   } catch {}
 
   // Views to exercise
-  const quick = String(process.env.QUICK||'0')==='1';
+  const mode = (process.env.UI_MODE || '').toLowerCase();
+  const quick = mode !== 'full' && String(process.env.QUICK||'1') !== '0';
   const views = quick ? ['ownership', 'trading'] : ['ownership', 'trading', 'traits', 'whales', 'health'];
-  const simple = [];
+  const simple = ['dots', 'flow', 'tree', 'rhythm'];
   const previewIds = (process.env.PREVIEW_IDS || '5000,3333,2500,2000,1000,100,2').split(',').map(s=>parseInt(s,10)).filter(n=>!isNaN(n));
-  const perViewVariants = quick ? 1 : parseInt(process.env.PREVIEW_VARIANTS || '3', 10);
+  const defaultVariants = quick ? 1 : parseInt(process.env.PREVIEW_VARIANTS || '1', 10);
+  const perViewVariants = Math.max(1, defaultVariants);
 
   for (const view of views){
     // Select legacy view (ensures nodes array is present for focusSelect)

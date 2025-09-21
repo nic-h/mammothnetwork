@@ -14,19 +14,28 @@
   <header class="header">
     <div id="top-loader" class="top-loader" hidden></div>
     <div class="logo-wrap"><div class="logo">mammoths.network</div><span class="status-dot" aria-hidden="true"></span></div>
-    <div></div>
-    <input id="search" type="search" placeholder="0x… / ENS / TOKEN ID" class="header-search tooltipped" autocomplete="off" spellcheck="false" value="" data-tooltip="Search wallet (0x…), ENS, or token ID" title="Search wallet (0x…), ENS, or token ID">
     <div class="header-controls">
-      <!-- preset buttons removed (views live in left panel) -->
-      <div class="more">
-        <button id="more-btn" class="btn btn--chip tooltipped" title="More" data-tooltip="MORE" aria-haspopup="menu" aria-expanded="false" aria-controls="more-panel"><span aria-hidden="true">•••</span></button>
-        <div id="more-panel" class="more-panel" role="menu" hidden>
-          <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="edges">EDGE LAYERS</button>
-          <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="traits">TRAITS</button>
-          <button class="menu-item" role="menuitem" tabindex="-1" data-action="ambient">AMBIENT EDGES</button>
+      <label class="sr-only" for="search">Search token, ENS name, or 0x wallet address</label>
+      <input
+        id="search"
+        type="search"
+        class="header-search tooltipped"
+        placeholder="Search token ID / ENS / 0x wallet"
+        aria-label="Search token, ENS name, or 0x wallet address"
+        autocomplete="off"
+        spellcheck="false"
+        title="Search token, ENS, or wallet"
+      >
+      <div class="header-actions">
+        <div class="more">
+          <button id="more-btn" class="btn btn--chip tooltipped" title="More" data-tooltip="MORE" aria-haspopup="menu" aria-expanded="false" aria-controls="more-panel"><span aria-hidden="true">•••</span></button>
+          <div id="more-panel" class="more-panel" role="menu" hidden>
+            <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="edges">EDGE LAYERS</button>
+            <button class="menu-item" role="menuitem" tabindex="-1" data-action="scroll" data-target="traits">TRAITS</button>
+            <button class="menu-item" role="menuitem" tabindex="-1" data-action="ambient">AMBIENT EDGES</button>
+          </div>
         </div>
       </div>
-      <!-- View selector moved to left panel -->
     </div>
   </header>
   <div class="main-container">
@@ -36,6 +45,10 @@
         <div class="view-selector panel-view" aria-label="Views" style="margin-bottom: var(--pad-12);">
           <label class="panel-title" style="text-align:left;" for="view">VIEW</label>
           <select id="view" aria-label="Views">
+            <option value="dots">DOTS — OWNERSHIP STATE</option>
+            <option value="flow">FLOW — MARKET FLOWS</option>
+            <option value="tree">TREE — LIFECYCLE</option>
+            <option value="rhythm">RHYTHM — TIME × PRICE</option>
             <option value="ownership">OWNERSHIP NETWORK</option>
             <option value="trading">TRADING ACTIVITY</option>
             <option value="traits">TRAIT EXPLORER</option>
