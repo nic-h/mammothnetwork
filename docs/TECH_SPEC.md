@@ -3,11 +3,11 @@
 Status: living specification for the repo. This doc tracks intent (spec) and implementation status to avoid drift while we iterate.
 
 ## Summary
-Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas runs on Deck.gl with crisp device‑pixel rendering (no manual DPR clamps), additive blending, and optional GPU aggregation. Data is served by a SQLite backend with cached endpoints and compact “preset‑data” arrays.
+Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas now runs on a Three.js + 3d-force-graph renderer with custom gradient sprites, additive blending, and zoom-aware level-of-detail controls. Data is served by a SQLite backend with cached endpoints and compact “preset-data” arrays.
 
 ### Simple Views (binary path)
-- DOTS (ScatterplotLayer): wallet scatter using binary attributes; color = Active/Whale/Frozen/Dormant; size = log10(holdings+buys+sells). Click opens token detail.
-- FLOW (ArcLayer): top ~400 edges; red sales / blue transfers; visible ≥ 1.4 zoom.
+- DOTS (ScatterplotLayer): wallet scatter using binary attributes; color = Active/Whale/Frozen/Dormant; size = log10(holdings+buys+sells). “Cluster mode” bubble-packs tokens by owner/segment with circle packing and faint rings; toggle lives in DOTS controls. Click opens token detail.
+- FLOW (ArcLayer): buy flows render green, sell flows red, with curved arcs, arrows, and directional particles gated by the time slider (≥ 1.4 zoom).
 - WEB (PathLayer): straight connections; visible ≥ 1.2 zoom.
 - PULSE (ScatterplotLayer): recency‑weighted alpha; subtle pulse for <24h.
 - CROWN (ScatterplotLayer + TextLayer): rarity dots + gold labels for top‑K at zoom ≥ 2.
@@ -15,7 +15,7 @@ Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownershi
 Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → fallback to live `/api/graph` nodes/edges (ensures canvas never blank).
 
 ## Alignment Snapshot
-- Rendering: Deck.gl primary (ScreenGrid/Scatterplot/Line/Arc/Polygon/Heatmap) — Implemented
+- Rendering: Three.js + 3d-force-graph (custom sprites, animated pulse, link styles) — Implemented
 - Nodes: colored circles only (no per-node images) — Implemented
 - Modes: holders, transfers, traits, wallets — Implemented
 - Presets: ownership, trading, rarity, social, whales, frozen — Implemented (6/10)
@@ -160,12 +160,17 @@ Ethos
 - Strict acceptance: only ACTIVE / profileId>0 / profile link users are surfaced (else `ethos` is null in responses). `/api/ethos/profile` caches 24h.
 
 ## Rendering Details
-- Crisp DPR: Deck manages `useDevicePixels`; delete any manual DPR/canvas sizing.
-- Dots (ScatterplotLayer): pixel units, `radiusMinPixels:2`..`radiusMaxPixels:7`, outline 0.5px, additive blending, brushing enabled.
-- Edges (LineLayer): `widthMinPixels:2`, additive blending; visible earlier for denser look.
-- Flows (ArcLayer): additive, `widthMinPixels:2`, visible from ~0.6 zoom, brushing enabled.
-- Density (ScreenGridLayer): optional low‑opacity underlay with `gpuAggregation:true`.
-- Layer order: density → edges → flows → dots → overlays (labels/selection).
+- Engine: `client/three/app.js` boots ForceGraph3D and bundles to `public/three.app.js` via `npm run build:client`.
+- Nodes: gradient `THREE.SpriteMaterial` (additive blending). Base size scales with `log10(sale_count)`; whales get extra scale when the “Whale Bubbles” toggle is active.
+- Pulse loop: `requestAnimationFrame` adjusts sprite opacity with activity recency; hover/selection/highlight tweak tint/alpha before the pulse step.
+- Edges: zoom buckets (near=500, mid=300, far=100) clamp the slider. Styles match legacy Deck views (sales red, transfers blue dashed, mints white dotted, mixed gold, ownership/ambient green, traits violet).
+- FLOW view: arcs bend at 0.2, buys render green with double particles, sells render red with single particles/solid strokes, and the time slider filters edges to the selected window.
+- TREE view: lineage nodes are cloned, recolored, and pinned into a radial layout (d3.tree polar coordinates) around the focused token/wallet; simulation decay set to 1 while active.
+- DOTS cluster mode: optional circle-packing (d3.pack) by owner/segment with faint group rings; nodes pin until the toggle is cleared, then snap back to preset positions.
+- RHYTHM view: tokens are remapped into a time×price volume space (Z by recency, radius by turnover). Recent activity pulses green, dormant holdings fade red, and the time slider clips visible bands.
+- Interactions: node click recenters the camera and sidebar; ENS/0x search resolves to wallet highlight; background click clears selection.
+- Sidebar order: Ethos (score/tags/blurb) → Story → Traits → Description; sections auto-hide when empty. Traits render in a two-column grid with single-line values and ellipsis.
+- Automation guard: the stage writes `window.__mammothDrawnFrame = true` after the first layout so Playwright captures wait on a filled canvas.
 
 ## Performance Targets
 - Initial load < 500ms (with cache)
@@ -235,28 +240,32 @@ These arrays are computed server-side from SQLite and cached in‑memory per req
 
 
 # Changelog
+- v2.2.1 — TREE view now renders a fixed radial lineage layout, DOTS adds bubble-pack Cluster mode, FLOW uses green-buy/red-sell encodings with curved arcs and particles, and Link density/time controls adjust per view.
+- v2.2 — Migrated center engine to Three.js 3d-force-graph with custom sprites/LOD; removed Deck.gl runtime.
 - v2.1 — Center engine moved to Deck.gl, PIXI kept as fallback; new views (holders hulls, trading waterfalls/flows, traits constellations); DB migrations (mint/token events, relationships, snapshots); endpoints (`/api/token/:id/story`, `/api/suspicious-trades`).
 - v2.0 — Spec aligned to current implementation; added tokens proposal; clarified decisions.
 
 ---
 
-# Engine & Rendering (Deck.gl)
+# Engine & Rendering (Three.js ForceGraph)
 
 ## Engine selection
-- Engine bootstrapped by `public/engine.js` (Deck.gl only).
-- Left and right panels (HTML/CSS) are unchanged; only the center canvas swaps engines.
+- `public/engine.js` lazy-loads `public/three.app.js` (esbuild bundle from `client/three/app.js`).
+- Left and right panels (HTML/CSS) stay intact; the center `.center-panel` is replaced with `#three-stage` at runtime.
 
-## Deck.gl layers by view
-- Holders: PolygonLayer (owner hulls), Scatterplot (nodes + glow), Line (optional ownership edges).
-- Trading: Line/Arc (flow highways) + animated particles; Scatterplot (tier pools).
-- Traits: Line (constellation rings), Text (trait labels on zoom), Scatterplot (nodes) + glow.
-- Whales: Line (branch edges), Scatterplot (nodes) + glow (generational trees).
-- Health: Heatmap (activity buckets), Scatterplot (pulses), decorative layers for frozen/dormant.
+## ForceGraph configuration
+- `ForceGraph3D` with a custom `nodeThreeObject` sprite (gradient disc, additive blending) sized from log10(sale_count) and whale flags.
+- Zoom bucket caps: near=500, mid=300, far=100 edges; the slider cannot exceed the active bucket.
+- Whale bubble toggle multiplies whale sprite scale (+35%) and adds opacity bias inside the pulse loop.
+- Link styling mirrors legacy Deck views: sales red solid, transfers blue dashed, mints white dotted, mixed gold solid, traits violet faint, ownership/ambient green translucent.
+- Pulse loop keeps nodes breathing (~12% amplitude) and boosts recently active (<24h) tokens.
 
 ## Interactions & shortcuts
-- Click → right panel details (`/api/token/:id` + `/api/token/:id/story`)
-- Hover → autoHighlight
-- Keyboard: `1–5` switch views, `R` reset zoom, `F` (planned focus), `/` quick search
+- Click → focuses camera (600 ms ease) and loads sidebar via `/api/token/:id`.
+- Hover → pointer cursor, non-hover nodes dim, and the active sprite scales up (no drag).
+- Search `Enter` → ENS/0x resolves to wallet highlight; numeric IDs focus the token.
+- Keyboard: `Esc` clears selection; toggles + sliders remain HTML-driven; view buttons call `window.mammoths.setSimpleView`.
+- Orbit controls pause when the pointer is over the header or side panels (prevents inadvertent drags while using the UI) and resume on stage re-entry.
 
 
 ---

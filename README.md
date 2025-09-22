@@ -9,14 +9,19 @@ New here? Start with Onboarding:
 - docs/DEV_TRIAGE.md — quick triage to verify data, endpoints, and canvas
 
 At‑a‑Glance System Overview
-- Frontend: Deck.gl (center canvas), crisp device‑pixel rendering, additive blending, brushing, optional GPU density.
+- Frontend: Three.js + 3d-force-graph (custom gradient sprites, additive blending, LOD-aware edge throttling).
+- Renderer source: `client/three/app.js` bundles to `public/three.app.js` via `npm run build:client`.
 - Backend: Express + SQLite (better-sqlite3). `/api/graph` delivers nodes/edges; `/api/preset-data` provides compact arrays for fast view encoding; ETag + TTL cache.
 - Data sources: Modularium API (holders, activity/transfers, listings), Ethos API (scores/users). Jobs fetch and cache into SQLite; UI reads only from DB.
 - Storage: images/thumbnails on disk (optional); no per-node images in the graph, only in the sidebar.
 - Deployment: Render.com with persistent disk; weekly cron refreshes data (see `jobs/run-all.js`).
 
 Current Status
-- Deck.gl (Scatterplot/Line/Polygon/Heatmap)
+- Three.js force-directed renderer (3d-force-graph + custom sprites/pulse loop)
+- TREE view renders a radial lineage layout around the focused token/wallet (forces paused for clarity).
+- DOTS view offers an optional Cluster mode bubble-map that circle-packs tokens by owner segment.
+- FLOW view highlights buys vs sells (green vs red) with curved arcs, directional arrows, and particle speed/volume scaling.
+- RHYTHM view maps tokens into time×price space (recent activity lifts in Z, buys glow green, dormant tokens fade red) for quick market cadence scans.
 - Deterministic layouts (grid default + preset-specific)
 - Modes: `holders`, `transfers`, `traits`, `wallets`
 - Presets (6): Ownership, Trading, Rarity, Social, Whales, Frozen
@@ -27,8 +32,10 @@ Current Status
   - Multiple trades between same parties: thicker gold
   - Layer toggles: Sales / Transfers / Mints (plus Ownership/Trades/Traits/Value)
 - Sidebar: owner, ENS, Ethos (strict ACTIVE/profileId/profile link), holdings, trades, last activity, traits, thumbnail
-- Styling: black + brand green (#00ff66), frozen blue (#4488ff), dormant gray (#666666)
+- Styling: black + brand green (#00ff66), frozen blue (#4488ff), dormant gray (#666666), whale bubble toggle enlarges whales
 - Header is sticky (40px row); grid background alpha ≈ 0.12
+- Hovering a node now dims its neighbors and enlarges the target; clicks focus the right sidebar and keep the camera centered.
+- Panels and header sit above the canvas (orbit/pan pauses whenever the cursor is over UI); the time slider only appears in FLOW/RHYTHM, and “Link density” reflects the active view.
 
 Local setup
 1. `npm ci`
@@ -39,7 +46,7 @@ Local setup
 4. `PORT=3001 npm run dev` (or use 3000)
 5. Open: `http://localhost:3001?force=1`
    - `force=1` bypasses cached graphs so the first load matches fresh DB contents.
-6. First-frame guard: the UI sets `window.__mammothDrawnFrame=true` after Deck renders visible nodes.
+6. First-frame guard: the UI sets `window.__mammothDrawnFrame=true` after the Three.js force graph paints its first frame.
    - If the canvas stays empty, check DevTools console and ensure the DB jobs completed.
 
 Environment
@@ -186,7 +193,7 @@ Visual Encoding Table
 Image version: `public/assets/visual-encoding-table.svg`
 
 Notes
-- Deck.gl center canvas with left/right panels preserved.
+- Three.js 3d-force-graph center canvas with left/right panels preserved.
 - Images: served at `/images`; thumbnails at `/thumbnails` (nodes never load images)
 - If better‑sqlite3 native errors: `npm rebuild better-sqlite3 --build-from-source`
 
@@ -207,7 +214,7 @@ Simple Views (2025‑09)
 
 Fast, GPU‑friendly views backed by binary attributes and zoom gates. These render from `/api/precomputed/*` when available and fall back to the live `/api/graph` nodes/edges so the canvas never appears blank.
 
-- DOTS: wallet scatter. Size = log10(holdings+buys+sells). Color = Active/Whale/Frozen/Dormant. Click opens token detail (from wallet → first token, or from graph fallback).
+- DOTS: wallet scatter. Size = log10(holdings+buys+sells). Color = Active/Whale/Frozen/Dormant. Cluster mode (checkbox) bubble-packs by owner/segment; otherwise reverts to preset positions. Click opens token detail (from wallet → first token, or from graph fallback).
 - FLOW: market flows (ArcLayer). Red = sales; Blue = transfers. Visible at zoom ≥ 1.4. Top ~400 arcs.
 - WEB: straight connections (PathLayer). Red/Blue like FLOW. Visible at zoom ≥ 1.2. Top ~400 lines.
 - PULSE: recent activity dots. Alpha = 1−days/90; soft “breathe” if <24h.
@@ -247,8 +254,10 @@ Headless Screenshots
    The script forces a selection via `window.mammoths.focusToken(id)` and waits for sidebar + image before capture.
 
 - Engine
-- The center rendering engine is Deck.gl (`public/deck.app.js`).
+- The center rendering engine is 3d-force-graph/Three.js (`public/three.app.js`, built from `client/three/app.js`).
 - Left and right panels remain unchanged (brand CSS tokens at `public/client/styles/tokens.css`).
+- Orbit controls pause while hovering the left/right panels or header; pointer reactivates pan/zoom when it returns to the stage.
+- `LINK DENSITY` replaces the old “Edges” slider label, and the time slider is only visible in FLOW/RHYTHM (filtered by buy/sell window).
 
 UI tweaks
 - Tip toolbar removed (cleaner top bar)
@@ -257,6 +266,7 @@ UI tweaks
 
 Changelog (high level)
 - 2025‑09‑12: Removed tip bar; tightened header spacing; stricter Ethos gating; added N/A ETHOS when no verified profile; added URL `?token=` preselection; improved Trading/Whales/Traits layouts; multiple screenshot variants.
+- 2025‑09‑19: TREE view uses radial lineage layout; DOTS gained Cluster mode; FLOW edges use green buys / red sells with directional particles and curved arcs; controls expose Link density + time slider only where relevant.
 - 2025‑09‑10: Added `/api/transfer-edges` and transaction edge styles with toggles; header sticky; grid visibility tuned; centralized JS palette.
 Data migrations (v2)
 - Run DB migrations: `npm run db:migrate`

@@ -16,24 +16,27 @@
     "jobs:enrich-ethos": "node --env-file=.env jobs/ethos.js",
     "jobs:sync-metadata": "node --env-file=.env jobs/sync-metadata.js",
     "jobs:all": "node --env-file=.env jobs/run-all.js",
-    "test:ui": "node scripts/ui.screenshots.js"
+    "test:ui": "node scripts/ui.screenshots.js",
+    "build:client": "node scripts/build.client.mjs"
   },
   "optionalDependencies": {
     "sharp": "^0.33.4"
   },
   "dependencies": {
+    "3d-force-graph": "^1.79.0",
     "better-sqlite3": "^9.4.0",
     "compression": "^1.7.4",
+    "d3-hierarchy": "^3.1.2",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "morgan": "^1.10.0",
-    "deck.gl": "^8.9.24",
-    "@deck.gl/geo-layers": "^8.9.24"
+    "three": "^0.160.1"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
+    "esbuild": "^0.21.5",
     "playwright": "^1.55.0"
   }
 }

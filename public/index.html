@@ -11,15 +11,19 @@
   <link rel="stylesheet" href="/style.css?v=20250919-2">
 </head>
 <body>
+  <div class="ui-root">
   <header class="header">
     <div id="top-loader" class="top-loader" hidden></div>
-    <div class="logo-wrap"><div class="logo">mammoths.network</div><span class="status-dot" aria-hidden="true"></span></div>
-    <div class="header-controls">
+    <div class="logo-wrap">
+      <button id="panel-toggle" type="button" aria-label="Toggle toolbox" aria-controls="left-panel" aria-expanded="true">☰</button>
+      <div class="logo">mammoths.network</div>
+    </div>
+    <div class="header-actions">
       <label class="sr-only" for="search">Search token, ENS name, or 0x wallet address</label>
       <input
         id="search"
         type="search"
-        class="header-search tooltipped"
+        class="tooltipped"
         placeholder="Search token ID / ENS / 0x wallet"
         aria-label="Search token, ENS name, or 0x wallet address"
         autocomplete="off"
@@ -29,7 +33,7 @@
     </div>
   </header>
   <div class="main-container">
-    <aside class="left-panel">
+    <aside class="left-panel panel" id="left-panel">
       <div class="controls-section">
         <!-- VIEW at top; header left-aligned like others -->
         <div class="view-selector panel-view" aria-label="Views" style="margin-bottom: var(--pad-12);">
@@ -46,6 +50,9 @@
             <button type="button" class="view-btn" data-view-btn="tree">TREE — LIFECYCLE</button>
             <button type="button" class="view-btn" data-view-btn="rhythm">RHYTHM — TIME × PRICE</button>
           </div>
+          <div class="layer-toggle" id="cluster-mode-row" hidden>
+            <label>Cluster mode</label><input type="checkbox" id="dots-cluster-mode">
+          </div>
         </div>
         <div class="mode-selector" hidden>
           <label for="mode">MODE</label>
@@ -56,13 +63,13 @@
             <option value="wallets">WALLETS</option>
           </select>
         </div>
-        <div class="edge-controls">
-          <label>EDGES</label>
+        <div class="edge-controls" data-ctrl="edges">
+          <label data-ctrl-label>LINK DENSITY</label>
           <input type="range" id="edges-slider" min="0" max="500" value="200">
           <span id="edge-count">200</span>
         </div>
-        <div class="edge-controls" id="time-controls" style="margin-top: var(--pad-12);">
-          <label>TIME</label>
+        <div class="edge-controls" id="time-controls" data-ctrl="time" style="margin-top: var(--pad-12);" hidden>
+          <label data-ctrl-label>TIME</label>
           <input type="range" id="time-slider" min="0" max="100" value="100">
           <span id="time-label"></span>
         </div>
@@ -108,15 +115,50 @@
       </div>
     </aside>
     <div class="center-panel"></div>
-    <aside class="right-panel" id="sidebar">
-      <img id="thumb" alt="thumb" style="display:none">
-      <div id="details">Select a node…</div>
+    <aside class="right-panel panel" id="sidebar">
+      <div class="sidebar-empty" id="sidebar-empty">Select a node…</div>
+      <div class="sidebar-body hidden" id="sidebar-body">
+        <img id="thumb" alt="thumb" class="sidebar-thumb" style="display:none">
+        <div class="token-header">
+          <div class="token-id" id="sb-id"></div>
+          <div class="token-name" id="sb-name"></div>
+        </div>
+        <div class="meta-grid" id="sb-meta">
+          <div><span class="label">Owner</span><span class="value" id="sb-owner">—</span></div>
+          <div><span class="label">Sales</span><span class="value" id="sb-sales">—</span></div>
+          <div><span class="label">Last Sale</span><span class="value" id="sb-last-sale">—</span></div>
+          <div><span class="label">Hold Days</span><span class="value" id="sb-hold">—</span></div>
+        </div>
+
+        <section id="sb-ethos" class="sidebar-section hidden">
+          <div class="section-header">Ethos</div>
+          <div class="ethos-row">
+            <span class="label">Score</span>
+            <span class="mono" id="sb-ethos-score"></span>
+          </div>
+          <div class="ethos-tags" id="sb-ethos-tags"></div>
+          <div class="section-text" id="sb-ethos-blurb"></div>
+        </section>
+
+        <section id="sb-story" class="sidebar-section hidden">
+          <div class="section-header">Story</div>
+          <div class="section-text" id="sb-story-text"></div>
+        </section>
+
+        <section class="sidebar-section">
+          <div class="section-header">Traits</div>
+          <div id="sb-traits" class="traits-grid"></div>
+        </section>
+
+        <section id="sb-desc" class="sidebar-section hidden">
+          <div class="section-header">Description</div>
+          <div class="section-text" id="sb-desc-text"></div>
+        </section>
+      </div>
     </aside>
   </div>
-  <!-- Deck.gl UMD (local, works offline/headless) -->
-  <script src="/lib/deck.gl/dist.min.js"></script>
-  <script src="/lib/@deck.gl/geo-layers/dist.min.js"></script>
-  <!-- Engine loader (loads Deck UMDs + app bundle) -->
+  </div>
+  <!-- Engine loader (dynamically imports Three bundle) -->
   <script src="/engine.js?v=20250919-2"></script>
 </body>
 </html>

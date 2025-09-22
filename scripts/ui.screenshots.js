@@ -6,12 +6,17 @@ const { chromium } = await import('playwright');
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const OUT = path.resolve(process.cwd(), 'artifacts', 'ui');
+const ENGINE_CANVAS_QUERY = '#three-stage canvas, .center-panel canvas';
 
 function ensureDir(p){ fs.mkdirSync(p, { recursive: true }); }
 
 async function waitForIdle(page){
   try { await page.waitForLoadState('domcontentloaded', { timeout: 10000 }); } catch {}
   await page.waitForTimeout(300); // small settle
+}
+
+async function waitForEngineCanvas(page, timeout = 8000){
+  await page.waitForSelector(ENGINE_CANVAS_QUERY, { timeout });
 }
 
 async function screenshot(page, name){
@@ -66,12 +71,12 @@ async function main(){
   const targetUrl = BASE.includes('?') ? `${BASE}&force=1` : `${BASE}?force=1`;
   await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
   await waitForIdle(page);
-  // Wait for deck canvas if available (avoid blank snapshots)
-  await page.waitForSelector('#deck-canvas', { timeout: 8000 });
+  // Wait for render surface (Three or Deck)
+  await waitForEngineCanvas(page);
   await page.waitForFunction(() => {
     try {
       if (window.__mammothDrawnFrame === true) return true;
-      const c = document.getElementById('deck-canvas');
+      const c = document.querySelector('#three-stage canvas, .center-panel canvas');
       const gl = c?.getContext?.('webgl2') || c?.getContext?.('webgl');
       if (!gl || !c?.width || !c?.height) return false;
       const px = new Uint8Array(4);
@@ -83,13 +88,15 @@ async function main(){
   }, { timeout: 12000 });
   // Wait until Deck has initialized and canvas backing store is non-zero
   await page.waitForFunction(() => {
-    const c = document.getElementById('deck-canvas');
-    return !!(window.deck && c && c.width > 0 && c.height > 0);
+    const c = document.querySelector('#three-stage canvas, .center-panel canvas');
+    if (!c || !(c.width > 0 && c.height > 0)) return false;
+    if (window.mammoths) return true;
+    return false;
   }, { timeout: 12000 }).catch(()=>{});
   // Log canvas size and a center pixel sample from WebGL (debug)
   try {
     const probe = await page.evaluate(() => {
-      const c = document.getElementById('deck-canvas');
+      const c = document.querySelector('#three-stage canvas, .center-panel canvas');
       const ctr = document.querySelector('.center-panel');
       const w = c?.width||0, h=c?.height||0;
       const bb = c?.getBoundingClientRect?.() || {width:0,height:0};
@@ -109,8 +116,12 @@ async function main(){
   } catch {}
   try {
     await page.waitForLoadState('load', { timeout: 10000 });
-    const info = await page.evaluate(() => ({ t: typeof window.deck, scripts: Array.from(document.querySelectorAll('script')).map(s=>s.src).filter(s=>/deck\.gl|geo-layers/.test(s)).length }));
-    console.log('deck ns:', info.t, 'scripts:', info.scripts);
+    const info = await page.evaluate(() => ({
+      modules: Array.from(document.querySelectorAll('script[type="module"]')).length,
+      mammoths: typeof window.mammoths,
+      forceGraph: typeof window.ForceGraph3D
+    }));
+    console.log('engine ns:', info);
   } catch {}
 
   // Views to exercise
@@ -156,7 +167,7 @@ async function main(){
       await page.setViewportSize({ width: 1440, height: 900 });
       await waitForIdle(page);
       try { await page.keyboard.press('r'); await page.waitForTimeout(200); } catch {}
-      await page.waitForSelector('#deck-canvas', { timeout: 8000 }).catch(()=>{});
+      await waitForEngineCanvas(page, 6000).catch(()=>{});
       await screenshot(page, `desktop-preset-${view}-v${vi+1}-1440`);
     }
   }
@@ -177,7 +188,7 @@ async function main(){
     await page.setViewportSize({ width: 1440, height: 900 });
     await waitForIdle(page);
     try { await page.keyboard.press('r'); await page.waitForTimeout(200); } catch {}
-    await page.waitForSelector('#deck-canvas', { timeout: 8000 }).catch(()=>{});
+    await waitForEngineCanvas(page, 6000).catch(()=>{});
     await screenshot(page, `desktop-simple-${key}-1440`);
   }
 
