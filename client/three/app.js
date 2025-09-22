@@ -1341,16 +1341,6 @@ function populateSidebar(id, data) {
   setFieldHTML('sb-traits', renderTraitGrid(traitList));
 
   const description = (!story ? data.description : '') || '';
-  const descSection = document.getElementById('sb-desc');
-  if (descSection) {
-    if (description.trim()) {
-      descSection.classList.remove('hidden');
-      setFieldText('sb-desc-text', description.trim());
-    } else {
-      descSection.classList.add('hidden');
-      setFieldText('sb-desc-text', '');
-    }
-  }
 
   const node = state.nodeMap.get(id);
   const viewNode = state.viewNodes?.get(id);
@@ -1366,7 +1356,6 @@ function populateSidebar(id, data) {
     node.ethos = mergedEthos;
     node.trading = mergedTrading;
     node.story = story;
-    node.description = description;
     node.traits = mergedTraits;
     if (Number.isFinite(mergedTrading.volumeUsd)) node.volumeUsd = mergedTrading.volumeUsd;
     applyNodeImportance(node);
@@ -1375,7 +1364,6 @@ function populateSidebar(id, data) {
     viewNode.ethos = mergedEthos;
     viewNode.trading = mergedTrading;
     viewNode.story = story;
-    viewNode.description = description;
     viewNode.traits = mergedTraits;
     if (Number.isFinite(mergedTrading.volumeUsd)) viewNode.volumeUsd = mergedTrading.volumeUsd;
     applyNodeImportance(viewNode);

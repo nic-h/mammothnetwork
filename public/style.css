@@ -443,11 +443,6 @@ input[type="checkbox"]:checked::after{
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.traits-grid .trait.empty {
-  grid-column: 1 / -1;
-  font-size: var(--fs-12);
-  opacity: .65;
-}
 .left-panel.panel.hidden { transform: translateX(-18px); }
 
 @media (prefers-reduced-motion: reduce) {
