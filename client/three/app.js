@@ -1251,7 +1251,9 @@ async function updateSidebar(id) {
   if (!bodyEl || !emptyEl) return;
   if (!Number.isFinite(id)) {
     bodyEl.classList.add('hidden');
+    bodyEl.hidden = true;
     emptyEl.classList.remove('hidden');
+    emptyEl.hidden = false;
     emptyEl.textContent = 'Select a node…';
     if (thumb) thumb.style.display = 'none';
     return;
@@ -1261,7 +1263,9 @@ async function updateSidebar(id) {
     const data = await jfetch(`/api/token/${id}`);
     if (!data || data.error) {
       bodyEl.classList.add('hidden');
+      bodyEl.hidden = true;
       emptyEl.classList.remove('hidden');
+      emptyEl.hidden = false;
       emptyEl.textContent = 'No metadata available.';
       if (thumb) thumb.style.display = 'none';
       return;
@@ -1269,7 +1273,9 @@ async function updateSidebar(id) {
     populateSidebar(id, data);
   } catch (err) {
     bodyEl.classList.add('hidden');
+    bodyEl.hidden = true;
     emptyEl.classList.remove('hidden');
+    emptyEl.hidden = false;
     emptyEl.textContent = 'Unable to load token metadata.';
     if (thumb) thumb.style.display = 'none';
   } finally {
@@ -1283,7 +1289,9 @@ function populateSidebar(id, data) {
   const thumb = document.getElementById('thumb');
   if (!bodyEl || !emptyEl) return;
   bodyEl.classList.remove('hidden');
+  bodyEl.hidden = false;
   emptyEl.classList.add('hidden');
+  emptyEl.hidden = true;
 
   const imgPath = data.image_local || data.thumbnail_local || null;
   if (thumb) {
