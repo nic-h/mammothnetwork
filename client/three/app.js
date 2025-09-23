@@ -255,10 +255,12 @@ async function initData() {
 
     disposeSprites();
     state.graph.nodeThreeObject(node => buildSprite(node));
-    state.graph.graphData({ nodes: state.nodes, links: [] });
-    state.graph.d3ReheatSimulation();
-    updateNodeStyles();
-    await loadTraitFilters();
+  state.graph.graphData({ nodes: state.nodes, links: [] });
+  state.graph.d3ReheatSimulation();
+  state.graph.nodeThreeObject(node => buildSprite(node));
+  state.graph.nodeThreeObjectExtend(false);
+  updateNodeStyles();
+  await loadTraitFilters();
     requestAnimationFrame(() => {
       try { state.graph.zoomToFit(400, 50); } catch {}
       try { state.graph.refresh(); } catch {}
@@ -685,8 +687,14 @@ function scheduleZoomToFit(padding = 80, duration = 600) {
 
 function buildSprite(node) {
   if (!node) return null;
-  const existing = state.nodeSprites.get(node.id);
-  if (existing) return existing;
+  if (state.nodeSprites.has(node.id)) {
+    const existing = state.nodeSprites.get(node.id);
+    if (!existing || !existing.material) {
+      state.nodeSprites.delete(node.id);
+    } else {
+      return existing;
+    }
+  }
   const baseColor = node.baseColor || COLORS.active;
   const tint = colorToThree(baseColor);
   const material = new THREE.SpriteMaterial({
@@ -738,6 +746,7 @@ function renderDotsView() {
   toggleControl('edges', true, 'Link density');
   restoreHomePositions(true);
   state.graph.nodeThreeObject(node => buildSprite(node));
+  state.graph.nodeThreeObjectExtend(false);
   const toggles = currentToggles();
   const cap = effectiveEdgeCap();
   const buckets = [
@@ -778,6 +787,7 @@ function renderFlowView() {
   state.colorMode = 'flow';
   restoreHomePositions(true);
   state.graph.nodeThreeObject(node => buildSprite(node));
+  state.graph.nodeThreeObjectExtend(false);
   const cap = effectiveEdgeCap();
   const pool = (state.rawEdges.transfers || []).filter(edge => {
     const kind = String(edge?.kind || '').toLowerCase();
@@ -812,6 +822,7 @@ function renderRhythmView() {
   if (!state.graph) return;
   state.colorMode = 'rhythm';
   state.graph.nodeThreeObject(node => buildSprite(node));
+  state.graph.nodeThreeObjectExtend(false);
   const start = Number.isFinite(state.timeline.start) ? state.timeline.start : Date.now() / 1000 - 86400;
   const end = Number.isFinite(state.timeline.value) ? state.timeline.value : (Number.isFinite(state.timeline.end) ? state.timeline.end : start + 86400);
   const span = Math.max(1, end - start);
@@ -1098,6 +1109,8 @@ function restoreHomePositions(pin = true) {
 
 function renderTreeView(targetId) {
   if (!state.graph) return;
+  state.graph.nodeThreeObject(node => buildSprite(node));
+  state.graph.nodeThreeObjectExtend(false);
   state.graph.nodeThreeObject(node => buildSprite(node));
   state.colorMode = 'tree';
   toggleControl('time', false);
