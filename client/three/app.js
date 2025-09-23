@@ -169,6 +169,8 @@ const API = {
   graph.nodeLabel(node => `#${node.id}`);
   graph.nodeThreeObject(node => buildSprite(node));
   graph.nodeThreeObjectExtend(false);
+  if (typeof graph.nodeOpacity === 'function') graph.nodeOpacity(() => 1);
+  if (typeof graph.nodeVisibility === 'function') graph.nodeVisibility(() => true);
   if (typeof graph.onEngineStop === 'function') {
     graph.onEngineStop(() => {
       try { graph.zoomToFit(800, 80); } catch {}
