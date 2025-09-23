@@ -58,7 +58,9 @@ const state = {
   lastTreeRoot: null,
   colorMode: 'default',
   traitGroups: [],
-  activeTrait: null
+  selectedTraits: new Map(),
+  traitTokenCache: new Map(),
+  traitRequestId: 0
 };
 
 const spriteTexture = (() => {
@@ -400,13 +402,17 @@ async function loadTraitFilters() {
   if (clearBtn && !clearBtn.dataset.traitsBound) {
     clearBtn.dataset.traitsBound = '1';
     clearBtn.addEventListener('click', () => {
-      state.activeTrait = null;
+      state.selectedTraits.clear();
       state.highlighted = null;
       updateTraitFilterStates();
-      resetSidebarEmpty();
+      resetSidebarEmpty(true);
       renderCurrentView();
     });
   }
+  const traitsSection = document.querySelector('.traits-section');
+  const traitsHeader = document.querySelector('.traits-header');
+  if (traitsSection) traitsSection.classList.add('open');
+  if (traitsHeader) traitsHeader.setAttribute('aria-expanded', 'true');
   if (!container) return;
   container.innerHTML = '<div class="small-meta">Loading traits…</div>';
   let groups = [];
@@ -472,17 +478,76 @@ function renderTraitGroups(container, groups) {
 
 async function handleTraitFilter(type, value) {
   if (!type || !value) return;
-  const key = `${type}:::${value}`;
-  if (state.activeTrait === key) {
-    state.activeTrait = null;
+  const trimmedType = String(type || '').trim();
+  const trimmedValue = String(value || '').trim();
+  if (!trimmedType || !trimmedValue) return;
+  if (!state.selectedTraits.has(trimmedType)) {
+    state.selectedTraits.set(trimmedType, new Set());
+  }
+  const set = state.selectedTraits.get(trimmedType);
+  if (set.has(trimmedValue)) {
+    set.delete(trimmedValue);
+    if (set.size === 0) state.selectedTraits.delete(trimmedType);
+  } else {
+    set.add(trimmedValue);
+  }
+  updateTraitFilterStates();
+  await applyTraitFilterHighlights();
+}
+
+function updateTraitFilterStates() {
+  document.querySelectorAll('.trait-filter').forEach(btn => {
+    const type = btn.dataset.type || '';
+    const value = btn.dataset.value || '';
+    const activeSet = state.selectedTraits.get(type);
+    const active = activeSet ? activeSet.has(value) : false;
+    btn.classList.toggle('active', active);
+  });
+}
+
+async function applyTraitFilterHighlights() {
+  const entries = Array.from(state.selectedTraits.entries()).filter(([, set]) => set && set.size);
+  if (!entries.length) {
     state.highlighted = null;
-    updateTraitFilterStates();
-    resetSidebarEmpty();
+    resetSidebarEmpty(true);
     renderCurrentView();
     return;
   }
-  state.activeTrait = key;
-  updateTraitFilterStates();
+  const requestId = ++state.traitRequestId;
+  let result = null;
+  for (const [type, values] of entries) {
+    for (const value of values) {
+      const tokenSet = await getTraitTokenSet(type, value);
+      if (!tokenSet.size) {
+        result = new Set();
+        break;
+      }
+      if (!result) {
+        result = new Set(tokenSet);
+      } else {
+        result = new Set(Array.from(result).filter(id => tokenSet.has(id)));
+      }
+      if (result.size === 0) break;
+    }
+    if (result && result.size === 0) break;
+  }
+  if (state.traitRequestId !== requestId) return;
+  if (result && result.size) {
+    state.highlighted = result;
+    renderCurrentView();
+    const first = result.values().next().value;
+    if (Number.isFinite(first)) focusNode(first);
+    showTraitSummary(result.size);
+  } else {
+    state.highlighted = null;
+    renderCurrentView();
+    showTraitSummary(0);
+  }
+}
+
+async function getTraitTokenSet(type, value) {
+  const key = `${type}:::${value}`;
+  if (state.traitTokenCache.has(key)) return state.traitTokenCache.get(key);
   let ids = [];
   try {
     const resp = await jfetch(`/api/trait-tokens?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`);
@@ -491,32 +556,32 @@ async function handleTraitFilter(type, value) {
   if (!ids.length) {
     ids = state.nodes.filter(node => (node.traits || []).some(t => t.key === type && t.value === value)).map(node => node.id);
   }
-  state.highlighted = ids.length ? new Set(ids) : null;
-  renderCurrentView();
-  if (ids.length) focusNode(ids[0]);
-  updateTraitSidebarSummary(type, value, ids.length);
+  const set = new Set(ids);
+  state.traitTokenCache.set(key, set);
+  return set;
 }
 
-function updateTraitFilterStates() {
-  const active = state.activeTrait;
-  document.querySelectorAll('.trait-filter').forEach(btn => {
-    const key = `${btn.dataset.type}:::${btn.dataset.value}`;
-    btn.classList.toggle('active', active === key);
-  });
-}
-
-function updateTraitSidebarSummary(type, value, count) {
+function showTraitSummary(count) {
   const bodyEl = document.getElementById('sidebar-body');
   const emptyEl = document.getElementById('sidebar-empty');
   if (!bodyEl || !emptyEl) return;
+  const filters = [];
+  state.selectedTraits.forEach((set, type) => {
+    set.forEach(value => filters.push(`${escapeHtml(type.toUpperCase())}: ${escapeHtml(value)}`));
+  });
   bodyEl.classList.add('hidden');
   bodyEl.hidden = true;
   emptyEl.classList.remove('hidden');
   emptyEl.hidden = false;
-  emptyEl.innerHTML = `<div class="token-title">${escapeHtml(type.toUpperCase())}: ${escapeHtml(value)}</div><div class="small-meta">${count} token${count === 1 ? '' : 's'} match this trait.</div>`;
+  const filterHtml = filters.map(item => `<div>${item}</div>`).join('');
+  emptyEl.innerHTML = `<div class="token-title">Trait Filters</div><div class="small-meta">${count} token${count === 1 ? '' : 's'} match the selected traits.</div><div class="section-text">${filterHtml || '—'}</div>`;
 }
 
-function resetSidebarEmpty() {
+function resetSidebarEmpty(force = false) {
+  if (!force && state.selectedTraits.size) {
+    showTraitSummary(state.highlighted instanceof Set ? state.highlighted.size : 0);
+    return;
+  }
   const emptyEl = document.getElementById('sidebar-empty');
   const bodyEl = document.getElementById('sidebar-body');
   const thumb = document.getElementById('thumb');
