@@ -737,6 +737,7 @@ function renderDotsView() {
   toggleControl('time', false);
   toggleControl('edges', true, 'Link density');
   restoreHomePositions(true);
+  state.graph.nodeThreeObject(node => buildSprite(node));
   const toggles = currentToggles();
   const cap = effectiveEdgeCap();
   const buckets = [
@@ -776,6 +777,7 @@ function renderFlowView() {
   if (!state.graph) return;
   state.colorMode = 'flow';
   restoreHomePositions(true);
+  state.graph.nodeThreeObject(node => buildSprite(node));
   const cap = effectiveEdgeCap();
   const pool = (state.rawEdges.transfers || []).filter(edge => {
     const kind = String(edge?.kind || '').toLowerCase();
@@ -809,6 +811,7 @@ function renderFlowView() {
 function renderRhythmView() {
   if (!state.graph) return;
   state.colorMode = 'rhythm';
+  state.graph.nodeThreeObject(node => buildSprite(node));
   const start = Number.isFinite(state.timeline.start) ? state.timeline.start : Date.now() / 1000 - 86400;
   const end = Number.isFinite(state.timeline.value) ? state.timeline.value : (Number.isFinite(state.timeline.end) ? state.timeline.end : start + 86400);
   const span = Math.max(1, end - start);
@@ -1095,6 +1098,7 @@ function restoreHomePositions(pin = true) {
 
 function renderTreeView(targetId) {
   if (!state.graph) return;
+  state.graph.nodeThreeObject(node => buildSprite(node));
   state.colorMode = 'tree';
   toggleControl('time', false);
   toggleControl('edges', false);
