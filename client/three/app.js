@@ -1549,11 +1549,13 @@ function populateSidebar(id, data) {
   if (ethosSection) {
     if (ethos) {
       ethosSection.classList.remove('hidden');
+      ethosSection.hidden = false;
       setFieldText('sb-ethos-score', ethos.score != null ? formatNumber(ethos.score) : '—');
       setFieldHTML('sb-ethos-tags', renderTagPills(ethos.tags));
       setFieldText('sb-ethos-blurb', ethos.blurb || '');
     } else {
       ethosSection.classList.add('hidden');
+      ethosSection.hidden = true;
       setFieldHTML('sb-ethos-tags', '');
       setFieldText('sb-ethos-blurb', '');
     }
