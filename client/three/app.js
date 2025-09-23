@@ -56,7 +56,9 @@ const state = {
   clusterMode: false,
   clusterMeshes: [],
   lastTreeRoot: null,
-  colorMode: 'default'
+  colorMode: 'default',
+  traitGroups: [],
+  activeTrait: null
 };
 
 const spriteTexture = (() => {
@@ -254,6 +256,7 @@ async function initData() {
     state.graph.graphData({ nodes: state.nodes, links: [] });
     state.graph.d3ReheatSimulation();
     updateNodeStyles();
+    await loadTraitFilters();
     requestAnimationFrame(() => {
       try { state.graph.zoomToFit(400, 50); } catch {}
       try { state.graph.refresh(); } catch {}
@@ -308,7 +311,6 @@ function buildNodes(tokens, fallback, preset) {
     const ethos = extractEthosFromToken(token);
     const trading = extractTradingFromToken(token, fall, preset, idx);
     const story = extractStoryFromToken(token, fall);
-    const desc = token?.description ?? fall.description ?? '';
     const traits = extractTraitsFromToken(token);
     const ownerAddr = token?.owner ?? token?.ownerAddr ?? fall.owner ?? null;
 
@@ -343,7 +345,6 @@ function buildNodes(tokens, fallback, preset) {
       ethos,
       trading,
       story,
-      description: desc,
       traits
     });
     applyNodeImportance(nodes[nodes.length - 1]);
@@ -391,6 +392,141 @@ function applyNodeImportance(node) {
   const size = clamp(18 * importance, 14, 80);
   node.baseSize = size;
   node.displaySize = size;
+}
+
+async function loadTraitFilters() {
+  const container = document.getElementById('traits-container');
+  const clearBtn = document.getElementById('clear-filters');
+  if (clearBtn && !clearBtn.dataset.traitsBound) {
+    clearBtn.dataset.traitsBound = '1';
+    clearBtn.addEventListener('click', () => {
+      state.activeTrait = null;
+      state.highlighted = null;
+      updateTraitFilterStates();
+      resetSidebarEmpty();
+      renderCurrentView();
+    });
+  }
+  if (!container) return;
+  container.innerHTML = '<div class="small-meta">Loading traits…</div>';
+  let groups = [];
+  try {
+    const data = await jfetch(`/api/traits?v=${Date.now()}`);
+    if (Array.isArray(data?.traits)) groups = data.traits;
+  } catch {}
+  if (!Array.isArray(groups) || !groups.length) {
+    groups = buildTraitFallback();
+  }
+  if (!groups.length) {
+    container.innerHTML = '<div class="small-meta">Traits dataset unavailable.</div>';
+    return;
+  }
+  renderTraitGroups(container, groups);
+}
+
+function buildTraitFallback() {
+  const map = new Map();
+  state.nodes.forEach(node => {
+    (node.traits || []).forEach(({ key, value }) => {
+      const type = (key || '').trim();
+      const val = (value || '').trim();
+      if (!type || !val) return;
+      if (!map.has(type)) map.set(type, new Map());
+      const bucket = map.get(type);
+      bucket.set(val, (bucket.get(val) || 0) + 1);
+    });
+  });
+  return Array.from(map.entries()).map(([type, bucket]) => ({
+    type,
+    values: Array.from(bucket.entries()).map(([value, count]) => ({ value, count }))
+  })).filter(group => group.values.length).sort((a, b) => a.type.localeCompare(b.type));
+}
+
+function renderTraitGroups(container, groups) {
+  container.innerHTML = '';
+  state.traitGroups = groups;
+  groups.forEach(group => {
+    const section = document.createElement('div');
+    section.className = 'trait-group-container';
+    const header = document.createElement('div');
+    header.className = 'trait-group-title';
+    header.textContent = (group.type || '').toUpperCase();
+    section.appendChild(header);
+    const list = document.createElement('div');
+    list.className = 'trait-group-list';
+    (group.values || []).forEach(entry => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'trait-filter';
+      item.dataset.type = String(group.type || '').trim();
+      item.dataset.value = String(entry?.value || '').trim();
+      item.innerHTML = `<span class="trait-filter-label">${escapeHtml(item.dataset.value || '—')}</span><span class="trait-filter-count">${entry?.count ?? 0}</span>`;
+      item.addEventListener('click', () => handleTraitFilter(item.dataset.type, item.dataset.value));
+      list.appendChild(item);
+    });
+    section.appendChild(list);
+    container.appendChild(section);
+  });
+  updateTraitFilterStates();
+}
+
+async function handleTraitFilter(type, value) {
+  if (!type || !value) return;
+  const key = `${type}:::${value}`;
+  if (state.activeTrait === key) {
+    state.activeTrait = null;
+    state.highlighted = null;
+    updateTraitFilterStates();
+    resetSidebarEmpty();
+    renderCurrentView();
+    return;
+  }
+  state.activeTrait = key;
+  updateTraitFilterStates();
+  let ids = [];
+  try {
+    const resp = await jfetch(`/api/trait-tokens?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`);
+    if (Array.isArray(resp?.tokens)) ids = resp.tokens.map(Number).filter(Number.isFinite);
+  } catch {}
+  if (!ids.length) {
+    ids = state.nodes.filter(node => (node.traits || []).some(t => t.key === type && t.value === value)).map(node => node.id);
+  }
+  state.highlighted = ids.length ? new Set(ids) : null;
+  renderCurrentView();
+  if (ids.length) focusNode(ids[0]);
+  updateTraitSidebarSummary(type, value, ids.length);
+}
+
+function updateTraitFilterStates() {
+  const active = state.activeTrait;
+  document.querySelectorAll('.trait-filter').forEach(btn => {
+    const key = `${btn.dataset.type}:::${btn.dataset.value}`;
+    btn.classList.toggle('active', active === key);
+  });
+}
+
+function updateTraitSidebarSummary(type, value, count) {
+  const bodyEl = document.getElementById('sidebar-body');
+  const emptyEl = document.getElementById('sidebar-empty');
+  if (!bodyEl || !emptyEl) return;
+  bodyEl.classList.add('hidden');
+  bodyEl.hidden = true;
+  emptyEl.classList.remove('hidden');
+  emptyEl.hidden = false;
+  emptyEl.innerHTML = `<div class="token-title">${escapeHtml(type.toUpperCase())}: ${escapeHtml(value)}</div><div class="small-meta">${count} token${count === 1 ? '' : 's'} match this trait.</div>`;
+}
+
+function resetSidebarEmpty() {
+  const emptyEl = document.getElementById('sidebar-empty');
+  const bodyEl = document.getElementById('sidebar-body');
+  const thumb = document.getElementById('thumb');
+  if (!emptyEl || !bodyEl) return;
+  emptyEl.classList.remove('hidden');
+  emptyEl.hidden = false;
+  emptyEl.textContent = 'Select a node…';
+  bodyEl.classList.add('hidden');
+  bodyEl.hidden = true;
+  if (thumb) thumb.style.display = 'none';
 }
 
 function normalizedDepth(volume, maxVolume, rarity) {
@@ -473,6 +609,13 @@ function colorToThree(rgba, boost = 1) {
   };
   const [r, g, b] = Array.isArray(rgba) ? rgba : TOKENS.fg;
   return { r: scale(r), g: scale(g), b: scale(b) };
+}
+
+function scheduleZoomToFit(padding = 80, duration = 600) {
+  if (!state.graph) return;
+  requestAnimationFrame(() => {
+    try { state.graph.zoomToFit(duration, padding); } catch {}
+  });
 }
 
 function buildSprite(node) {
@@ -561,6 +704,7 @@ function renderDotsView() {
   applyLinkStylesForView();
   if (state.clusterMode) applyClusterModeIfNeeded();
   updateNodeStyles();
+  scheduleZoomToFit();
 }
 
 function renderFlowView() {
@@ -594,6 +738,7 @@ function renderFlowView() {
   if (typeof state.graph.linkLineDash === 'function') state.graph.linkLineDash(linkDash);
   applyLinkStylesForView();
   updateNodeStyles();
+  scheduleZoomToFit();
 }
 
 function renderRhythmView() {
@@ -640,6 +785,7 @@ function renderRhythmView() {
   if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
   applyLinkStylesForView();
   updateNodeStyles();
+  scheduleZoomToFit();
 }
 
 function rebuildLinks() {
@@ -933,6 +1079,7 @@ function renderTreeView(targetId) {
   try { state.graph.refresh(); } catch {}
   try { if (typeof state.graph.centerAt === 'function') state.graph.centerAt(0, 0, 0, 600); } catch {}
   try { if (typeof state.graph.zoom === 'function') state.graph.zoom(5, 600); } catch {}
+  scheduleZoomToFit();
 }
 
 function lineageGraph(rootId, depthLimit = 4) {

@@ -443,6 +443,49 @@ input[type="checkbox"]:checked::after{
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.trait-group-container {
+  margin-bottom: var(--pad-12);
+}
+.trait-group-title {
+  font-size: var(--fs-10);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: rgba(var(--green-rgb), .7);
+  margin-bottom: var(--pad-6);
+}
+.trait-group-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.trait-filter {
+  background: transparent;
+  border: 1px solid rgba(var(--green-rgb), .25);
+  color: rgba(203,213,225,.9);
+  padding: 4px 10px;
+  font-size: var(--fs-11);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.trait-filter:hover {
+  background: rgba(var(--green-rgb), .1);
+  border-color: rgba(var(--green-rgb), .4);
+}
+.trait-filter.active {
+  background: rgba(var(--green-rgb), .18);
+  border-color: rgba(var(--green-rgb), .65);
+  color: var(--fg);
+}
+.trait-filter-count {
+  font-variant-numeric: tabular-nums;
+  opacity: .6;
+}
 .left-panel.panel.hidden { transform: translateX(-18px); }
 
 @media (prefers-reduced-motion: reduce) {
