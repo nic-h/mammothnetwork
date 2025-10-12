@@ -1290,34 +1290,48 @@ function renderDotsView() {
 
 async function renderBubbleMapView() {
   if (!state.graph) return;
+  startUILoad();
   try {
-    const response = await fetch('/api/preset-data?nodes=10000');
-    const preset = await response.json();
-    const sourceNodes = Array.isArray(preset?.nodes) ? preset.nodes : [];
-    const nodes = sourceNodes.map(entry => ({ ...entry }));
-    const radius = (n) => Math.max(6, Math.sqrt(n.holdings || n.volume_tia || 1));
+    const preset = await jfetch(`${API.preset}?nodes=10000`);
+    const nodes = buildBubbleNodes(preset);
+    if (!nodes.length) {
+      state.graph.graphData({ nodes: [], links: [] });
+      state.viewNodes = new Map();
+      hideExplainOverlay();
+      return;
+    }
+
     bubbleMapLayout(nodes, {
-      groupBy: n => n.segment || n.community || 'Other',
-      radius,
-      padding: 1
+      groupBy: n => n.groupKey,
+      radius: n => Math.max(6, Math.sqrt(n.flowMetric || n.holdingCount || 1)),
+      padding: 1.4
+    });
+
+    nodes.forEach(node => {
+      const size = Math.max(18, (node.r || 4) * 6);
+      node.baseSize = size;
+      node.displaySize = size;
+      node.fx = node.x;
+      node.fy = node.y;
+      node.fz = 0;
     });
 
     toggleControl('edges', false);
+    if (typeof state.graph.linkVisibility === 'function') state.graph.linkVisibility(() => false);
     state.graph
       .graphData({ nodes, links: [] })
       .cooldownTicks(0)
       .d3AlphaDecay(1);
-
-    if (typeof state.graph.linkVisibility === 'function') state.graph.linkVisibility(() => false);
     state.graph.linkColor(() => 'rgba(0,0,0,0)');
     state.graph.linkOpacity(() => 0);
     state.graph.linkWidth(() => 0);
-    state.graph.nodeThreeObject(node => circle(node, radius(node)));
+    state.graph.nodeThreeObject(node => circle(node, Math.max(6, Math.sqrt(node.flowMetric || node.holdingCount || 1))));
     state.graph.nodeThreeObjectExtend(false);
     state.graph.numDimensions(2);
     state.graph.d3VelocityDecay(1);
     if (typeof state.graph.nodeOpacity === 'function') state.graph.nodeOpacity(() => 1);
 
+    state.bubbleNodes = nodes;
     state.viewNodes = new Map(nodes.map(n => [n.id, n]));
     state.selectedId = null;
     state.highlighted = null;
@@ -1326,18 +1340,62 @@ async function renderBubbleMapView() {
     scheduleZoomToFit();
   } catch (err) {
     console.warn('three.app: bubble map error', err?.message || err);
+    state.graph.graphData({ nodes: [], links: [] });
+  } finally {
+    stopUILoad();
   }
 }
 
-function circle(_node, r) {
+function buildBubbleNodes(preset = {}) {
+  const owners = Array.isArray(preset?.owners) ? preset.owners : [];
+  if (!owners.length) return [];
+  const ownerIndex = Array.isArray(preset?.ownerIndex) ? preset.ownerIndex : [];
+  const ownerWalletType = Array.isArray(preset?.ownerWalletType) ? preset.ownerWalletType : [];
+  const ownerCommunity = Array.isArray(preset?.ownerCommunityId) ? preset.ownerCommunityId : [];
+  const ownerEthos = Array.isArray(preset?.ownerEthos) ? preset.ownerEthos : [];
+  const ownerBuyVol = Array.isArray(preset?.ownerBuyVol) ? preset.ownerBuyVol : [];
+  const ownerSellVol = Array.isArray(preset?.ownerSellVol) ? preset.ownerSellVol : [];
+
+  const holdings = new Array(owners.length).fill(0);
+  ownerIndex.forEach(idx => {
+    if (Number.isInteger(idx) && idx >= 0 && idx < holdings.length) holdings[idx] += 1;
+  });
+
+  return owners.map((wallet, i) => {
+    const address = String(wallet || '').toLowerCase();
+    const walletType = String(ownerWalletType[i] || '').toLowerCase();
+    const community = Number.isFinite(ownerCommunity[i]) ? Number(ownerCommunity[i]) : null;
+    const baseColor = colorForWallet(walletType, community, i);
+    const flow = (Number(ownerBuyVol[i] || 0) || 0) + (Number(ownerSellVol[i] || 0) || 0);
+    const ethosScore = Number(ownerEthos[i] || 0) || 0;
+
+    return {
+      id: address || `owner-${i}`,
+      address,
+      label: address ? `${address.slice(0, 6)}…${address.slice(-4)}` : `owner-${i + 1}`,
+      walletType,
+      community,
+      ethosScore,
+      flowMetric: flow,
+      holdingCount: holdings[i] || 0,
+      baseColor: baseColor.slice(0, 4),
+      displayColor: baseColor.slice(0, 4),
+      stage: 'owner',
+      groupKey: walletType || (community != null ? `community-${community}` : 'other')
+    };
+  });
+}
+
+function circle(node, r) {
+  const tint = colorToThree(node?.baseColor || node?.displayColor || CSS_COLORS.nodeFill);
   const group = new THREE.Group();
   const fill = new THREE.Mesh(
     new THREE.CircleGeometry(r, 32),
-    new THREE.MeshBasicMaterial({ opacity: 0.9, transparent: true })
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(tint.r, tint.g, tint.b), opacity: 0.9, transparent: true })
   );
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(r + 0.9, r + 1.4, 32),
-    new THREE.MeshBasicMaterial({ opacity: 1 })
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(tint.r, tint.g, tint.b), opacity: 1, transparent: true })
   );
   group.add(fill);
   group.add(ring);

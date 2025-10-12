@@ -1,25 +1,27 @@
 :root {
   /* palette */
-  --bg: #0a0a0a;
-  --panel: #111111;
-  --ui: #1a1a1a;
-  --text: #e6e6e6;
-  --muted: #9aa0a6;
+  --bg: #040a07;
+  --panel: rgba(11, 19, 14, 0.85);
+  --ui: rgba(9, 16, 12, 0.76);
+  --text: #9bf7b2;
+  --muted: rgba(0, 255, 102, 0.55);
   --accent: #00ff66;
-  --accent-2: #9b87ff;
-  --danger: #ff6b6b;
-  --grid: #222222;
+  --accent-2: #24ffa5;
+  --danger: #ff5f5f;
+  --grid: rgba(0, 255, 102, 0.08);
+  --frozen: #49a0ff;
+  --dormant: #4e6055;
 
   /* graph */
-  --node-fill: #d4ffd4;
-  --node-stroke: #80ffb3;
-  --link: 136, 136, 136;
-  --link-dim-a: 0.12;
-  --link-focus-a: 0.6;
+  --node-fill: rgba(0, 255, 102, 0.25);
+  --node-stroke: rgba(0, 255, 102, 0.8);
+  --link: 80, 220, 142;
+  --link-dim-a: 0.1;
+  --link-focus-a: 0.55;
 
   /* typography */
-  --font-sans: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-  --font-mono: 'Fira Code', Menlo, Consolas, monospace;
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-md: 14px;
@@ -32,11 +34,18 @@
   --space-4: 16px;
 
   /* radii */
-  --radius: 8px;
-  --radius-lg: 12px;
+  --radius: 10px;
+  --radius-lg: 14px;
 
   /* borders & elevation */
-  --border-color: #262626;
+  --border-color: rgba(0, 255, 102, 0.18);
   --border: 1px solid var(--border-color);
-  --shadow: 0 0 0 1px #141414, 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow: 0 0 0 1px rgba(0, 255, 102, 0.08), 0 16px 48px rgba(0, 20, 10, 0.75);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
 }

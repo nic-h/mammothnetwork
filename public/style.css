@@ -126,6 +126,7 @@
 #three-stage {
   position: absolute;
   inset: 0;
+  overflow: hidden;
 }
 
 #three-stage canvas {
@@ -133,6 +134,18 @@
   height: 100%;
   display: block;
   outline: none;
+}
+
+#three-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size: 36px 36px;
+  opacity: 0.85;
 }
 
 /* primitives */
