@@ -1,69 +1,68 @@
-# Mammoths Network — LLM Contributor Guide (Deck.gl)
+# Mammoths Network — LLM Contributor Guide (Three.js)
 
-This document gives a compact mental model and a reproducible checklist so an LLM (or a new engineer) can help without breaking working behavior.
+This guide gives Codex (and any new engineer) the minimum context needed to make safe, surgical changes without regressing the live Three.js renderer.
 
 ## TL;DR
-- Frontend: Deck.gl UMD, loader at `public/engine.js`, app at `public/deck.app.js`, HTML at `public/index.html`, styles in `public/style.css`.
-- Backend: Express in `server/index.js` with SQLite (see `server/db.js`).
-- Data jobs (Modularium + Ethos): `jobs/*` — run them to (re)populate SQLite; scripts read `.env` automatically via `node --env-file=.env`.
-- Graph API: `/api/graph?mode=holders|transfers|traits|wallets&edges=0..500`.
-- Presets arrays: `/api/preset-data?nodes=10000`.
-- Detail API: `/api/token/:id`, wallet APIs at `/api/wallet/:address` and `/api/wallet/:address/meta`.
+- Frontend: `client/three/app.js` bundles via esbuild to `public/three.app.js`; loaded by `public/engine.js` inside `public/index.html` with shared styles in `public/style.css`.
+- Backend: Express server in `server/index.js` with SQLite helpers in `server/db.js` and cached graph endpoints.
+- Data jobs: scripts in `jobs/` hydrate SQLite from Modularium + Ethos; run them with `node --env-file=.env jobs/<name>.js` or `npm run jobs:all`.
+- Graph data: `/api/graph?mode=holders|transfers|traits|wallets&edges=0..500`, `/api/preset-data?nodes=10000`, `/api/transfer-edges`.
+- Details: `/api/token/:id`, `/api/wallet/:address`, `/api/wallet/:address/meta`, `/api/ethos/profile`.
 
-## How to run (fast)
-1) `npm ci`
-2) Load env and migrate:
-```
-set -a; source .env; set +a
-npm run db:migrate
-```
-3) Populate (full pipeline, safe to re‑run):
-```
-npm run jobs:all
-```
-4) Start server: `PORT=3001 npm run dev` → http://localhost:3001
+## How to Run (fast path)
+1. `npm ci`
+2. Load env + migrate:
+   ```
+   set -a; source .env; set +a
+   npm run db:migrate
+   ```
+3. Populate cache (idempotent):
+   ```
+   npm run jobs:all
+   ```
+4. Start the dev server: `PORT=3001 npm run dev`
+5. Open http://localhost:3001?force=1 (bypasses cached graphs on first load).
 
 ## Anatomy
 - `public/index.html`
-  - Loads Deck.gl UMD from `/lib/deck.gl/dist.min.js` and geo-layers from `/lib/@deck.gl/geo-layers/dist.min.js`.
-  - Loads `engine.js` which ensures the UMDs are ready, then injects `deck.app.js` with cache‑busting from `<meta name="app-build">`.
-  - Three‑panel grid: left (controls), center (Deck canvas), right (details).
+  - Inline UI scaffolding for the three-panel layout.
+  - Loads `engine.js`, which dynamically imports `/three.app.js?v=<meta app-build>`.
 - `public/engine.js`
-  - Robust loader: tries local UMDs first, then CDN; boots `deck.app.js` only after `window.deck` is present.
-- `public/deck.app.js`
-  - Creates a Deck instance with `useDevicePixels: true` (crisp DPR). No manual DPR clamps.
-  - Layers: ScreenGrid density (optional) → Line edges (additive) → Arc flows (additive, brushing) → Scatterplot dots (pixel‑capped, outline, additive, brushing) → overlays.
-  - Simple views (DOTS/FLOW/WEB/PULSE/CROWN) exist but rich stack is default.
+  - Waits for DOM ready, then `import()`s `three.app.js`. Logs success/failure to the console.
+- `client/three/app.js`
+  - Builds the ForceGraph3D scene (nodes, edges, presets, sidebar sync) using Three.js + custom sprite materials.
+  - Exposes `window.mammoths.focusToken(id)` and `window.mammoths.setSimpleView(name)` for automation/scripts.
 - `server/index.js`
-  - Serves `/lib` from `node_modules`, `public/`, and the API routes.
-  - Graph and preset endpoints with ETag/TTL; `/api/precomputed/*` as fast path.
-- `jobs/*`
-  - Pulls holders/activity/listings from Modularium and Ethos; computes metrics; saves to SQLite.
+  - Serves static assets, runs migrations, and exposes the API (`/api/graph`, `/api/preset-data`, `/api/token/:id`, etc.) with ETag + TTL caching.
+- `jobs/*.js`
+  - Modularium/Ethos ingestion, wallet enrichment, edge precomputation, similarity builds. Safe to re-run.
 
-## Debug checklist (when canvas looks empty)
-1) Hard refresh (Cmd+Shift+R) — invalidates sticky assets.
-2) Network tab:
-   - `/lib/deck.gl/dist.min.js` returns 200.
-   - `/engine.js?v=…` → `/deck.app.js?v=…` injected.
-   - `/api/graph?mode=holders&edges=200` returns JSON with `nodes`.
-3) DOM/Console:
-   - DOM contains `.center-panel #deck-canvas`.
-   - Console shows: `deck.app: boot` and `engine: deck.app injected`.
-4) Data sanity: `/api/preset-data?nodes=10000` returns keys; `/api/health` shows `haveDb: true`.
+## Debug Checklist (blank canvas triage)
+1. Hard refresh (Cmd+Shift+R).
+2. Network tab:
+   - `/three.app.js?v=…` returns 200 (no 404/500).
+   - `/api/graph?mode=holders&edges=200&force=1` returns nodes.
+3. DOM & console:
+   - `.center-panel #three-stage` exists.
+   - `window.__mammothDrawnFrame === true` after first render.
+   - Console contains `engine: three.app module loaded` (no import errors).
+4. Data sanity: `/api/preset-data?nodes=10000` has owners array; `/api/health` → `{ ok: true, haveDb: true }`.
 
-## Non‑breaking tasks an LLM can tackle
-- Add UI toggles for density overlay and brushing radius.
-- Add lightweight text labels on zoom (TextLayer) for whales/rare tokens.
-- Add small error toast/banner when any API call fails.
-- Improve culling/LOD for zoomed‑out views.
+## Low-Risk Tasks for Codex
+- UI polish (tokens-only CSS tweaks, new toggles, copy updates).
+- Sidebar enhancements that don't change API shapes.
+- Sprite/edge styling adjustments that stay within ForceGraph3D APIs.
+- Additional Playwright waits/assertions using `window.__mammothDrawnFrame` or `window.mammoths.*` helpers.
 
-## Style + brand rules
-- Black background, neon green `#00ff66` (variables in tokens.css), mono fonts (Fira Code/IBM Plex Mono), subtle glow.
-- Keep borders: `1px solid rgba(0,255,102,.2)`; spacing via tokens.
+## Brand & UX Rules
+- Palette: black background, neon green `#00ff66`, frozen blue `#4488ff`, dormant gray `#666666` (tokens defined in `public/client/styles/tokens.css`).
+- Typography: monospace stack (Fira Code/IBM Plex Mono). Respect existing spacing tokens and border radii.
+- Edge cap: keep UI + API limited to ≤500 edges by default (force=1 path only for debugging).
 
 ## Gotchas
-- Do not reintroduce manual DPR clamps or canvas sizing — Deck manages DPR.
-- Keep edges ≤ 500 for perf; use pixel units (widthMinPixels).
-- Simple views must still fall back to live `/api/graph` data to avoid blank states.
+- Do **not** reintroduce legacy WebGL engines or PIXI assets; Three.js is the single source of truth.
+- Avoid manipulating canvas size manually; ForceGraph3D already responds to ResizeObserver.
+- Keep file writes idempotent—migrations and jobs must never drop data.
+- Scripts rely on `node --env-file=.env`; ensure new jobs follow the same pattern.
 
-If you change rendering or data flows, keep changes surgical and reversible. Do not alter server endpoint shapes unless coordinated with jobs and frontend.
+When in doubt, search the repo for existing patterns (e.g., `viewNodes`, `renderTreeView`, TTL cache usage) and mirror them. Keep changes small, explain rationale in docs/PR descriptions, and run `npm run db:migrate && npm run dev` locally to validate before sharing.

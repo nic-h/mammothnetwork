@@ -7,37 +7,49 @@ const OUT = path.resolve(process.cwd(), 'artifacts', 'ui');
 fs.mkdirSync(OUT, { recursive: true });
 
 const VIEW_STATES = [
-  { name: 'dots', view: 'dots', expectedLayer: 'nodes', token: 5000 },
-  { name: 'flow', view: 'flow', expectedLayer: 'flows-market', token: 3333 },
-  { name: 'tree', view: 'tree', expectedLayer: 'tree-nodes', token: 724 },
-  { name: 'rhythm', view: 'rhythm', expectedLayer: 'rhythm-dots', token: 1472 }
+  { name: 'dots', view: 'dots', token: 5000 },
+  { name: 'flow', view: 'flow', token: 3333 },
+  { name: 'tree', view: 'tree', token: 724 },
+  { name: 'rhythm', view: 'rhythm', token: 1472 }
 ];
 
 async function focusToken(page, tokenId) {
   await page.evaluate((id) => {
-    const search = document.getElementById('search');
-    if (search) {
-      search.value = '';
-      search.dispatchEvent(new Event('input', { bubbles: true }));
+    if (window.mammoths?.focusToken) {
+      window.mammoths.focusToken(id);
+      return;
     }
+    const search = document.getElementById('search');
+    if (!search) return;
+    search.value = String(id);
+    search.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }));
+    search.dispatchEvent(new Event('change', { bubbles: true }));
   }, tokenId);
-  await page.fill('#search', String(tokenId));
-  await page.keyboard.press('Enter');
   await page.waitForFunction(() => {
-    const details = document.getElementById('details');
-    if (!details) return false;
-    const txt = details.textContent || '';
-    return txt.trim().length > 0 && !/Select a node/i.test(txt);
+    const body = document.getElementById('sidebar-body');
+    if (!body || body.classList.contains('hidden')) return false;
+    const label = document.getElementById('sb-id');
+    return !!(label && label.textContent && label.textContent.trim().length);
   }, { timeout: 5000 }).catch(() => {});
 }
 
-async function waitForLayer(page, expected) {
-  await page.waitForFunction((layerId) => {
-    const deck = window.deckInst;
-    if (!deck || !Array.isArray(deck.props?.layers)) return false;
-    return deck.props.layers.some(layer => layer && layer.id === layerId);
-  }, { timeout: 10000 }, expected).catch(() => {});
-  await page.waitForTimeout(600);
+async function setView(page, name) {
+  await page.evaluate((viewName) => {
+    if (window.mammoths?.setSimpleView) {
+      window.mammoths.setSimpleView(viewName);
+      return;
+    }
+    const select = document.getElementById('view');
+    if (select) {
+      select.value = viewName;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }, name);
+  await page.waitForFunction((viewName) => {
+    const activeBtn = document.querySelector(`[data-view-btn].active[data-view-btn="${viewName}"]`);
+    return !!activeBtn;
+  }, {}, name).catch(() => {});
+  await page.waitForTimeout(500);
 }
 
 async function main() {
@@ -51,9 +63,8 @@ async function main() {
   await page.waitForFunction(() => window.__mammothDrawnFrame === true, { timeout: 15000 }).catch(() => {});
 
   for (const state of VIEW_STATES) {
-    await page.selectOption('#view', state.view);
-    await page.waitForTimeout(1200);
-    await waitForLayer(page, state.expectedLayer);
+    await setView(page, state.view);
+    await page.waitForTimeout(800);
     try { await page.keyboard.press('r'); } catch {}
     await page.waitForTimeout(400);
     await focusToken(page, state.token);

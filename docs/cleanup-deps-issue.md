@@ -13,7 +13,7 @@ Raw output:
 ```
 
 Notes:
-- PIXI has been removed; deck.gl is the single engine. If `depcheck` surfaces PIXI again, remove it.
+- PIXI has been removed; Three.js + 3d-force-graph is the single engine. If `depcheck` surfaces PIXI again, remove it.
 - `sharp` is loaded dynamically in `jobs/sync-metadata.js` (optional dependency); depcheck marks it as used.
 
 ## ts-prune

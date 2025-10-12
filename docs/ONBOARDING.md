@@ -1,4 +1,4 @@
-# Mammoths Network — Onboarding (Deck.gl)
+# Mammoths Network — Onboarding (Three.js)
 
 This is the fastest path to get productive on the project. It assumes Node 20+, git, and SQLite are available locally.
 
@@ -8,15 +8,15 @@ This is the fastest path to get productive on the project. It assumes Node 20+, 
 3. Backfill data (normalize/metrics): `node scripts/db.backfill.js`
 4. Start server: `npm run dev` (defaults to `PORT=3000`; you can set `PORT=3001`)
 5. Open: `http://localhost:3000` (or `http://localhost:3001`)
-   - Left/right UI stay the same. The center canvas is Deck.gl.
+   - Left/right UI stay the same. The center canvas runs ForceGraph3D (Three.js).
    - Keyboard: `1–5` switch views, `R` reset zoom.
 
 If port 3000 is in use: `PORT=3001 npm run dev` or kill: `lsof -i :3000 | awk 'NR>1{print $2}' | xargs kill -9`
 
 ## Repo Map
 - `public/` — client assets
-  - `engine.js` — boots Deck.gl (ensures UMDs, injects `deck.app.js`)
-  - `deck.app.js` — Deck.gl center renderer (Scatterplot/Line/Polygon/Glow)
+  - `engine.js` — dynamic loader that imports the Three.js bundle (`three.app.js`)
+  - `three.app.js` — bundled ForceGraph3D renderer (gradients, LOD, presets)
   - `client/styles/tokens.css` — brand tokens (colors, spacing, font)
 - `server/` — Express + SQLite
   - `index.js` — API routes (graph, preset-data, token, listings, traits, story, suspicious)
@@ -60,14 +60,13 @@ Where DB is used
   - `/api/transfer-edges`, `/api/suspicious-trades`, `/api/wallet-relationships` — overlays
 
 ## Engine
-Deck.gl only (no PIXI). The left and right panels do not change; only the center canvas renders the scene.
+Three.js + 3d-force-graph (no PIXI). The left and right panels do not change; only the center canvas renders the scene via gradient sprites and additive edges.
 
-## Views (deck)
-- Holders — gravitational clusters with owner hull rings and glow.
-- Trading — profit waterfalls, optional flow arcs/particles.
-- Traits — constellation lines and wobble clusters; labels on zoom.
-- Whales — generational trees (in progress); radial tiers as fallback.
-- Health — heatmap + pulses (in progress).
+## Views
+- DOTS — ownership state with whale bubbles and optional cluster mode.
+- FLOW — transfer/sale arcs with directional particles and time slider.
+- TREE — radial lineage layout around the focused token/wallet.
+- RHYTHM — time × price mapping with recency pulses and dormant fades.
 
 ## Screenshots
 - Generate desktop snapshots (1440 px):

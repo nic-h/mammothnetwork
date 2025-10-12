@@ -32,7 +32,7 @@ Always use tokens for colors, spacing, and sizes. If a new token is needed, add 
 ## Don’ts
 - Don’t hardcode colors or spacing — always use tokens.
 - Don’t remove existing elements/IDs; add non-destructive enhancements.
-- Don’t change Deck.gl or data/API structures from the UI layer.
+- Don’t change the Three.js force-graph wiring or data/API structures from the UI layer.
 
 ## Testing Checklist
 - Presets (and unified Views) switch modes and layouts correctly.

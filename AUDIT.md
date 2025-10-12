@@ -2,7 +2,7 @@ Mammoths Network Integration Audit
 =================================
 
 Scope
-- Integrate Deck.gl network renderer into existing repo
+- Integrate Three.js force-directed renderer into existing repo
 - Use existing SQLite cache (tokens, attributes, images) without data loss
 - Add jobs for holders/activity/edges/enrichment
 - Add API with ETag + 5‑min memory cache
@@ -38,11 +38,11 @@ API
 - `GET /api/activity`: lightweight stub.
 - `GET /api/health`: status and DB path.
 
-Frontend (Deck.gl)
-- UMD via unpkg in `public/index.html`.
-- Scatterplot/Line/Polygon/Text layers for nodes/edges/hulls/labels; additive glow implemented with layered scatter.
-- Optional Trips layer for transfer flows; ScreenGrid/Hexagon for ownership density.
-- LOD tuning: ambient edges hidden when zoomed out.
+Frontend (Three.js)
+- Engine bundles from `client/three/app.js` → `public/three.app.js` (esbuild).
+- ForceGraph3D nodes rendered via custom sprite textures; additive glow and whale bubble scaling options.
+- Edge modes cover ownership, transfers, sales, mints, and trait links with zoom-aware throttling.
+- Timeline/preset toggles managed in vanilla JS UI; cluster mode leverages d3-hierarchy helpers.
 
 Performance alignment
 - Initial load: fast path uses cached `graph_cache` and Brotli/gzip compression (shrink-ray-current).
@@ -54,7 +54,7 @@ Render deploy
 - Cron/Jobs: add a Render Cron Job (separate service) to run `node jobs/run-all.js` weekly; see README.
 
 Pre-merge checklist
-- [x] No D3/Canvas or per-node image rendering in UI.
+- [x] No Canvas 2D or per-node image rendering in UI.
 - [x] No heavy build tooling; plain Express + static files.
 - [x] Standard DB path via `DATABASE_PATH` with fallback.
 - [x] `/api/health` present.
@@ -62,7 +62,7 @@ Pre-merge checklist
 - [x] Memory cache (5 min) + ETag.
 - [x] Brotli/gzip enabled.
 - [x] Degree caps and rarity threshold in edge builders.
-- [x] Deck.gl only
+- [x] Three.js force graph only
 
 Open items / optional
 - Hook Modularium client or RPC to fill holders/transfers offline.

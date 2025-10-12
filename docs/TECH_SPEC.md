@@ -5,12 +5,11 @@ Status: living specification for the repo. This doc tracks intent (spec) and imp
 ## Summary
 Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas now runs on a Three.js + 3d-force-graph renderer with custom gradient sprites, additive blending, and zoom-aware level-of-detail controls. Data is served by a SQLite backend with cached endpoints and compact “preset-data” arrays.
 
-### Simple Views (binary path)
-- DOTS (ScatterplotLayer): wallet scatter using binary attributes; color = Active/Whale/Frozen/Dormant; size = log10(holdings+buys+sells). “Cluster mode” bubble-packs tokens by owner/segment with circle packing and faint rings; toggle lives in DOTS controls. Click opens token detail.
-- FLOW (ArcLayer): buy flows render green, sell flows red, with curved arcs, arrows, and directional particles gated by the time slider (≥ 1.4 zoom).
-- WEB (PathLayer): straight connections; visible ≥ 1.2 zoom.
-- PULSE (ScatterplotLayer): recency‑weighted alpha; subtle pulse for <24h.
-- CROWN (ScatterplotLayer + TextLayer): rarity dots + gold labels for top‑K at zoom ≥ 2.
+### Simple Views
+- DOTS — ownership state defaults; additive sprite glow, whale bubble toggle, optional cluster mode (circle packing via d3-hierarchy).
+- FLOW — curved transfer/sale arcs with directional particles, color-coded by trade type, filtered by the time slider.
+- TREE — radial lineage layout using d3.tree around the focused token or wallet; forces paused for clarity.
+- RHYTHM — time × price projection; recent activity pulses green, dormant holdings fade red, Z-axis lifts by recency.
 
 Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → fallback to live `/api/graph` nodes/edges (ensures canvas never blank).
 
@@ -163,7 +162,7 @@ Ethos
 - Engine: `client/three/app.js` boots ForceGraph3D and bundles to `public/three.app.js` via `npm run build:client`.
 - Nodes: gradient `THREE.SpriteMaterial` (additive blending). Base size scales with `log10(sale_count)`; whales get extra scale when the “Whale Bubbles” toggle is active.
 - Pulse loop: `requestAnimationFrame` adjusts sprite opacity with activity recency; hover/selection/highlight tweak tint/alpha before the pulse step.
-- Edges: zoom buckets (near=500, mid=300, far=100) clamp the slider. Styles match legacy Deck views (sales red, transfers blue dashed, mints white dotted, mixed gold, ownership/ambient green, traits violet).
+- Edges: zoom buckets (near=500, mid=300, far=100) clamp the slider. Styles follow spec (sales red, transfers blue dashed, mints white dotted, mixed gold, ownership/ambient green, traits violet).
 - FLOW view: arcs bend at 0.2, buys render green with double particles, sells render red with single particles/solid strokes, and the time slider filters edges to the selected window.
 - TREE view: lineage nodes are cloned, recolored, and pinned into a radial layout (d3.tree polar coordinates) around the focused token/wallet; simulation decay set to 1 while active.
 - DOTS cluster mode: optional circle-packing (d3.pack) by owner/segment with faint group rings; nodes pin until the toggle is cleared, then snap back to preset positions.
@@ -241,8 +240,8 @@ These arrays are computed server-side from SQLite and cached in‑memory per req
 
 # Changelog
 - v2.2.1 — TREE view now renders a fixed radial lineage layout, DOTS adds bubble-pack Cluster mode, FLOW uses green-buy/red-sell encodings with curved arcs and particles, and Link density/time controls adjust per view.
-- v2.2 — Migrated center engine to Three.js 3d-force-graph with custom sprites/LOD; removed Deck.gl runtime.
-- v2.1 — Center engine moved to Deck.gl, PIXI kept as fallback; new views (holders hulls, trading waterfalls/flows, traits constellations); DB migrations (mint/token events, relationships, snapshots); endpoints (`/api/token/:id/story`, `/api/suspicious-trades`).
+- v2.2 — Center engine uses Three.js 3d-force-graph with custom sprites/LOD; legacy renderers removed.
+- v2.1 — Center engine overhaul, new views (holders hulls, trading waterfalls/flows, traits constellations); DB migrations (mint/token events, relationships, snapshots); endpoints (`/api/token/:id/story`, `/api/suspicious-trades`).
 - v2.0 — Spec aligned to current implementation; added tokens proposal; clarified decisions.
 
 ---
@@ -257,7 +256,7 @@ These arrays are computed server-side from SQLite and cached in‑memory per req
 - `ForceGraph3D` with a custom `nodeThreeObject` sprite (gradient disc, additive blending) sized from log10(sale_count) and whale flags.
 - Zoom bucket caps: near=500, mid=300, far=100 edges; the slider cannot exceed the active bucket.
 - Whale bubble toggle multiplies whale sprite scale (+35%) and adds opacity bias inside the pulse loop.
-- Link styling mirrors legacy Deck views: sales red solid, transfers blue dashed, mints white dotted, mixed gold solid, traits violet faint, ownership/ambient green translucent.
+- Link styling: sales red solid, transfers blue dashed, mints white dotted, mixed gold solid, traits violet faint, ownership/ambient green translucent.
 - Pulse loop keeps nodes breathing (~12% amplitude) and boosts recently active (<24h) tokens.
 
 ## Interactions & shortcuts

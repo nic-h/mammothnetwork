@@ -7,7 +7,7 @@ Use this checklist to verify a working local/dev deployment and to diagnose “b
 - DB has rows: tokens > 0, transfers > 0
 - Graph responds: `/api/graph` has nodes
 - Preset arrays respond: `/api/preset-data` has owners
-- Canvas exists: an element `#deck-canvas` added to `.center-panel`
+- Canvas exists: the Three.js container `#three-stage` inside `.center-panel`
 - Selecting a token opens sidebar with text + image
 
 ## 1) Server up
@@ -37,7 +37,7 @@ curl -s http://localhost:3000/api/precomputed/tokens | jq '.tokens|length'
 ```
 Notes:
 - If these return HTML, restart the server (old process didn’t load the new routes).
-- Simple views (DOTS/FLOW/WEB/PULSE/CROWN) fall back to live `/api/graph` nodes/edges when these are empty, so the canvas should still render.
+- Simple views (DOTS/FLOW/TREE/RHYTHM) fall back to live `/api/graph` nodes/edges when these are empty, so the canvas should still render.
 
 ## 5) Images
 - Files: `data/thumbnails/:id.jpg` (or `data/images/:id.jpg`).
@@ -45,8 +45,8 @@ Notes:
 
 ## 6) Frontend ready
 Open the app and check DevTools Console:
-- No “Deck.gl UMD not found” error
-- DOM contains `.center-panel #deck-canvas`
+- No dynamic import errors from `engine.js`
+- DOM contains `.center-panel #three-stage`
 - Panels are clickable (search and left/right UI should not be blocked by canvas)
 
 ## 7) Populate data (minimal path)
@@ -70,7 +70,7 @@ Full pipeline: `npm run jobs:all` (adds listings, edges similarity, etc.).
 window.mammoths?.focusToken?.(724)
 ```
 You should see a selection ring and the right panel populated.
-- Deck exposes `window.__mammothDrawnFrame`. If it never becomes `true`, the canvas has not drawn; re-check data jobs or console errors.
+- The Three.js bootstrap sets `window.__mammothDrawnFrame`. If it never becomes `true`, the canvas has not drawn; re-check data jobs or console errors.
 
 ## 9) Screenshots (prove it)
 ```

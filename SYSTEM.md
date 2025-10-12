@@ -4,7 +4,7 @@ You are building a network visualization app for the Mammoths NFT collection. Th
 
 ## CRITICAL REQUIREMENTS
 1. Match the existing design system from dash.mammoths.tech (minimal, monospace, black/white/green)
-2. Use Deck.gl for WebGL rendering (NOT D3.js, NOT Canvas 2D)
+2. Use Three.js with 3d-force-graph for WebGL rendering (NOT D3.js, NOT Canvas 2D)
 3. Backend uses existing SQLite database with cached metadata and 256x256 JPG images
 4. NO image thumbnails shown on nodes - only colored circles
 6. Deploy to Render.com with persistent disk storage

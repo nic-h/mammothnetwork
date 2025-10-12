@@ -71,7 +71,7 @@ async function main(){
   const targetUrl = BASE.includes('?') ? `${BASE}&force=1` : `${BASE}?force=1`;
   await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
   await waitForIdle(page);
-  // Wait for render surface (Three or Deck)
+  // Wait for render surface (Three.js stage)
   await waitForEngineCanvas(page);
   await page.waitForFunction(() => {
     try {
@@ -86,7 +86,7 @@ async function main(){
       return false;
     }
   }, { timeout: 12000 });
-  // Wait until Deck has initialized and canvas backing store is non-zero
+  // Wait until Three.js helpers are exposed and canvas backing store is non-zero
   await page.waitForFunction(() => {
     const c = document.querySelector('#three-stage canvas, .center-panel canvas');
     if (!c || !(c.width > 0 && c.height > 0)) return false;

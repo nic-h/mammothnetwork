@@ -37,7 +37,7 @@ button { font: inherit; }
 /* Header */
 .header {
   display: grid;
-  grid-template-columns: var(--col-left) 1fr var(--col-right);
+  grid-template-columns: var(--col-left) 1fr min(320px, 28vw);
   align-items: center;
   border-bottom: 1px solid rgba(var(--green-rgb), .3);
   position: sticky;
@@ -103,8 +103,9 @@ button { font: inherit; }
   grid-column: 3;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  width: var(--col-right);
+  justify-content: flex-end;
+  width: 100%;
+  padding-right: var(--pad-16);
 }
 
 #search {
@@ -351,12 +352,12 @@ input[type="checkbox"]:checked::after{
   gap: var(--pad-12);
 }
 #sidebar .sidebar-thumb {
-  width: calc(100% + 2px);
+  display: block;
+  width: 100%;
   height: auto;
-  max-width: none;
   border: 1px solid rgba(var(--green-rgb), .25);
   box-shadow: 0 10px 18px rgba(0, 0, 0, .45);
-  margin: -1px -1px var(--pad-12) -1px;
+  margin: 0 auto var(--pad-12);
 }
 #sidebar .token-header {
   display: flex;
@@ -494,7 +495,7 @@ input[type="checkbox"]:checked::after{
   .panel::after,
   .center-panel::before { transition: none !important; animation: none !important; }
 }
-/* Ensure the deck canvas owns gestures */
+/* Ensure the Three.js stage owns gestures */
 
 .controls-section { display: flex; flex-direction: column; gap: var(--pad-16); }
 .panel-title { font-size: var(--fs-14); font-weight: 700; letter-spacing: .1em; display: block; }
