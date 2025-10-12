@@ -169,8 +169,11 @@ const state = {
   tokenNodeMap: new Map(),
   bubbleNodes: [],
   bubbleGroups: new Map(),
+  bubbleGroupStats: new Map(),
   treeTopdown: { root: null, data: null, loading: false },
   treeTopdownDepth: 2,
+  explainNextView: null,
+  explainDefault: null,
   rawEdges: {
     ownership: [],
     traits: [],
@@ -384,6 +387,7 @@ const API = {
   initDraggablePanels();
   exposeApi();
   setupControlGuards();
+  bindExplainCard();
 
   await initData();
   rebuildLinks();
@@ -1259,6 +1263,7 @@ function disposeSprites() {
 
 function renderCurrentView() {
   if (!state.graph) return Promise.resolve();
+  hideExplainOverlay();
   let result;
   switch (state.activeView) {
     case 'bubble':
@@ -1352,6 +1357,7 @@ function renderBubbleMapView() {
   state.highlighted = null;
   updateNodeStyles();
   scheduleZoomToFit();
+  hideExplainOverlay();
 }
 
 function renderFlowView() {
@@ -1758,11 +1764,14 @@ async function renderTreeTopdownView(rootCandidate) {
     highlightBranch(state.graph, null, data);
     const sidebarTarget = state.ownerAddressMap.get(resolvedRoot)?.id || resolvedRoot;
     updateSidebar(sidebarTarget);
+    const summaryNode = data.nodes.find(n => n.id === resolvedRoot) || data.nodes[0];
+    if (summaryNode) showExplainOverlay(summarizeTopdownNode(summaryNode, data));
     updateNodeStyles();
     scheduleZoomToFit(140, 800);
   } catch (error) {
     console.warn('three.app: topdown tree error', error?.message || error);
     state.treeTopdown = { root: resolvedRoot, data: null, loading: false };
+    hideExplainOverlay();
   }
 }
 
@@ -2005,10 +2014,16 @@ function focusNode(id) {
   if (state.activeView === 'dots' || state.activeView === 'flow') {
     const neighbors = state.ownerTopNeighbors.get(id) || [];
     state.highlighted = neighbors.length ? new Set([id, ...neighbors]) : new Set([id]);
+    if (state.activeView === 'flow') {
+      showExplainOverlay(summarizeFlowNode(node));
+    } else {
+      hideExplainOverlay();
+    }
   } else if (state.activeView === 'bubble') {
     highlightBubbleGroup(node.groupKey || node.walletType || 'Other');
   } else {
     state.highlighted = null;
+    if (state.activeView !== 'treeTopdown') hideExplainOverlay();
   }
   const cam = state.graph.camera();
   const target = state.controls?.target || new THREE.Vector3(0, 0, 0);
@@ -2049,6 +2064,7 @@ function handleBackgroundClick() {
   state.highlighted = null;
   updateNodeStyles();
   updateSidebar(null);
+  hideExplainOverlay();
   if (state.activeView === 'treeRadial') {
     renderTreeRadialView(state.lastTreeRoot ?? state.nodes[0]?.id ?? null);
   }
@@ -2077,6 +2093,13 @@ function handleNodeHover(node) {
     const branchSet = node ? computeTopdownBranchSet(node, dataset) : null;
     state.highlighted = branchSet;
     highlightBranch(state.graph, node || null, dataset);
+    if (node) {
+      showExplainOverlay(summarizeTopdownNode(node, dataset));
+    } else {
+      const rootNode = dataset.nodes.find(n => n.id === state.treeTopdown.root);
+      if (rootNode) showExplainOverlay(summarizeTopdownNode(rootNode, dataset));
+      else hideExplainOverlay();
+    }
   }
   updateNodeStyles();
   if (state.stageEl) state.stageEl.style.cursor = node ? 'pointer' : 'grab';
@@ -2085,16 +2108,21 @@ function handleNodeHover(node) {
 function highlightBubbleGroup(groupKey, includeSelected = false) {
   if (!groupKey) {
     state.highlighted = null;
+    hideExplainOverlay();
     return;
   }
   const ids = state.bubbleGroups.get(groupKey);
   if (!ids) {
     state.highlighted = null;
+    hideExplainOverlay();
     return;
   }
   const set = new Set(ids);
   if (includeSelected && state.selectedId != null) set.add(state.selectedId);
   state.highlighted = set;
+  if (state.activeView === 'bubble') {
+    showExplainOverlay(summarizeBubbleGroup(groupKey));
+  }
 }
 
 async function highlightWallet(address) {
@@ -2490,6 +2518,22 @@ function bindUI() {
   }
 }
 
+function bindExplainCard() {
+  const nextBtn = document.getElementById('explain-next');
+  if (nextBtn && !nextBtn.dataset.threeBound) {
+    nextBtn.dataset.threeBound = '1';
+    nextBtn.addEventListener('click', () => {
+      if (!state.explainNextView) {
+        hideExplainOverlay();
+        return;
+      }
+      applySimpleView(state.explainNextView);
+      setActiveViewButton(state.explainNextView);
+      renderCurrentView();
+    });
+  }
+}
+
 function bindResize() {
   try {
     const ro = new ResizeObserver(() => {
@@ -2833,6 +2877,90 @@ function formatNumber(n) {
   if (!Number.isFinite(n)) return '—';
   if (Math.abs(n) >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
   return n.toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
+function showExplainOverlay(summary, options = {}) {
+  if (!summary) { hideExplainOverlay(); return; }
+  const {
+    title = '',
+    metric = '',
+    body = '',
+    nextView = null
+  } = summary;
+  const rememberDefault = options.rememberDefault === true;
+  const card = document.getElementById('explain-card');
+  const titleEl = document.getElementById('explain-title');
+  const metricEl = document.getElementById('explain-metric');
+  const bodyEl = document.getElementById('explain-body');
+  const nextBtn = document.getElementById('explain-next');
+  if (!card || !titleEl || !metricEl || !bodyEl || !nextBtn) return;
+
+  const normalized = {
+    title: String(title || ''),
+    metric: String(metric || ''),
+    body: Array.isArray(body) ? body.map(line => String(line || '')) : String(body || ''),
+    nextView: typeof nextView === 'string' && nextView ? nextView : null
+  };
+
+  titleEl.textContent = normalized.title;
+  metricEl.textContent = normalized.metric;
+  if (Array.isArray(normalized.body)) {
+    bodyEl.innerHTML = normalized.body.map(line => `<p>${escapeHtml(line)}</p>`).join('');
+  } else {
+    bodyEl.textContent = normalized.body;
+  }
+
+  const hasNext = !!normalized.nextView;
+  state.explainNextView = normalized.nextView;
+  nextBtn.classList.toggle('hidden', !hasNext);
+  nextBtn.disabled = !hasNext;
+  if (hasNext) nextBtn.textContent = 'Next View';
+
+  card.classList.remove('hidden');
+  if (rememberDefault) state.explainDefault = normalized;
+}
+
+function hideExplainOverlay() {
+  const card = document.getElementById('explain-card');
+  if (!card) return;
+  card.classList.add('hidden');
+  state.explainNextView = null;
+  state.explainDefault = null;
+}
+
+function summarizeTopdownNode(node, data) {
+  const title = truncateAddr(node.id);
+  const children = data.links.filter(link => (link.source.id || link.source) === node.id).length;
+  const metric = `${formatNumber(node.trades || 0)} trades • ${children} branch${children === 1 ? '' : 'es'}`;
+  const body = `Depth ${node.level} node. Volume index ${formatNumber(node.volume || 0)}.`;
+  return { title, metric, body, nextView: 'bubble' };
+}
+
+function summarizeBubbleGroup(groupKey) {
+  const nodes = state.bubbleNodes.filter(n => (n.groupKey || n.walletType || 'Other') === groupKey);
+  if (!nodes.length) return { title: groupKey, metric: '', body: '', nextView: 'flow' };
+  const trades = nodes.reduce((sum, item) => sum + (item.flowMetric || item.trades || 0), 0);
+  const holdings = nodes.reduce((sum, item) => sum + (item.holdingCount || 0), 0);
+  const whales = nodes.filter(n => (n.walletType || '').includes('whale')).length;
+  const title = `${groupKey} cluster`;
+  const metric = `${formatNumber(nodes.length)} wallet${nodes.length === 1 ? '' : 's'}`;
+  const body = [`Total trades ${formatNumber(trades)}`, `Holdings ${formatNumber(holdings)}`, whales ? `${whales} whale profile${whales === 1 ? '' : 's'}` : 'Solid holders'];
+  return { title, metric, body, nextView: 'flow' };
+}
+
+function summarizeFlowNode(node) {
+  const edges = state.ownerEdges.flow.filter(link => link.source === node.id || link.target === node.id);
+  const outgoing = edges.filter(link => link.source === node.id).reduce((sum, link) => sum + (link.weight || 0), 0);
+  const incoming = edges.filter(link => link.target === node.id).reduce((sum, link) => sum + (link.weight || 0), 0);
+  const title = truncateAddr(node.address || node.id);
+  const metric = `${formatNumber(edges.length)} lanes • ${formatNumber(outgoing)} out / ${formatNumber(incoming)} in`;
+  const counterparts = edges.slice(0, 4).map(link => {
+    const counterpartId = link.source === node.id ? link.target : link.source;
+    const counterpartNode = state.ownerNodeMap.get(counterpartId) || state.ownerAddressMap.get(counterpartId);
+    return truncateAddr(counterpartNode?.address || counterpartNode?.id || counterpartId);
+  });
+  const body = edges.length ? `Last 30d counterparties: ${counterparts.join(', ')}` : 'No recent trades in window.';
+  return { title, metric, body, nextView: 'treeTopdown' };
 }
 
 function cloneEdgeAsAmbient(edge) {
