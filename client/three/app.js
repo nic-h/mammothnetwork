@@ -1,6 +1,6 @@
 import ForceGraph3D from '3d-force-graph';
 import * as THREE from 'three';
-import { hierarchy, tree as d3tree, pack as d3pack } from 'd3-hierarchy';
+import { hierarchy, pack as d3pack } from 'd3-hierarchy';
 import { buildTopdownTree, attachTopdownTree, highlightBranch } from './layout/treeTopDown.js';
 import { bubbleMapLayout } from './layout/bubbleMap.js';
 
@@ -99,12 +99,6 @@ const COLLISION_FALLBACK_SWEEPS = 3;
 const COLLISION_DRIFT_CLAMP = 15;
 const COLLISION_EPSILON = 0.1;
 const COLLISION_MIN_RADIUS = 2;
-const TREE_NODE_BASE_SIZE = 12;
-const TREE_NODE_ROOT_SIZE = 18;
-const TREE_RING_BASE = 140;
-const TREE_RING_SPACING = 90;
-const TREE_RING_PADDING = 2;
-
 const CSS_COLORS = {
   nodeFill: cssColor('--node-fill', [212, 255, 212, 255]),
   nodeStroke: cssColor('--node-stroke', [128, 255, 179, 255]),
@@ -158,7 +152,6 @@ const state = {
   nodeMap: new Map(),
   nodeSprites: new Map(),
   viewNodes: new Map(),
-  treeNodes: new Map(),
   ownerNodes: [],
   ownerNodeMap: new Map(),
   ownerAddressMap: new Map(),
@@ -167,9 +160,6 @@ const state = {
   ownerTopNeighbors: new Map(),
   tokenNodes: [],
   tokenNodeMap: new Map(),
-  bubbleNodes: [],
-  bubbleGroups: new Map(),
-  bubbleGroupStats: new Map(),
   treeTopdown: { root: null, data: null, loading: false },
   treeTopdownDepth: 2,
   explainNextView: null,
@@ -190,10 +180,9 @@ const state = {
   mode: 'holders',
   lastZoomBucket: null,
   showBubbles: false,
-  activeView: 'dots',
+  activeView: View.BUBBLE,
   clusterMode: false,
   clusterMeshes: [],
-  lastTreeRoot: null,
   colorMode: 'default',
   traitGroups: [],
   selectedTraits: new Map(),
@@ -260,18 +249,7 @@ const spriteTexture = (() => {
 })();
 
 const SIMPLE_VIEWS = {
-  dots: {
-    mode: 'holders',
-    toggles: {
-      'ambient-edges': false,
-      'layer-ownership': true,
-      'layer-transfers': false,
-      'layer-sales': false,
-      'layer-mints': false,
-      'layer-traits': false
-    }
-  },
-  bubble: {
+  [View.BUBBLE]: {
     mode: 'holders',
     toggles: {
       'ambient-edges': false,
@@ -282,7 +260,18 @@ const SIMPLE_VIEWS = {
       'layer-traits': false
     }
   },
-  flow: {
+  [View.TREE]: {
+    mode: 'holders',
+    toggles: {
+      'ambient-edges': false,
+      'layer-ownership': false,
+      'layer-transfers': false,
+      'layer-sales': false,
+      'layer-mints': false,
+      'layer-traits': false
+    }
+  },
+  [View.FLOW]: {
     mode: 'holders',
     toggles: {
       'ambient-edges': false,
@@ -293,29 +282,7 @@ const SIMPLE_VIEWS = {
       'layer-traits': false
     }
   },
-  treeRadial: {
-    mode: 'traits',
-    toggles: {
-      'ambient-edges': false,
-      'layer-ownership': false,
-      'layer-transfers': false,
-      'layer-sales': false,
-      'layer-mints': false,
-      'layer-traits': true
-    }
-  },
-  treeTopdown: {
-    mode: 'holders',
-    toggles: {
-      'ambient-edges': false,
-      'layer-ownership': false,
-      'layer-transfers': false,
-      'layer-sales': false,
-      'layer-mints': false,
-      'layer-traits': false
-    }
-  },
-  rhythm: {
+  [View.RHYTHM]: {
     mode: 'transfers',
     toggles: {
       'ambient-edges': false,
@@ -327,6 +294,13 @@ const SIMPLE_VIEWS = {
     }
   }
 };
+
+const View = Object.freeze({
+  BUBBLE: 'bubble',
+  TREE: 'tree',
+  FLOW: 'flow',
+  RHYTHM: 'rhythm'
+});
 
 const API = {
   graph: '/api/graph',
@@ -1266,24 +1240,20 @@ function renderCurrentView() {
   hideExplainOverlay();
   let result;
   switch (state.activeView) {
-    case 'bubble':
+    case View.BUBBLE:
       result = renderBubbleMapView();
       break;
-    case 'flow':
-      result = renderFlowView();
-      break;
-    case 'treeRadial':
-      result = renderTreeRadialView(state.selectedId ?? state.lastTreeRoot ?? state.nodes[0]?.id ?? null);
-      break;
-    case 'treeTopdown':
+    case View.TREE:
       result = renderTreeTopdownView(state.treeTopdown?.root || state.selectedId || (state.ownerNodes[0]?.address ?? null));
       break;
-    case 'rhythm':
+    case View.FLOW:
+      result = renderFlowView();
+      break;
+    case View.RHYTHM:
       result = renderRhythmView();
       break;
-    case 'dots':
     default:
-      result = renderDotsView();
+      result = renderBubbleMapView();
       break;
   }
   if (result && typeof result.then === 'function') {
@@ -1295,6 +1265,7 @@ function renderCurrentView() {
 
 function renderDotsView() {
   if (!state.graph) return;
+  hideExplainOverlay();
   useOwnerDataset();
   state.colorMode = 'default';
   toggleControl('edges', true, 'Link density');
@@ -1317,47 +1288,60 @@ function renderDotsView() {
   scheduleZoomToFit();
 }
 
-function renderBubbleMapView() {
+async function renderBubbleMapView() {
   if (!state.graph) return;
-  const clones = state.ownerNodes.map(node => ({ ...node }));
-  bubbleMapLayout(clones, {
-    groupBy: n => n.walletType || n.community || 'Other',
-    radius: n => Math.max(4, Math.sqrt(n.flowMetric || n.trades || 1)),
-    padding: COLLISION_PADDING
-  });
-  clones.forEach(node => {
-    const size = Math.max(16, (node.r || 4) * 6);
-    node.baseSize = size;
-    node.displaySize = size;
-    node.fx = node.x;
-    node.fy = node.y;
-    node.fz = 0;
-  });
-  state.bubbleNodes = clones;
-  state.viewNodes = new Map(clones.map(n => [n.id, n]));
-  state.bubbleGroups = new Map();
-  clones.forEach(node => {
-    const key = node.groupKey || node.walletType || 'Other';
-    if (!state.bubbleGroups.has(key)) state.bubbleGroups.set(key, new Set());
-    state.bubbleGroups.get(key).add(node.id);
-  });
-  state.selectedId = null;
+  try {
+    const response = await fetch('/api/preset-data?nodes=10000');
+    const preset = await response.json();
+    const sourceNodes = Array.isArray(preset?.nodes) ? preset.nodes : [];
+    const nodes = sourceNodes.map(entry => ({ ...entry }));
+    const radius = (n) => Math.max(6, Math.sqrt(n.holdings || n.volume_tia || 1));
+    bubbleMapLayout(nodes, {
+      groupBy: n => n.segment || n.community || 'Other',
+      radius,
+      padding: 1
+    });
 
-  toggleControl('edges', false);
-  state.graph.numDimensions(2);
-  state.graph.graphData({ nodes: clones, links: [] });
-  state.graph.d3VelocityDecay(1);
-  if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
-  if (typeof state.graph.linkVisibility === 'function') state.graph.linkVisibility(() => false);
-  state.graph.linkColor(() => 'rgba(0,0,0,0)');
-  state.graph.linkOpacity(() => 0);
-  state.graph.linkWidth(() => 0);
-  state.graph.nodeThreeObject(node => buildSprite(node));
-  state.graph.nodeThreeObjectExtend(false);
-  state.highlighted = null;
-  updateNodeStyles();
-  scheduleZoomToFit();
-  hideExplainOverlay();
+    toggleControl('edges', false);
+    state.graph
+      .graphData({ nodes, links: [] })
+      .cooldownTicks(0)
+      .d3AlphaDecay(1);
+
+    if (typeof state.graph.linkVisibility === 'function') state.graph.linkVisibility(() => false);
+    state.graph.linkColor(() => 'rgba(0,0,0,0)');
+    state.graph.linkOpacity(() => 0);
+    state.graph.linkWidth(() => 0);
+    state.graph.nodeThreeObject(node => circle(node, radius(node)));
+    state.graph.nodeThreeObjectExtend(false);
+    state.graph.numDimensions(2);
+    state.graph.d3VelocityDecay(1);
+    if (typeof state.graph.nodeOpacity === 'function') state.graph.nodeOpacity(() => 1);
+
+    state.viewNodes = new Map(nodes.map(n => [n.id, n]));
+    state.selectedId = null;
+    state.highlighted = null;
+    hideExplainOverlay();
+    updateNodeStyles();
+    scheduleZoomToFit();
+  } catch (err) {
+    console.warn('three.app: bubble map error', err?.message || err);
+  }
+}
+
+function circle(_node, r) {
+  const group = new THREE.Group();
+  const fill = new THREE.Mesh(
+    new THREE.CircleGeometry(r, 32),
+    new THREE.MeshBasicMaterial({ opacity: 0.9, transparent: true })
+  );
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(r + 0.9, r + 1.4, 32),
+    new THREE.MeshBasicMaterial({ opacity: 1 })
+  );
+  group.add(fill);
+  group.add(ring);
+  return group;
 }
 
 function renderFlowView() {
@@ -1374,9 +1358,13 @@ function renderFlowView() {
   state.graph.d3VelocityDecay(1);
   if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
   state.viewNodes = new Map(state.nodeMap);
+  const flowSummary = summarizeFlowOverview();
+  if (flowSummary) showExplainOverlay(flowSummary, { rememberDefault: true });
+  else hideExplainOverlay();
   state.graph.linkColor(linkColor);
   state.graph.linkOpacity(linkOpacity);
   state.graph.linkWidth(linkWidth);
+  if (typeof state.graph.linkCurvature === 'function') state.graph.linkCurvature(() => 0.4);
   if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(() => 0);
   if (typeof state.graph.linkLineDash === 'function') state.graph.linkLineDash(linkDash);
   applyLinkStylesForView();
@@ -1386,6 +1374,7 @@ function renderFlowView() {
 
 function renderRhythmView() {
   if (!state.graph) return;
+  hideExplainOverlay();
   useTokenDataset();
   state.colorMode = 'rhythm';
   state.highlighted = null;
@@ -1530,7 +1519,7 @@ function linkColor() {
 }
 
 function linkWidth(link) {
-  if (state.activeView === 'treeRadial' || state.activeView === 'treeTopdown') return 1;
+  if (state.activeView === View.TREE) return 1;
   if (!link) return 1;
   if (typeof link.width === 'number') return link.width;
   const base = Math.log1p(Math.max(1, link.weight || 1));
@@ -1554,7 +1543,13 @@ function linkDash() {
 function applyLinkStylesForView() {
   if (!state.graph) return;
   if (typeof state.graph.linkCurvature === 'function') {
-    state.graph.linkCurvature(state.activeView === 'flow' ? () => 0.15 : () => 0);
+    if (state.activeView === View.FLOW) {
+      state.graph.linkCurvature(() => 0.4);
+    } else if (state.activeView === View.TREE) {
+      state.graph.linkCurvature(() => 0.35);
+    } else {
+      state.graph.linkCurvature(() => 0);
+    }
   }
   if (typeof state.graph.linkDirectionalArrowLength === 'function') {
     state.graph.linkDirectionalArrowLength(() => 0);
@@ -1566,7 +1561,7 @@ function applyLinkStylesForView() {
 
 function nodeLabel(node) {
   if (!node) return '';
-  if (state.activeView === 'dots' || state.activeView === 'flow') {
+  if (state.activeView === View.FLOW) {
     const focus = state.selectedId;
     if (!focus) return '';
     if (node.id === focus) return node.label || node.address || '';
@@ -1576,14 +1571,7 @@ function nodeLabel(node) {
   return `#${node.id}`;
 }
 
-function applyClusterModeIfNeeded() {
-  if (state.activeView !== 'dots') return;
-  if (!state.clusterMode) {
-    releaseClusterMode();
-    return;
-  }
-  applyClusterPacking('owner');
-}
+function applyClusterModeIfNeeded() {}
 
 function applyClusterPacking(groupBy) {
   if (!state.graph) return;
@@ -1688,49 +1676,6 @@ function restoreHomePositions(pin = true) {
   });
 }
 
-function renderTreeRadialView(targetId) {
-  if (!state.graph) return;
-  useTokenDataset();
-  state.highlighted = null;
-  state.graph.nodeThreeObject(node => buildSprite(node));
-  state.graph.nodeThreeObjectExtend(false);
-  state.graph.numDimensions(2);
-  state.colorMode = 'tree';
-  toggleControl('time', false);
-  toggleControl('edges', false);
-  const focusId = Number.isFinite(Number(targetId)) ? Number(targetId) : state.selectedId ?? state.nodes[0]?.id ?? null;
-  if (!Number.isFinite(focusId) || !state.nodeMap.has(focusId)) {
-    state.graph.graphData({ nodes: [], links: [] });
-    return;
-  }
-  const sub = lineageGraph(focusId);
-  if (!sub || !sub.nodeMap.size) return;
-  state.selectedId = focusId;
-  state.lastTreeRoot = focusId;
-  state.treeNodes = sub.nodeMap;
-  state.viewNodes = sub.nodeMap;
-
-  const treeRoot = hierarchy(buildTreeHierarchy(sub.rootId, sub.parentMap, sub.nodeMap));
-  positionTreeNodes(treeRoot);
-
-  state.graph.d3VelocityDecay(1);
-  if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
-  state.graph.graphData({ nodes: Array.from(sub.nodeMap.values()), links: sub.links });
-  state.graph.linkColor(linkColor);
-  state.graph.linkOpacity(linkOpacity);
-  state.graph.linkWidth(link => 1);
-  if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(() => 0);
-  if (typeof state.graph.linkDirectionalParticleWidth === 'function') state.graph.linkDirectionalParticleWidth(() => 0);
-  if (typeof state.graph.linkLineDash === 'function') state.graph.linkLineDash(() => []);
-  applyLinkStylesForView();
-  updateNodeStyles();
-  updateSidebar(focusId);
-  try { state.graph.refresh(); } catch {}
-  try { if (typeof state.graph.centerAt === 'function') state.graph.centerAt(0, 0, 0, 600); } catch {}
-  try { if (typeof state.graph.zoom === 'function') state.graph.zoom(5, 600); } catch {}
-  scheduleZoomToFit();
-}
-
 async function renderTreeTopdownView(rootCandidate) {
   if (!state.graph) return;
   const resolvedRoot = resolveOwnerAddress(rootCandidate) || rootCandidate;
@@ -1756,8 +1701,12 @@ async function renderTreeTopdownView(rootCandidate) {
     });
     state.graph.nodeThreeObjectExtend(false);
     state.graph.numDimensions(3);
+    if (typeof state.graph.linkCurvature === 'function') state.graph.linkCurvature(() => 0.35);
+    if (typeof state.graph.linkDirectionalParticles === 'function') {
+      state.graph.linkDirectionalParticles(link => Math.min(8, Math.ceil((link.count || 0) / 2)));
+    }
     state.graph.linkColor(() => 'rgba(255,255,255,0.22)');
-    state.graph.linkOpacity(linkOpacity);
+    state.graph.linkOpacity(() => 0.6);
     state.graph.linkWidth(link => Math.max(1, Math.log1p(link.count || 1)));
     state.viewNodes = new Map(data.nodes.map(n => [n.id, n]));
     state.selectedId = resolvedRoot;
@@ -1765,7 +1714,11 @@ async function renderTreeTopdownView(rootCandidate) {
     const sidebarTarget = state.ownerAddressMap.get(resolvedRoot)?.id || resolvedRoot;
     updateSidebar(sidebarTarget);
     const summaryNode = data.nodes.find(n => n.id === resolvedRoot) || data.nodes[0];
-    if (summaryNode) showExplainOverlay(summarizeTopdownNode(summaryNode, data));
+    if (summaryNode) {
+      showExplainOverlay(summarizeTopdownNode(summaryNode, data), { rememberDefault: true });
+    } else {
+      hideExplainOverlay();
+    }
     updateNodeStyles();
     scheduleZoomToFit(140, 800);
   } catch (error) {
@@ -1775,171 +1728,9 @@ async function renderTreeTopdownView(rootCandidate) {
   }
 }
 
-function lineageGraph(rootId, depthLimit = 4) {
-  if (!Number.isFinite(rootId) || !state.nodeMap.has(rootId)) return null;
-  const visited = new Set([rootId]);
-  const queue = [{ id: rootId, depth: 0 }];
-  const nodeMap = new Map();
-  const parentMap = new Map();
-  const links = [];
-
-  const rootClone = cloneNodeForView(state.nodeMap.get(rootId), 'root');
-  nodeMap.set(rootId, rootClone);
-
-  const adjacency = buildAdjacencyIndex();
-
-  while (queue.length) {
-    const { id, depth } = queue.shift();
-    const connections = adjacency.get(id) || [];
-    for (const { neighbor, edge, dir } of connections) {
-      if (!Number.isFinite(neighbor) || neighbor === id) continue;
-      if (!state.nodeMap.has(neighbor)) continue;
-      if (parentMap.get(id) === neighbor) continue;
-      if (visited.has(neighbor)) continue;
-      const stage = stageFromEdge(edge, dir === 'in' ? 'branch' : 'branch');
-      if (!nodeMap.has(neighbor)) {
-        const clone = cloneNodeForView(state.nodeMap.get(neighbor), stage);
-        nodeMap.set(neighbor, clone);
-        parentMap.set(neighbor, id);
-      }
-      visited.add(neighbor);
-      const key = `${id}->${neighbor}`;
-      if (!links.some(link => `${link.source}->${link.target}` === key)) {
-        links.push({
-          source: id,
-          target: neighbor,
-          kind: (edge?.kind || edge?.type || 'transfer').toLowerCase(),
-          weight: edge?.weight ?? 1,
-          ts: edge?.ts ?? edge?.timestamp ?? null
-        });
-      }
-      if (depth + 1 < depthLimit) {
-        queue.push({ id: neighbor, depth: depth + 1 });
-      }
-    }
-  }
-
-  return { nodeMap, links, parentMap, rootId };
-}
-
-function buildTreeHierarchy(rootId, parentMap, nodeMap) {
-  const build = (id) => {
-    const children = [];
-    parentMap.forEach((parent, child) => {
-      if (parent === id) children.push(build(child));
-    });
-    return { id, __node: nodeMap.get(id), children };
-  };
-  return build(rootId);
-}
-
-function cloneNodeForView(source, stage) {
-  if (!source) return null;
-  const color = stageColor(stage);
-  const size = stage === 'root' ? TREE_NODE_ROOT_SIZE : TREE_NODE_BASE_SIZE;
-  return {
-    ...source,
-    x: source.homeX ?? source.x ?? 0,
-    y: source.homeY ?? source.y ?? 0,
-    z: 0,
-    fx: undefined,
-    fy: undefined,
-    fz: undefined,
-    stage,
-    baseColor: color.slice(),
-    displayColor: color.slice(),
-    baseSize: size,
-    displaySize: size
-  };
-}
-
-function stageColor(stage) {
-  const key = String(stage || '').toLowerCase();
-  if (key === 'root') return [255, 255, 255, 255];
-  if (key === 'mint') return parseCssColor('#4c9aff', 1) || [76, 154, 255, 255];
-  if (key === 'buy') return CSS_COLORS.accent.slice();
-  if (key === 'sell' || key === 'sale') return parseCssColor('#ff9f43', 1) || [255, 159, 67, 255];
-  if (key === 'branch') return rgbaMultiply(CSS_COLORS.accent, 0.7);
-  return CSS_COLORS.nodeFill.slice();
-}
-
-function stageFromEdge(edge, fallback) {
-  const raw = String(edge?.kind || edge?.type || '').toLowerCase();
-  if (raw === 'mint') return 'mint';
-  if (raw === 'buy') return 'buy';
-  if (raw === 'sell' || raw === 'sale') return 'sell';
-  return fallback || 'branch';
-}
-
-function buildAdjacencyIndex() {
-  const adjacency = new Map();
-  const sources = [
-    state.rawEdges.sales,
-    state.rawEdges.transfers,
-    state.rawEdges.mints,
-    state.rawEdges.mixed,
-    state.rawEdges.ownership
-  ].filter(list => Array.isArray(list));
-  sources.forEach(list => {
-    list.forEach(edge => {
-      const source = Number(edge?.source);
-      const target = Number(edge?.target);
-      if (!Number.isFinite(source) || !Number.isFinite(target)) return;
-      if (!adjacency.has(source)) adjacency.set(source, []);
-      adjacency.get(source).push({ neighbor: target, edge, dir: 'out' });
-      if (!adjacency.has(target)) adjacency.set(target, []);
-      adjacency.get(target).push({ neighbor: source, edge, dir: 'in' });
-    });
-  });
-  return adjacency;
-}
-
-function positionTreeNodes(treeRoot) {
-  const levels = new Map();
-  treeRoot.each(node => {
-    if (!node.data.__node) return;
-    if (!levels.has(node.depth)) levels.set(node.depth, []);
-    levels.get(node.depth).push(node);
-  });
-
-  levels.forEach((nodes, depth) => {
-    if (!nodes.length) return;
-    if (depth === 0) {
-      const clone = nodes[0].data.__node;
-      clone.x = 0;
-      clone.y = 0;
-      clone.z = 0;
-      clone.fx = 0;
-      clone.fy = 0;
-      clone.fz = 0;
-      return;
-    }
-    const count = nodes.length;
-    const diameter = depth === 0 ? TREE_NODE_ROOT_SIZE : TREE_NODE_BASE_SIZE;
-    const desiredSpacing = diameter + TREE_RING_PADDING;
-    const minRadius = (desiredSpacing * count) / (2 * Math.PI);
-    const radius = Math.max(TREE_RING_BASE + depth * TREE_RING_SPACING, minRadius);
-    nodes.forEach((node, index) => {
-      const clone = node.data.__node;
-      if (!clone) return;
-      const angle = (index / count) * Math.PI * 2;
-      const x = Math.cos(angle) * radius;
-      const y = Math.sin(angle) * radius;
-      clone.x = x;
-      clone.y = y;
-      clone.z = 0;
-      clone.fx = x;
-      clone.fy = y;
-      clone.fz = 0;
-    });
-  });
-}
-
 function updateViewControls() {
   const clusterRow = document.getElementById('cluster-mode-row');
-  if (clusterRow) clusterRow.hidden = state.activeView !== 'dots';
-  const clusterToggle = document.getElementById('dots-cluster-mode');
-  if (clusterToggle) clusterToggle.checked = !!state.clusterMode;
+  if (clusterRow) clusterRow.hidden = true;
 }
 
 function toggleControl(control, isVisible, labelText) {
@@ -1987,9 +1778,9 @@ function updateNodeStyles() {
     const scale = base * emphasis;
     if (sprite.scale?.set) sprite.scale.set(scale, scale, scale);
     if (material) {
-      if (state.activeView === 'treeTopdown') {
+      if (state.activeView === View.TREE) {
         material.opacity = highlightSet ? (isHighlighted ? 1 : 0.4) : 1;
-      } else if (state.activeView === 'bubble') {
+      } else if (state.activeView === View.BUBBLE) {
         material.opacity = highlightSet ? (isHighlighted ? 1 : 0.3) : 1;
       } else {
         material.opacity = 1;
@@ -2000,30 +1791,20 @@ function updateNodeStyles() {
 }
 
 function focusNode(id) {
-  if (state.activeView === 'treeRadial') {
-    renderTreeRadialView(id);
-    return;
-  }
-  if (state.activeView === 'treeTopdown') {
+  if (state.activeView === View.TREE) {
     renderTreeTopdownView(id);
     return;
   }
   const node = (state.viewNodes && state.viewNodes.get(id)) || state.nodeMap.get(id);
   if (!node) return;
   state.selectedId = id;
-  if (state.activeView === 'dots' || state.activeView === 'flow') {
+  if (state.activeView === View.FLOW) {
     const neighbors = state.ownerTopNeighbors.get(id) || [];
     state.highlighted = neighbors.length ? new Set([id, ...neighbors]) : new Set([id]);
-    if (state.activeView === 'flow') {
-      showExplainOverlay(summarizeFlowNode(node));
-    } else {
-      hideExplainOverlay();
-    }
-  } else if (state.activeView === 'bubble') {
-    highlightBubbleGroup(node.groupKey || node.walletType || 'Other');
+    showExplainOverlay(summarizeFlowNode(node));
   } else {
     state.highlighted = null;
-    if (state.activeView !== 'treeTopdown') hideExplainOverlay();
+    hideExplainOverlay();
   }
   const cam = state.graph.camera();
   const target = state.controls?.target || new THREE.Vector3(0, 0, 0);
@@ -2041,16 +1822,11 @@ function focusNode(id) {
 function handleNodeClick(node) {
   if (!node) return;
   switch (state.activeView) {
-    case 'treeRadial':
-      renderTreeRadialView(node.id);
-      break;
-    case 'treeTopdown':
+    case View.TREE:
       renderTreeTopdownView(node.id);
       break;
-    case 'bubble':
+    case View.BUBBLE:
       state.selectedId = node.id;
-      highlightBubbleGroup(node.groupKey || node.walletType || 'Other', true);
-      updateNodeStyles();
       updateSidebar(node.id);
       break;
     default:
@@ -2064,16 +1840,17 @@ function handleBackgroundClick() {
   state.highlighted = null;
   updateNodeStyles();
   updateSidebar(null);
-  hideExplainOverlay();
-  if (state.activeView === 'treeRadial') {
-    renderTreeRadialView(state.lastTreeRoot ?? state.nodes[0]?.id ?? null);
-  }
-  if (state.activeView === 'treeTopdown' && state.treeTopdown?.data) {
+  const isStoryView = state.activeView === View.TREE || state.activeView === View.BUBBLE || state.activeView === View.FLOW;
+  if (!isStoryView) hideExplainOverlay();
+  if (state.activeView === View.TREE && state.treeTopdown?.data) {
     highlightBranch(state.graph, null, state.treeTopdown.data);
   }
-  if (state.activeView === 'bubble') {
-    highlightBubbleGroup(null);
+  if (state.activeView === View.BUBBLE) {
+    if (typeof state.graph?.nodeOpacity === 'function') state.graph.nodeOpacity(() => 1);
     updateNodeStyles();
+  }
+  if (state.explainDefault && isStoryView) {
+    showExplainOverlay(state.explainDefault);
   }
 }
 
@@ -2081,20 +1858,26 @@ function handleNodeHover(node) {
   const id = node?.id ?? null;
   if (state.hoveredId === id) return;
   state.hoveredId = id;
-  if (state.activeView === 'bubble') {
-    if (node) {
-      highlightBubbleGroup(node.groupKey || node.walletType || 'Other');
-    } else {
-      highlightBubbleGroup(null);
+  if (state.activeView === View.BUBBLE) {
+    const groupKey = node ? (node.segment || node.community || 'Other') : null;
+    if (typeof state.graph?.nodeOpacity === 'function') {
+      if (groupKey) {
+        state.graph.nodeOpacity(nn => ((nn?.segment || nn?.community || 'Other') === groupKey ? 1 : 0.25));
+      } else {
+        state.graph.nodeOpacity(() => 1);
+      }
     }
+    state.highlighted = null;
   }
-  if (state.activeView === 'treeTopdown' && state.treeTopdown?.data) {
+  if (state.activeView === View.TREE && state.treeTopdown?.data) {
     const dataset = state.treeTopdown.data;
     const branchSet = node ? computeTopdownBranchSet(node, dataset) : null;
     state.highlighted = branchSet;
     highlightBranch(state.graph, node || null, dataset);
     if (node) {
       showExplainOverlay(summarizeTopdownNode(node, dataset));
+    } else if (state.explainDefault) {
+      showExplainOverlay(state.explainDefault);
     } else {
       const rootNode = dataset.nodes.find(n => n.id === state.treeTopdown.root);
       if (rootNode) showExplainOverlay(summarizeTopdownNode(rootNode, dataset));
@@ -2103,26 +1886,6 @@ function handleNodeHover(node) {
   }
   updateNodeStyles();
   if (state.stageEl) state.stageEl.style.cursor = node ? 'pointer' : 'grab';
-}
-
-function highlightBubbleGroup(groupKey, includeSelected = false) {
-  if (!groupKey) {
-    state.highlighted = null;
-    hideExplainOverlay();
-    return;
-  }
-  const ids = state.bubbleGroups.get(groupKey);
-  if (!ids) {
-    state.highlighted = null;
-    hideExplainOverlay();
-    return;
-  }
-  const set = new Set(ids);
-  if (includeSelected && state.selectedId != null) set.add(state.selectedId);
-  state.highlighted = set;
-  if (state.activeView === 'bubble') {
-    showExplainOverlay(summarizeBubbleGroup(groupKey));
-  }
 }
 
 async function highlightWallet(address) {
@@ -2420,16 +2183,6 @@ function bindUI() {
   });
   state.showBubbles = isChecked('layer-bubbles', false);
 
-  const clusterToggle = document.getElementById('dots-cluster-mode');
-  if (clusterToggle && !clusterToggle.dataset.threeBound) {
-    clusterToggle.dataset.threeBound = '1';
-    clusterToggle.checked = !!state.clusterMode;
-    clusterToggle.addEventListener('change', () => {
-      state.clusterMode = !!clusterToggle.checked;
-      if (state.activeView === 'dots') renderCurrentView();
-    });
-  }
-
   const viewButtons = document.querySelectorAll('[data-view-btn]');
   viewButtons.forEach(btn => {
     if (btn.dataset.threeBound) return;
@@ -2467,7 +2220,7 @@ function bindUI() {
       if (/^0x[a-fA-F0-9]{40}$/.test(raw)) { await highlightWallet(raw); return; }
       const id = parseInt(raw, 10);
       if (Number.isFinite(id)) {
-        if (state.activeView === 'treeRadial') renderTreeRadialView(id);
+        if (state.activeView === View.TREE) renderTreeTopdownView(id);
         else focusNode(id);
       }
     });
@@ -2557,17 +2310,8 @@ function applySimpleView(name) {
     el.checked = value;
   });
   updateViewControls();
-  if (name !== 'dots' && name !== 'bubble') releaseClusterMode();
-  if (name !== 'treeRadial') {
-    state.treeNodes.clear();
-    state.viewNodes = new Map(state.nodeMap);
-    if (state.graph) {
-      state.graph.d3VelocityDecay(DEFAULT_DECAY);
-      state.graph.d3ReheatSimulation();
-      if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(300);
-    }
-  }
-  if (name !== 'treeTopdown') {
+  if (name !== View.BUBBLE) releaseClusterMode();
+  if (name !== View.TREE) {
     state.treeTopdown = { root: state.treeTopdown?.root || null, data: null, loading: false };
   }
   state.highlighted = null;
@@ -2879,6 +2623,39 @@ function formatNumber(n) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 3 });
 }
 
+function ownerLabel(entry) {
+  if (!entry) return '—';
+  if (typeof entry === 'object') {
+    if (entry.label) return entry.label;
+    if (entry.address) return truncateAddr(entry.address);
+    if (entry.id != null) return ownerLabel(entry.id);
+  }
+  const raw = String(entry || '').trim();
+  if (!raw) return '—';
+  const node = state.ownerNodeMap?.get?.(raw);
+  if (node) {
+    if (node.label) return node.label;
+    if (node.address) return truncateAddr(node.address);
+  }
+  const lower = raw.toLowerCase();
+  const byAddress = state.ownerAddressMap?.get?.(lower);
+  if (byAddress) {
+    if (byAddress.label) return byAddress.label;
+    if (byAddress.address) return truncateAddr(byAddress.address);
+  }
+  if (/^0x[a-f0-9]{40}$/.test(lower)) return truncateAddr(lower);
+  return raw;
+}
+
+function linkEndpointId(endpoint) {
+  if (!endpoint) return null;
+  if (typeof endpoint === 'object') {
+    if (endpoint.id != null) return endpoint.id;
+    if (endpoint.address) return endpoint.address;
+  }
+  return endpoint;
+}
+
 function showExplainOverlay(summary, options = {}) {
   if (!summary) { hideExplainOverlay(); return; }
   const {
@@ -2929,38 +2706,76 @@ function hideExplainOverlay() {
 }
 
 function summarizeTopdownNode(node, data) {
-  const title = truncateAddr(node.id);
-  const children = data.links.filter(link => (link.source.id || link.source) === node.id).length;
-  const metric = `${formatNumber(node.trades || 0)} trades • ${children} branch${children === 1 ? '' : 'es'}`;
-  const body = `Depth ${node.level} node. Volume index ${formatNumber(node.volume || 0)}.`;
-  return { title, metric, body, nextView: 'bubble' };
+  const title = ownerLabel(node.id);
+  const links = Array.isArray(data?.links) ? data.links : [];
+  const children = links.filter(link => linkEndpointId(link.source) === node.id);
+  const childCount = children.length;
+  const totalTrades = children.reduce((sum, link) => sum + (Number(link.count ?? link.totalTrades ?? 0) || 0), 0);
+  const recentTrades = children.reduce((sum, link) => sum + (Number(link.recent ?? 0) || 0), 0);
+  const top = children.reduce((best, link) => {
+    const weight = Number(link.count ?? link.totalTrades ?? 0) || 0;
+    if (weight > best.weight) return { weight, link };
+    return best;
+  }, { weight: -Infinity, link: null });
+  const topTarget = top.link ? ownerLabel(linkEndpointId(top.link.target)) : null;
+  const metric = `${formatNumber(node.trades || totalTrades || 0)} trades • ${childCount} branch${childCount === 1 ? '' : 'es'}`;
+  const body = [];
+  if (childCount === 0) {
+    body.push('No downstream counterparties yet.');
+  } else {
+    body.push(`Largest branch → ${topTarget || '—'} (${formatNumber(top.weight > 0 ? top.weight : 0)} trades).`);
+    if (recentTrades > 0) body.push(`${formatNumber(recentTrades)} trades in last 30d.`);
+  }
+  body.push(`Depth ${node.level} • Volume index ${formatNumber(node.volume || 0)}`);
+  return { title, metric, body, nextView: View.BUBBLE };
 }
 
-function summarizeBubbleGroup(groupKey) {
-  const nodes = state.bubbleNodes.filter(n => (n.groupKey || n.walletType || 'Other') === groupKey);
-  if (!nodes.length) return { title: groupKey, metric: '', body: '', nextView: 'flow' };
-  const trades = nodes.reduce((sum, item) => sum + (item.flowMetric || item.trades || 0), 0);
-  const holdings = nodes.reduce((sum, item) => sum + (item.holdingCount || 0), 0);
-  const whales = nodes.filter(n => (n.walletType || '').includes('whale')).length;
-  const title = `${groupKey} cluster`;
-  const metric = `${formatNumber(nodes.length)} wallet${nodes.length === 1 ? '' : 's'}`;
-  const body = [`Total trades ${formatNumber(trades)}`, `Holdings ${formatNumber(holdings)}`, whales ? `${whales} whale profile${whales === 1 ? '' : 's'}` : 'Solid holders'];
-  return { title, metric, body, nextView: 'flow' };
+function summarizeFlowOverview() {
+  const links = Array.isArray(state.ownerEdges?.flow) ? state.ownerEdges.flow : [];
+  if (!links.length) return null;
+  const weights = links.map(link => Number(link.weight || 0) || 0).filter(w => w >= 0);
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  const top = links.reduce((best, link) => {
+    const weight = Number(link.weight || 0) || 0;
+    if (weight > best.weight) return { weight, link };
+    return best;
+  }, { weight: -Infinity, link: null });
+  const topSource = top.link ? ownerLabel(linkEndpointId(top.link.source)) : null;
+  const topTarget = top.link ? ownerLabel(linkEndpointId(top.link.target)) : null;
+  const body = [];
+  if (top.link) body.push(`Peak corridor ${topSource || '—'} → ${topTarget || '—'} (${formatNumber(top.weight > 0 ? top.weight : 0)} trades).`);
+  if (weights.length) {
+    body.push(`Median lane ${formatNumber(median(weights))} trades · 95th pct ${formatNumber(percentile(weights, 0.95))}`);
+  }
+  const metric = `${formatNumber(links.length)} lanes • ${formatNumber(total)} trades`;
+  return { title: 'Flow Corridors', metric, body, nextView: View.TREE };
 }
 
 function summarizeFlowNode(node) {
-  const edges = state.ownerEdges.flow.filter(link => link.source === node.id || link.target === node.id);
-  const outgoing = edges.filter(link => link.source === node.id).reduce((sum, link) => sum + (link.weight || 0), 0);
-  const incoming = edges.filter(link => link.target === node.id).reduce((sum, link) => sum + (link.weight || 0), 0);
-  const title = truncateAddr(node.address || node.id);
+  const links = Array.isArray(state.ownerEdges?.flow) ? state.ownerEdges.flow : [];
+  const edges = links.filter(link => {
+    const src = linkEndpointId(link.source);
+    const dst = linkEndpointId(link.target);
+    return src === node.id || dst === node.id;
+  });
+  const outgoing = edges.reduce((sum, link) => {
+    const src = linkEndpointId(link.source);
+    return src === node.id ? sum + (Number(link.weight || 0) || 0) : sum;
+  }, 0);
+  const incoming = edges.reduce((sum, link) => {
+    const dst = linkEndpointId(link.target);
+    return dst === node.id ? sum + (Number(link.weight || 0) || 0) : sum;
+  }, 0);
+  const title = ownerLabel(node);
   const metric = `${formatNumber(edges.length)} lanes • ${formatNumber(outgoing)} out / ${formatNumber(incoming)} in`;
   const counterparts = edges.slice(0, 4).map(link => {
-    const counterpartId = link.source === node.id ? link.target : link.source;
-    const counterpartNode = state.ownerNodeMap.get(counterpartId) || state.ownerAddressMap.get(counterpartId);
-    return truncateAddr(counterpartNode?.address || counterpartNode?.id || counterpartId);
+    const src = linkEndpointId(link.source);
+    const dst = linkEndpointId(link.target);
+    const other = src === node.id ? dst : src;
+    return ownerLabel(other) || '—';
   });
-  const body = edges.length ? `Last 30d counterparties: ${counterparts.join(', ')}` : 'No recent trades in window.';
-  return { title, metric, body, nextView: 'treeTopdown' };
+  const body = edges.length ? [`Counterparties: ${counterparts.join(', ')}`] : ['No recent trades in window.'];
+  return { title, metric, body, nextView: View.TREE };
 }
 
 function cloneEdgeAsAmbient(edge) {

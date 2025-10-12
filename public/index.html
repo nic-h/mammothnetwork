@@ -39,23 +39,16 @@
         <div class="view-selector panel-view" aria-label="Views">
           <label class="panel-title" for="view">VIEW</label>
           <select id="view" aria-label="Views" hidden>
-            <option value="dots">DOTS — OWNERSHIP STATE</option>
             <option value="bubble">BUBBLE — CLUSTER MAP</option>
+            <option value="tree">TREE — BRANCHES</option>
             <option value="flow">FLOW — MARKET FLOWS</option>
-            <option value="treeRadial">TREE — LINEAGE</option>
-            <option value="treeTopdown">TREE — BRANCHES</option>
             <option value="rhythm">RHYTHM — TIME × PRICE</option>
           </select>
           <div class="view-buttons" id="view-buttons" role="group" aria-label="Views">
-            <button type="button" class="btn view-btn active" data-view-btn="dots">DOTS — OWNERSHIP STATE</button>
-            <button type="button" class="btn view-btn" data-view-btn="bubble">BUBBLE — CLUSTER MAP</button>
+            <button type="button" class="btn view-btn active" data-view-btn="bubble">BUBBLE — CLUSTER MAP</button>
+            <button type="button" class="btn view-btn" data-view-btn="tree">TREE — BRANCHES</button>
             <button type="button" class="btn view-btn" data-view-btn="flow">FLOW — MARKET FLOWS</button>
-            <button type="button" class="btn view-btn" data-view-btn="treeRadial">TREE — LINEAGE</button>
-            <button type="button" class="btn view-btn" data-view-btn="treeTopdown">TREE — BRANCHES</button>
             <button type="button" class="btn view-btn" data-view-btn="rhythm">RHYTHM — TIME × PRICE</button>
-          </div>
-          <div class="layer-toggle" id="cluster-mode-row" hidden>
-            <label>Cluster mode</label><input type="checkbox" id="dots-cluster-mode">
           </div>
         </div>
         <div class="mode-selector" hidden>

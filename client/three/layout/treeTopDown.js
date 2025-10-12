@@ -112,9 +112,7 @@ export function attachTopdownTree(graph, data, {
     graph.onNodeClick(node => onClick(node, data));
   }
 
-  graph.linkDirectionalParticles(link => Math.min(12, Math.max(0, (link.count || 0) / 2)));
-  graph.linkDirectionalParticleWidth(() => 0.6);
-  graph.linkDirectionalParticleSpeed(link => Math.max(0.002, Math.min(0.02, (link.recent || link.count || 0) / 200)));
+  graph.linkDirectionalParticles(link => Math.min(8, Math.ceil((link.count || 0) / 2)));
 
   graph.nodeThreeObject(node => {
     const radius = radiusFn(node);
