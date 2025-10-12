@@ -84,6 +84,25 @@ function sqrtScale(value, clampMax) {
   return Math.sqrt(capped);
 }
 
+function median(values = []) {
+  const list = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!list.length) return 0;
+  const mid = Math.floor(list.length / 2);
+  return list.length % 2 === 0 ? (list[mid - 1] + list[mid]) / 2 : list[mid];
+}
+
+const COLLISION_PADDING = 2;
+const COLLISION_SWEEPS = 12;
+const COLLISION_FALLBACK_SWEEPS = 3;
+const COLLISION_DRIFT_CLAMP = 15;
+const COLLISION_EPSILON = 0.1;
+const COLLISION_MIN_RADIUS = 2;
+const TREE_NODE_BASE_SIZE = 12;
+const TREE_NODE_ROOT_SIZE = 18;
+const TREE_RING_BASE = 140;
+const TREE_RING_SPACING = 90;
+const TREE_RING_PADDING = 2;
+
 const CSS_COLORS = {
   nodeFill: cssColor('--node-fill', [212, 255, 212, 255]),
   nodeStroke: cssColor('--node-stroke', [128, 255, 179, 255]),
@@ -362,9 +381,14 @@ async function initData() {
     state.rawEdges.ownership = ownershipEdges;
     state.rawEdges.ambient = ownershipEdges.map(cloneEdgeAsAmbient);
     state.rawEdges.traits = buildSimpleEdges(traitsGraph?.edges, 'traits');
+    state.rawEdges.transfers = [];
+    state.rawEdges.sales = [];
+    state.rawEdges.mints = [];
+    state.rawEdges.mixed = [];
 
     const ownerData = buildOwnerDataset(state.preset);
     seedOwnerLayout(ownerData.nodes);
+    resolveOwnerCollisions(ownerData.nodes);
     state.ownerNodes = ownerData.nodes;
     state.ownerNodeMap = new Map(ownerData.nodes.map(n => [n.id, n]));
     state.ownerAddressMap = new Map(ownerData.nodes.map(n => [n.addressLc, n]));
@@ -654,6 +678,158 @@ function buildOwnerEdges(edgeList = [], ownerMap = new Map()) {
   });
 
   return { holders, flow, topNeighbors };
+}
+
+function resolveOwnerCollisions(nodes) {
+  if (!Array.isArray(nodes) || !nodes.length) return;
+  const radii = nodes.map(n => Math.max(COLLISION_MIN_RADIUS, n.radius || COLLISION_MIN_RADIUS));
+  const medianRadius = median(radii) || COLLISION_MIN_RADIUS;
+  const cellSize = Math.max(8, 2 * medianRadius + COLLISION_PADDING);
+  nodes.forEach(node => {
+    node.collisionBaseX = node.x;
+    node.collisionBaseY = node.y;
+  });
+  let result = performCollisionSweeps(nodes, cellSize, COLLISION_SWEEPS);
+  if (result.maxOverlap > COLLISION_EPSILON) {
+    // fallback shrink
+    let radiusScale = 0.95;
+    while (result.maxOverlap > COLLISION_EPSILON && radiusScale >= 0.9) {
+      nodes.forEach(node => {
+        node.radius = Math.max(COLLISION_MIN_RADIUS, (node.radius || COLLISION_MIN_RADIUS) * radiusScale);
+        const size = Math.max(12, node.radius * 6);
+        node.baseSize = size;
+        node.displaySize = size;
+      });
+      result = performCollisionSweeps(nodes, Math.max(8, 2 * median(nodes.map(n => n.radius || COLLISION_MIN_RADIUS)) + COLLISION_PADDING), COLLISION_FALLBACK_SWEEPS);
+      radiusScale *= 0.95;
+    }
+  }
+  nodes.forEach(node => {
+    node.fx = node.x;
+    node.fy = node.y;
+    node.fz = 0;
+    node.homeX = node.x;
+    node.homeY = node.y;
+    node.homeZ = 0;
+  });
+  if (result.maxOverlap > COLLISION_EPSILON && typeof console !== 'undefined') {
+    console.warn('Owner collision solver residual overlap:', result.maxOverlap.toFixed(3));
+  }
+}
+
+function performCollisionSweeps(nodes, cellSize, maxSweeps) {
+  let maxOverlap = Infinity;
+  const padding = COLLISION_PADDING;
+  const displacement = nodes.map(() => ({ x: 0, y: 0 }));
+  const grid = new Map();
+  for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    grid.clear();
+    nodes.forEach((node, idx) => {
+      const key = gridKey(node.x, node.y, cellSize);
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(idx);
+      displacement[idx].x = 0;
+      displacement[idx].y = 0;
+    });
+
+    maxOverlap = 0;
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const radiusI = Math.max(COLLISION_MIN_RADIUS, node.radius || COLLISION_MIN_RADIUS);
+      const cell = cellCoords(node.x, node.y, cellSize);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const key = `${cell.cx + dx}:${cell.cy + dy}`;
+          const bucket = grid.get(key);
+          if (!bucket) continue;
+          for (const j of bucket) {
+            if (j <= i) continue;
+            const other = nodes[j];
+            const radiusJ = Math.max(COLLISION_MIN_RADIUS, other.radius || COLLISION_MIN_RADIUS);
+            const minDist = radiusI + radiusJ + padding;
+            let dxVec = other.x - node.x;
+            let dyVec = other.y - node.y;
+            let dist = Math.hypot(dxVec, dyVec);
+            if (dist === 0) {
+              const angle = (i + j) * 0.61803398875;
+              dxVec = Math.cos(angle) * 0.001;
+              dyVec = Math.sin(angle) * 0.001;
+              dist = 0.001;
+            }
+            const overlap = minDist - dist;
+            if (overlap > 0) {
+              maxOverlap = Math.max(maxOverlap, overlap);
+              const push = Math.min(overlap, 0.6 * minDist) / dist;
+              const shiftX = dxVec * push * 0.5;
+              const shiftY = dyVec * push * 0.5;
+              displacement[i].x -= shiftX;
+              displacement[i].y -= shiftY;
+              displacement[j].x += shiftX;
+              displacement[j].y += shiftY;
+            }
+          }
+        }
+      }
+    }
+
+    if (maxOverlap <= COLLISION_EPSILON) break;
+
+    const groupCentroids = computeGroupCentroids(nodes);
+
+    nodes.forEach((node, idx) => {
+      node.x += displacement[idx].x;
+      node.y += displacement[idx].y;
+
+      const baseX = node.collisionBaseX ?? 0;
+      const baseY = node.collisionBaseY ?? 0;
+      const dx = node.x - baseX;
+      const dy = node.y - baseY;
+      const drift = Math.hypot(dx, dy);
+      if (drift > COLLISION_DRIFT_CLAMP) {
+        const scale = COLLISION_DRIFT_CLAMP / drift;
+        node.x = baseX + dx * scale;
+        node.y = baseY + dy * scale;
+      }
+
+      const centroid = groupCentroids.get(node.walletType || 'owner') || { x: 0, y: 0 };
+      node.x += (centroid.x - node.x) * 0.05;
+      node.y += (centroid.y - node.y) * 0.05;
+    });
+  }
+  return { maxOverlap };
+}
+
+function gridKey(x, y, cellSize) {
+  const cell = cellCoords(x, y, cellSize);
+  return `${cell.cx}:${cell.cy}`;
+}
+
+function cellCoords(x, y, cellSize) {
+  const inv = 1 / cellSize;
+  return {
+    cx: Math.floor(x * inv),
+    cy: Math.floor(y * inv)
+  };
+}
+
+function computeGroupCentroids(nodes) {
+  const groups = new Map();
+  nodes.forEach(node => {
+    const key = node.walletType || 'owner';
+    if (!groups.has(key)) groups.set(key, { sumX: 0, sumY: 0, count: 0 });
+    const bucket = groups.get(key);
+    bucket.sumX += node.x;
+    bucket.sumY += node.y;
+    bucket.count += 1;
+  });
+  const centroids = new Map();
+  groups.forEach((bucket, key) => {
+    centroids.set(key, {
+      x: bucket.count ? bucket.sumX / bucket.count : 0,
+      y: bucket.count ? bucket.sumY / bucket.count : 0
+    });
+  });
+  return centroids;
 }
 
 function useOwnerDataset() {
@@ -1138,8 +1314,10 @@ function renderRhythmView() {
     const size = Math.max(12, radius * 5);
     clone.baseSize = size;
     clone.displaySize = size;
+    clone.radius = size / 2;
     return clone;
   });
+  applyRhythmBeeswarm(clones);
   toggleControl('time', false);
   toggleControl('edges', false);
   state.graph.graphData({ nodes: clones, links: [] });
@@ -1160,6 +1338,47 @@ function renderRhythmView() {
 
 function rebuildLinks() {
   renderCurrentView();
+}
+
+function applyRhythmBeeswarm(nodes) {
+  if (!nodes.length) return;
+  const radii = nodes.map(n => Math.max(COLLISION_MIN_RADIUS, n.radius || (n.displaySize || 12) / 2));
+  const medianRadius = median(radii) || COLLISION_MIN_RADIUS;
+  const binWidth = Math.max(8, 2 * medianRadius + COLLISION_PADDING);
+  const padding = COLLISION_PADDING;
+  const bins = new Map();
+  nodes.forEach((node, index) => {
+    const radius = Math.max(COLLISION_MIN_RADIUS, node.radius || (node.displaySize || 12) / 2);
+    node.radius = radius;
+    const key = Math.round(node.x / binWidth);
+    if (!bins.has(key)) bins.set(key, []);
+    bins.get(key).push({ node, desiredY: node.y, index });
+  });
+  bins.forEach(items => {
+    items.sort((a, b) => a.desiredY - b.desiredY);
+    const placed = [];
+    items.forEach(item => {
+      const nodeRadius = item.node.radius;
+      const step = nodeRadius + padding;
+      let bestY = item.desiredY;
+      let attempt = 0;
+      const maxAttempts = placed.length * 4 + 4;
+      while (attempt < maxAttempts) {
+        const hasOverlap = placed.some(other => {
+          const required = nodeRadius + other.radius + padding;
+          return Math.abs(bestY - other.y) < required;
+        });
+        if (!hasOverlap) break;
+        attempt++;
+        const direction = attempt % 2 === 0 ? -1 : 1;
+        const offset = Math.ceil(attempt / 2) * step;
+        bestY = item.desiredY + direction * offset;
+      }
+      item.node.y = bestY;
+      item.node.fy = bestY;
+      placed.push({ y: bestY, radius: nodeRadius });
+    });
+  });
 }
 
 function currentToggles() {
@@ -1364,7 +1583,7 @@ function renderTreeView(targetId) {
   state.highlighted = null;
   state.graph.nodeThreeObject(node => buildSprite(node));
   state.graph.nodeThreeObjectExtend(false);
-  state.graph.nodeThreeObject(node => buildSprite(node));
+  state.graph.numDimensions(2);
   state.colorMode = 'tree';
   toggleControl('time', false);
   toggleControl('edges', false);
@@ -1380,34 +1599,18 @@ function renderTreeView(targetId) {
   state.treeNodes = sub.nodeMap;
   state.viewNodes = sub.nodeMap;
 
-  const baseRadius = Math.max(220, sub.nodeMap.size * 18);
   const treeRoot = hierarchy(buildTreeHierarchy(sub.rootId, sub.parentMap, sub.nodeMap));
-  d3tree().size([Math.PI * 2, baseRadius])(treeRoot);
-
-  treeRoot.descendants().forEach(node => {
-    const clone = node.data.__node;
-    if (!clone) return;
-    const angle = node.x;
-    const radius = node.y;
-    const x = Math.cos(angle) * radius;
-    const y = Math.sin(angle) * radius;
-    clone.x = x;
-    clone.y = y;
-    clone.z = 0;
-    clone.fx = x;
-    clone.fy = y;
-    clone.fz = 0;
-  });
+  positionTreeNodes(treeRoot);
 
   state.graph.d3VelocityDecay(1);
   if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
   state.graph.graphData({ nodes: Array.from(sub.nodeMap.values()), links: sub.links });
   state.graph.linkColor(linkColor);
-  state.graph.linkOpacity(() => 0.9);
-  state.graph.linkWidth(linkWidth);
-  if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(linkParticles);
-  if (typeof state.graph.linkDirectionalParticleWidth === 'function') state.graph.linkDirectionalParticleWidth(linkParticleWidth);
-  if (typeof state.graph.linkLineDash === 'function') state.graph.linkLineDash(linkDash);
+  state.graph.linkOpacity(linkOpacity);
+  state.graph.linkWidth(link => 1);
+  if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(() => 0);
+  if (typeof state.graph.linkDirectionalParticleWidth === 'function') state.graph.linkDirectionalParticleWidth(() => 0);
+  if (typeof state.graph.linkLineDash === 'function') state.graph.linkLineDash(() => []);
   applyLinkStylesForView();
   updateNodeStyles();
   updateSidebar(focusId);
@@ -1478,6 +1681,7 @@ function buildTreeHierarchy(rootId, parentMap, nodeMap) {
 function cloneNodeForView(source, stage) {
   if (!source) return null;
   const color = stageColor(stage);
+  const size = stage === 'root' ? TREE_NODE_ROOT_SIZE : TREE_NODE_BASE_SIZE;
   return {
     ...source,
     x: source.homeX ?? source.x ?? 0,
@@ -1489,8 +1693,8 @@ function cloneNodeForView(source, stage) {
     stage,
     baseColor: color.slice(),
     displayColor: color.slice(),
-    baseSize: stage === 'root' ? 26 : 18,
-    displaySize: stage === 'root' ? 26 : 18
+    baseSize: size,
+    displaySize: size
   };
 }
 
@@ -1520,7 +1724,7 @@ function buildAdjacencyIndex() {
     state.rawEdges.mints,
     state.rawEdges.mixed,
     state.rawEdges.ownership
-  ];
+  ].filter(list => Array.isArray(list));
   sources.forEach(list => {
     list.forEach(edge => {
       const source = Number(edge?.source);
@@ -1533,6 +1737,47 @@ function buildAdjacencyIndex() {
     });
   });
   return adjacency;
+}
+
+function positionTreeNodes(treeRoot) {
+  const levels = new Map();
+  treeRoot.each(node => {
+    if (!node.data.__node) return;
+    if (!levels.has(node.depth)) levels.set(node.depth, []);
+    levels.get(node.depth).push(node);
+  });
+
+  levels.forEach((nodes, depth) => {
+    if (!nodes.length) return;
+    if (depth === 0) {
+      const clone = nodes[0].data.__node;
+      clone.x = 0;
+      clone.y = 0;
+      clone.z = 0;
+      clone.fx = 0;
+      clone.fy = 0;
+      clone.fz = 0;
+      return;
+    }
+    const count = nodes.length;
+    const diameter = depth === 0 ? TREE_NODE_ROOT_SIZE : TREE_NODE_BASE_SIZE;
+    const desiredSpacing = diameter + TREE_RING_PADDING;
+    const minRadius = (desiredSpacing * count) / (2 * Math.PI);
+    const radius = Math.max(TREE_RING_BASE + depth * TREE_RING_SPACING, minRadius);
+    nodes.forEach((node, index) => {
+      const clone = node.data.__node;
+      if (!clone) return;
+      const angle = (index / count) * Math.PI * 2;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      clone.x = x;
+      clone.y = y;
+      clone.z = 0;
+      clone.fx = x;
+      clone.fy = y;
+      clone.fz = 0;
+    });
+  });
 }
 
 function updateViewControls() {
@@ -1790,7 +2035,8 @@ function populateOwnerSidebar(owner) {
   const walletType = owner.walletType ? owner.walletType.replace(/_/g, ' ').toUpperCase() : 'OWNER';
   setFieldText('sb-id', label);
   setFieldText('sb-name', walletType);
-  setFieldText('sb-owner', owner.address || '—');
+  const ownerDisplay = owner.address ? truncateAddr(owner.address) : '—';
+  setFieldText('sb-owner', ownerDisplay);
   setFieldText('sb-sales', formatNumber(owner.flowMetric || 0));
   setFieldText('sb-last-sale', '—');
   setFieldText('sb-hold', owner.holdingCount != null ? String(owner.holdingCount) : '—');
