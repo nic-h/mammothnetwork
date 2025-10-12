@@ -1,6 +1,8 @@
 import ForceGraph3D from '3d-force-graph';
 import * as THREE from 'three';
 import { hierarchy, tree as d3tree, pack as d3pack } from 'd3-hierarchy';
+import { buildTopdownTree, attachTopdownTree, highlightBranch } from './layout/treeTopDown.js';
+import { bubbleMapLayout } from './layout/bubbleMap.js';
 
 const TOKENS = {
   fg: [0, 255, 102],
@@ -165,6 +167,10 @@ const state = {
   ownerTopNeighbors: new Map(),
   tokenNodes: [],
   tokenNodeMap: new Map(),
+  bubbleNodes: [],
+  bubbleGroups: new Map(),
+  treeTopdown: { root: null, data: null, loading: false },
+  treeTopdownDepth: 2,
   rawEdges: {
     ownership: [],
     traits: [],
@@ -191,6 +197,44 @@ const state = {
   traitTokenCache: new Map(),
   traitRequestId: 0
 };
+
+function resolveOwnerAddress(candidate) {
+  if (!candidate) return null;
+  if (typeof candidate === 'object') {
+    if (candidate.address) return String(candidate.address).toLowerCase();
+    if (candidate.id) return resolveOwnerAddress(candidate.id);
+  }
+  if (typeof candidate === 'number') return resolveOwnerAddress(String(candidate));
+  const value = String(candidate).trim();
+  if (!value) return null;
+  if (value.startsWith('0x')) return value.toLowerCase();
+  const ownerNode = state.ownerNodeMap.get(value);
+  if (ownerNode?.address) return ownerNode.address.toLowerCase();
+  const addressNode = state.ownerAddressMap.get(value.toLowerCase());
+  if (addressNode?.address) return addressNode.address.toLowerCase();
+  return null;
+}
+
+function computeTopdownBranchSet(node, data) {
+  if (!node || !data) return null;
+  const ids = new Set();
+  const nodeById = new Map(data.nodes.map(n => [n.id, n]));
+  let current = nodeById.get(node.id) || node;
+  if (!current) return null;
+  ids.add(current.id);
+  while (current.level > 0) {
+    const parentLink = data.links.find(link => {
+      const targetId = link.target.id || link.target;
+      return targetId === current.id;
+    });
+    if (!parentLink) break;
+    const parentId = parentLink.source.id || parentLink.source;
+    ids.add(parentId);
+    current = nodeById.get(parentId);
+    if (!current) break;
+  }
+  return ids;
+}
 
 const spriteTexture = (() => {
   const size = 128;
@@ -224,6 +268,17 @@ const SIMPLE_VIEWS = {
       'layer-traits': false
     }
   },
+  bubble: {
+    mode: 'holders',
+    toggles: {
+      'ambient-edges': false,
+      'layer-ownership': false,
+      'layer-transfers': false,
+      'layer-sales': false,
+      'layer-mints': false,
+      'layer-traits': false
+    }
+  },
   flow: {
     mode: 'holders',
     toggles: {
@@ -235,7 +290,7 @@ const SIMPLE_VIEWS = {
       'layer-traits': false
     }
   },
-  tree: {
+  treeRadial: {
     mode: 'traits',
     toggles: {
       'ambient-edges': false,
@@ -244,6 +299,17 @@ const SIMPLE_VIEWS = {
       'layer-sales': false,
       'layer-mints': false,
       'layer-traits': true
+    }
+  },
+  treeTopdown: {
+    mode: 'holders',
+    toggles: {
+      'ambient-edges': false,
+      'layer-ownership': false,
+      'layer-transfers': false,
+      'layer-sales': false,
+      'layer-mints': false,
+      'layer-traits': false
     }
   },
   rhythm: {
@@ -306,31 +372,11 @@ const API = {
     });
   }
 
-  graph.onNodeClick(node => {
-    if (!node) return;
-    if (state.activeView === 'tree') {
-      renderTreeView(node.id);
-    } else {
-      focusNode(node.id);
-    }
-  });
+  graph.onNodeClick(node => handleNodeClick(node));
 
-  graph.onBackgroundClick(() => {
-    state.selectedId = null;
-    updateNodeStyles();
-    updateSidebar(null);
-    if (state.activeView === 'tree') {
-      renderTreeView(state.lastTreeRoot ?? state.nodes[0]?.id ?? null);
-    }
-  });
+  graph.onBackgroundClick(() => handleBackgroundClick());
 
-  graph.onNodeHover(node => {
-    const id = node?.id ?? null;
-    if (state.hoveredId === id) return;
-    state.hoveredId = id;
-    updateNodeStyles();
-    stageEl.style.cursor = id ? 'pointer' : 'grab';
-  });
+  graph.onNodeHover(node => handleNodeHover(node));
 
   applyStoredPanelState();
   bindUI();
@@ -1212,17 +1258,34 @@ function disposeSprites() {
 }
 
 function renderCurrentView() {
-  if (!state.graph) return;
-  if (state.activeView === 'tree') {
-    renderTreeView(state.selectedId ?? state.lastTreeRoot ?? state.nodes[0]?.id ?? null);
-  } else if (state.activeView === 'flow') {
-    renderFlowView();
-  } else if (state.activeView === 'rhythm') {
-    renderRhythmView();
-  } else {
-    renderDotsView();
+  if (!state.graph) return Promise.resolve();
+  let result;
+  switch (state.activeView) {
+    case 'bubble':
+      result = renderBubbleMapView();
+      break;
+    case 'flow':
+      result = renderFlowView();
+      break;
+    case 'treeRadial':
+      result = renderTreeRadialView(state.selectedId ?? state.lastTreeRoot ?? state.nodes[0]?.id ?? null);
+      break;
+    case 'treeTopdown':
+      result = renderTreeTopdownView(state.treeTopdown?.root || state.selectedId || (state.ownerNodes[0]?.address ?? null));
+      break;
+    case 'rhythm':
+      result = renderRhythmView();
+      break;
+    case 'dots':
+    default:
+      result = renderDotsView();
+      break;
+  }
+  if (result && typeof result.then === 'function') {
+    return result.then(() => updateViewControls());
   }
   updateViewControls();
+  return Promise.resolve();
 }
 
 function renderDotsView() {
@@ -1245,6 +1308,48 @@ function renderDotsView() {
   if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(() => 0);
   if (typeof state.graph.linkLineDash === 'function') state.graph.linkLineDash(() => []);
   if (state.clusterMode) applyClusterModeIfNeeded();
+  updateNodeStyles();
+  scheduleZoomToFit();
+}
+
+function renderBubbleMapView() {
+  if (!state.graph) return;
+  const clones = state.ownerNodes.map(node => ({ ...node }));
+  bubbleMapLayout(clones, {
+    groupBy: n => n.walletType || n.community || 'Other',
+    radius: n => Math.max(4, Math.sqrt(n.flowMetric || n.trades || 1)),
+    padding: COLLISION_PADDING
+  });
+  clones.forEach(node => {
+    const size = Math.max(16, (node.r || 4) * 6);
+    node.baseSize = size;
+    node.displaySize = size;
+    node.fx = node.x;
+    node.fy = node.y;
+    node.fz = 0;
+  });
+  state.bubbleNodes = clones;
+  state.viewNodes = new Map(clones.map(n => [n.id, n]));
+  state.bubbleGroups = new Map();
+  clones.forEach(node => {
+    const key = node.groupKey || node.walletType || 'Other';
+    if (!state.bubbleGroups.has(key)) state.bubbleGroups.set(key, new Set());
+    state.bubbleGroups.get(key).add(node.id);
+  });
+  state.selectedId = null;
+
+  toggleControl('edges', false);
+  state.graph.numDimensions(2);
+  state.graph.graphData({ nodes: clones, links: [] });
+  state.graph.d3VelocityDecay(1);
+  if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
+  if (typeof state.graph.linkVisibility === 'function') state.graph.linkVisibility(() => false);
+  state.graph.linkColor(() => 'rgba(0,0,0,0)');
+  state.graph.linkOpacity(() => 0);
+  state.graph.linkWidth(() => 0);
+  state.graph.nodeThreeObject(node => buildSprite(node));
+  state.graph.nodeThreeObjectExtend(false);
+  state.highlighted = null;
   updateNodeStyles();
   scheduleZoomToFit();
 }
@@ -1419,7 +1524,7 @@ function linkColor() {
 }
 
 function linkWidth(link) {
-  if (state.activeView === 'tree') return 1;
+  if (state.activeView === 'treeRadial' || state.activeView === 'treeTopdown') return 1;
   if (!link) return 1;
   if (typeof link.width === 'number') return link.width;
   const base = Math.log1p(Math.max(1, link.weight || 1));
@@ -1577,7 +1682,7 @@ function restoreHomePositions(pin = true) {
   });
 }
 
-function renderTreeView(targetId) {
+function renderTreeRadialView(targetId) {
   if (!state.graph) return;
   useTokenDataset();
   state.highlighted = null;
@@ -1618,6 +1723,47 @@ function renderTreeView(targetId) {
   try { if (typeof state.graph.centerAt === 'function') state.graph.centerAt(0, 0, 0, 600); } catch {}
   try { if (typeof state.graph.zoom === 'function') state.graph.zoom(5, 600); } catch {}
   scheduleZoomToFit();
+}
+
+async function renderTreeTopdownView(rootCandidate) {
+  if (!state.graph) return;
+  const resolvedRoot = resolveOwnerAddress(rootCandidate) || rootCandidate;
+  toggleControl('edges', false);
+  toggleControl('time', false);
+  state.colorMode = 'tree';
+  if (!resolvedRoot) {
+    state.graph.graphData({ nodes: [], links: [] });
+    state.treeTopdown = { root: null, data: null, loading: false };
+    return;
+  }
+  state.treeTopdown = { root: resolvedRoot, data: state.treeTopdown?.data || null, loading: true };
+  try {
+    const data = await buildTopdownTree(resolvedRoot, {
+      depth: state.treeTopdownDepth,
+      minTrades: 1,
+      edgesLimit: 500
+    });
+    state.treeTopdown = { root: resolvedRoot, data, loading: false };
+    attachTopdownTree(state.graph, data, {
+      levelDistance: 110,
+      radiusFn: node => Math.max(5, Math.sqrt(node.trades || 1) * 1.6)
+    });
+    state.graph.nodeThreeObjectExtend(false);
+    state.graph.numDimensions(3);
+    state.graph.linkColor(() => 'rgba(255,255,255,0.22)');
+    state.graph.linkOpacity(linkOpacity);
+    state.graph.linkWidth(link => Math.max(1, Math.log1p(link.count || 1)));
+    state.viewNodes = new Map(data.nodes.map(n => [n.id, n]));
+    state.selectedId = resolvedRoot;
+    highlightBranch(state.graph, null, data);
+    const sidebarTarget = state.ownerAddressMap.get(resolvedRoot)?.id || resolvedRoot;
+    updateSidebar(sidebarTarget);
+    updateNodeStyles();
+    scheduleZoomToFit(140, 800);
+  } catch (error) {
+    console.warn('three.app: topdown tree error', error?.message || error);
+    state.treeTopdown = { root: resolvedRoot, data: null, loading: false };
+  }
 }
 
 function lineageGraph(rootId, depthLimit = 4) {
@@ -1817,7 +1963,8 @@ function updateNodeStyles() {
     if (!node || !sprite) return;
     const isSelected = state.selectedId === id;
     const isHighlighted = highlightSet ? highlightSet.has(id) : false;
-    const color = computeNodeColor(node, { isSelected, isHovered: false, isHighlighted });
+    const isHovered = state.hoveredId === id;
+    const color = computeNodeColor(node, { isSelected, isHovered, isHighlighted });
     const material = sprite.material;
     if (material?.color && typeof material.color.setRGB === 'function') {
       const tint = colorToThree(color, 1);
@@ -1827,16 +1974,29 @@ function updateNodeStyles() {
       sprite.userData.nodeId = node.id;
     }
     const base = node.baseSize || node.displaySize || 20;
-    const scale = base * (isSelected ? 1.25 : 1);
+    const emphasis = isSelected ? 1.25 : isHovered ? 1.12 : isHighlighted ? 1.05 : 1;
+    const scale = base * emphasis;
     if (sprite.scale?.set) sprite.scale.set(scale, scale, scale);
-    if (material) material.opacity = 1;
+    if (material) {
+      if (state.activeView === 'treeTopdown') {
+        material.opacity = highlightSet ? (isHighlighted ? 1 : 0.4) : 1;
+      } else if (state.activeView === 'bubble') {
+        material.opacity = highlightSet ? (isHighlighted ? 1 : 0.3) : 1;
+      } else {
+        material.opacity = 1;
+      }
+    }
   });
   try { state.graph.refresh(); } catch {}
 }
 
 function focusNode(id) {
-  if (state.activeView === 'tree') {
-    renderTreeView(id);
+  if (state.activeView === 'treeRadial') {
+    renderTreeRadialView(id);
+    return;
+  }
+  if (state.activeView === 'treeTopdown') {
+    renderTreeTopdownView(id);
     return;
   }
   const node = (state.viewNodes && state.viewNodes.get(id)) || state.nodeMap.get(id);
@@ -1845,6 +2005,8 @@ function focusNode(id) {
   if (state.activeView === 'dots' || state.activeView === 'flow') {
     const neighbors = state.ownerTopNeighbors.get(id) || [];
     state.highlighted = neighbors.length ? new Set([id, ...neighbors]) : new Set([id]);
+  } else if (state.activeView === 'bubble') {
+    highlightBubbleGroup(node.groupKey || node.walletType || 'Other');
   } else {
     state.highlighted = null;
   }
@@ -1859,6 +2021,80 @@ function focusNode(id) {
   if (state.controls?.target) state.controls.target.set(node.x, node.y, node.z);
   updateNodeStyles();
   updateSidebar(id);
+}
+
+function handleNodeClick(node) {
+  if (!node) return;
+  switch (state.activeView) {
+    case 'treeRadial':
+      renderTreeRadialView(node.id);
+      break;
+    case 'treeTopdown':
+      renderTreeTopdownView(node.id);
+      break;
+    case 'bubble':
+      state.selectedId = node.id;
+      highlightBubbleGroup(node.groupKey || node.walletType || 'Other', true);
+      updateNodeStyles();
+      updateSidebar(node.id);
+      break;
+    default:
+      focusNode(node.id);
+      break;
+  }
+}
+
+function handleBackgroundClick() {
+  state.selectedId = null;
+  state.highlighted = null;
+  updateNodeStyles();
+  updateSidebar(null);
+  if (state.activeView === 'treeRadial') {
+    renderTreeRadialView(state.lastTreeRoot ?? state.nodes[0]?.id ?? null);
+  }
+  if (state.activeView === 'treeTopdown' && state.treeTopdown?.data) {
+    highlightBranch(state.graph, null, state.treeTopdown.data);
+  }
+  if (state.activeView === 'bubble') {
+    highlightBubbleGroup(null);
+    updateNodeStyles();
+  }
+}
+
+function handleNodeHover(node) {
+  const id = node?.id ?? null;
+  if (state.hoveredId === id) return;
+  state.hoveredId = id;
+  if (state.activeView === 'bubble') {
+    if (node) {
+      highlightBubbleGroup(node.groupKey || node.walletType || 'Other');
+    } else {
+      highlightBubbleGroup(null);
+    }
+  }
+  if (state.activeView === 'treeTopdown' && state.treeTopdown?.data) {
+    const dataset = state.treeTopdown.data;
+    const branchSet = node ? computeTopdownBranchSet(node, dataset) : null;
+    state.highlighted = branchSet;
+    highlightBranch(state.graph, node || null, dataset);
+  }
+  updateNodeStyles();
+  if (state.stageEl) state.stageEl.style.cursor = node ? 'pointer' : 'grab';
+}
+
+function highlightBubbleGroup(groupKey, includeSelected = false) {
+  if (!groupKey) {
+    state.highlighted = null;
+    return;
+  }
+  const ids = state.bubbleGroups.get(groupKey);
+  if (!ids) {
+    state.highlighted = null;
+    return;
+  }
+  const set = new Set(ids);
+  if (includeSelected && state.selectedId != null) set.add(state.selectedId);
+  state.highlighted = set;
 }
 
 async function highlightWallet(address) {
@@ -1882,7 +2118,7 @@ async function updateSidebar(id) {
   const thumb = document.getElementById('thumb');
   if (!bodyEl || !emptyEl) return;
   if (typeof id === 'string') {
-    const owner = state.ownerNodeMap.get(id);
+    const owner = state.ownerNodeMap.get(id) || state.ownerAddressMap.get(id.toLowerCase?.() || id);
     if (owner) {
       populateOwnerSidebar(owner);
       return;
@@ -2203,7 +2439,7 @@ function bindUI() {
       if (/^0x[a-fA-F0-9]{40}$/.test(raw)) { await highlightWallet(raw); return; }
       const id = parseInt(raw, 10);
       if (Number.isFinite(id)) {
-        if (state.activeView === 'tree') renderTreeView(id);
+        if (state.activeView === 'treeRadial') renderTreeRadialView(id);
         else focusNode(id);
       }
     });
@@ -2277,8 +2513,8 @@ function applySimpleView(name) {
     el.checked = value;
   });
   updateViewControls();
-  if (name !== 'dots') releaseClusterMode();
-  if (name !== 'tree') {
+  if (name !== 'dots' && name !== 'bubble') releaseClusterMode();
+  if (name !== 'treeRadial') {
     state.treeNodes.clear();
     state.viewNodes = new Map(state.nodeMap);
     if (state.graph) {
@@ -2287,6 +2523,10 @@ function applySimpleView(name) {
       if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(300);
     }
   }
+  if (name !== 'treeTopdown') {
+    state.treeTopdown = { root: state.treeTopdown?.root || null, data: null, loading: false };
+  }
+  state.highlighted = null;
   renderCurrentView();
 }
 
@@ -2304,10 +2544,10 @@ function exposeApi() {
   try {
     window.mammoths = Object.assign({}, window.mammoths, {
       focusToken: (id) => {
-        if (!Number.isFinite(Number(id))) return;
-        state.selectedId = Number(id);
+        if (id == null) return;
+        state.selectedId = typeof id === 'number' ? id : id;
         updateNodeStyles();
-        focusNode(Number(id));
+        focusNode(id);
       },
       setSimpleView: (name) => {
         applySimpleView(name);
