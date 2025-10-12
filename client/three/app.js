@@ -9,6 +9,114 @@ const TOKENS = {
   gray: [102, 102, 102]
 };
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function parseCssColor(value, alpha = 1) {
+  if (!value) return null;
+  const src = value.trim();
+  if (src.startsWith('#')) {
+    const hex = src.length === 4
+      ? src.replace(/#/g, '').split('').map(ch => ch + ch).join('')
+      : src.replace('#', '');
+    const bigint = parseInt(hex, 16);
+    if (Number.isNaN(bigint)) return null;
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return [r, g, b, clamp(Math.round(alpha * 255), 0, 255)];
+  }
+  const matches = src.match(/rgba?\(([^)]+)\)/i);
+  if (matches) {
+    const parts = matches[1].split(',').map(part => Number(part.trim()));
+    if (parts.length >= 3) {
+      return [parts[0], parts[1], parts[2], clamp(Math.round((parts[3] ?? alpha) * 255), 0, 255)];
+    }
+  }
+  if (src.includes(',')) {
+    const parts = src.split(',').map(part => Number(part.trim()));
+    if (parts.length >= 3) {
+      return [parts[0], parts[1], parts[2], clamp(Math.round(alpha * 255), 0, 255)];
+    }
+  }
+  return null;
+}
+
+function cssColor(name, fallback, alpha = 1) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
+  const styles = getComputedStyle(document.documentElement);
+  const value = styles.getPropertyValue(name);
+  const parsed = parseCssColor(value, alpha);
+  return parsed || fallback;
+}
+
+function rgbaMultiply(rgba, factor) {
+  const [r, g, b, a] = rgba;
+  return [clamp(Math.round(r * factor), 0, 255), clamp(Math.round(g * factor), 0, 255), clamp(Math.round(b * factor), 0, 255), a];
+}
+
+function blendColors(a, b, t) {
+  const mix = clamp(t, 0, 1);
+  const inv = 1 - mix;
+  return [
+    Math.round((a[0] || 0) * inv + (b[0] || 0) * mix),
+    Math.round((a[1] || 0) * inv + (b[1] || 0) * mix),
+    Math.round((a[2] || 0) * inv + (b[2] || 0) * mix),
+    Math.round((a[3] || 255) * inv + (b[3] || 255) * mix)
+  ];
+}
+
+function percentile(values = [], p = 0.95) {
+  const list = values.filter(v => Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
+  if (!list.length) return 0;
+  if (list.length === 1) return list[0];
+  const rank = (list.length - 1) * clamp(p, 0, 1);
+  const lower = Math.floor(rank);
+  const upper = Math.min(list.length - 1, lower + 1);
+  const weight = rank - lower;
+  return list[lower] * (1 - weight) + list[upper] * weight;
+}
+
+function sqrtScale(value, clampMax) {
+  const safe = Number.isFinite(value) ? value : 0;
+  const capped = clamp(safe, 0, Math.max(0, clampMax || 0));
+  return Math.sqrt(capped);
+}
+
+const CSS_COLORS = {
+  nodeFill: cssColor('--node-fill', [212, 255, 212, 255]),
+  nodeStroke: cssColor('--node-stroke', [128, 255, 179, 255]),
+  link: cssColor('--link', [136, 136, 136, 255]),
+  accent: cssColor('--accent', [0, 255, 102, 255]),
+  accent2: cssColor('--accent-2', [155, 135, 255, 255]),
+  muted: cssColor('--muted', [154, 160, 166, 255]),
+  danger: cssColor('--danger', [255, 107, 107, 255])
+};
+
+const WALLET_TYPE_COLORS = {
+  exchange: CSS_COLORS.accent2,
+  bot: parseCssColor('#ffd166', 1),
+  whale: CSS_COLORS.danger,
+  team: parseCssColor('#ff8fab', 1),
+  default: CSS_COLORS.accent
+};
+
+const COMMUNITY_COLORS = [
+  '#22d3ee', '#60a5fa', '#facc15', '#f87171', '#a855f7', '#34d399', '#fb7185', '#f97316'
+].map(hex => parseCssColor(hex, 1));
+
+function colorForWallet(type = '', community = null, index = 0) {
+  const key = String(type || '').toLowerCase();
+  const base = WALLET_TYPE_COLORS[key] || WALLET_TYPE_COLORS.default;
+  if (community != null && Number.isFinite(community)) {
+    const idx = community % COMMUNITY_COLORS.length;
+    return COMMUNITY_COLORS[idx] || base;
+  }
+  const variation = 0.94 + (index % 5) * 0.01;
+  return rgbaMultiply(base, variation);
+}
+
 const DEFAULT_DECAY = 0.22;
 
 const COLORS = {
@@ -17,10 +125,6 @@ const COLORS = {
   frozen: [...TOKENS.blue, 220],
   dormant: [...TOKENS.gray, 180]
 };
-
-const FLOW_DIM_COLOR = [107, 114, 128, 180];
-const RHYTHM_GREEN = [77, 237, 136, 235];
-const RHYTHM_RED = [255, 77, 77, 235];
 
 const PANEL_KEY = 'left-panel-hidden';
 
@@ -34,6 +138,14 @@ const state = {
   nodeSprites: new Map(),
   viewNodes: new Map(),
   treeNodes: new Map(),
+  ownerNodes: [],
+  ownerNodeMap: new Map(),
+  ownerAddressMap: new Map(),
+  ownerMetrics: { holdings: [], flow: [], p95Flow: 0, p95Holdings: 0 },
+  ownerEdges: { holders: [], flow: [] },
+  ownerTopNeighbors: new Map(),
+  tokenNodes: [],
+  tokenNodeMap: new Map(),
   rawEdges: {
     ownership: [],
     traits: [],
@@ -48,10 +160,8 @@ const state = {
   hoveredId: null,
   edgeCap: 200,
   mode: 'holders',
-  timeline: { start: null, end: null, value: null, enabled: false },
   lastZoomBucket: null,
   showBubbles: false,
-  pulseHandle: null,
   activeView: 'dots',
   clusterMode: false,
   clusterMeshes: [],
@@ -217,6 +327,7 @@ const API = {
   window.addEventListener('keydown', evt => {
     if (evt.key === 'Escape') {
       state.selectedId = null;
+      state.highlighted = null;
       updateNodeStyles();
       updateSidebar(null);
     }
@@ -238,8 +349,13 @@ async function initData() {
     const fallbackNodes = Array.isArray(holdersGraph?.nodes) ? holdersGraph.nodes : [];
     const tokenList = Array.isArray(tokensResp?.tokens) ? tokensResp.tokens : [];
 
-    state.nodes = buildNodes(tokenList, fallbackNodes, state.preset);
-    state.nodeMap = new Map(state.nodes.map(n => [n.id, n]));
+    const tokenNodes = buildTokenNodes(tokenList, fallbackNodes, state.preset);
+    state.tokenNodes = tokenNodes;
+    state.tokenNodeMap = new Map(tokenNodes.map(n => [n.id, n]));
+
+
+    state.nodes = state.tokenNodes;
+    state.nodeMap = new Map(state.tokenNodes.map(n => [n.id, n]));
     state.viewNodes = new Map(state.nodeMap);
 
     const ownershipEdges = buildSimpleEdges(holdersGraph?.edges, 'ownership');
@@ -247,37 +363,44 @@ async function initData() {
     state.rawEdges.ambient = ownershipEdges.map(cloneEdgeAsAmbient);
     state.rawEdges.traits = buildSimpleEdges(traitsGraph?.edges, 'traits');
 
-    const transferBuckets = buildTransferEdges(Array.isArray(transferEdges) ? transferEdges : []);
-    state.rawEdges.transfers = transferBuckets.transfers;
-    state.rawEdges.sales = transferBuckets.sales;
-    state.rawEdges.mints = transferBuckets.mints;
-    state.rawEdges.mixed = transferBuckets.mixed;
+    const ownerData = buildOwnerDataset(state.preset);
+    seedOwnerLayout(ownerData.nodes);
+    state.ownerNodes = ownerData.nodes;
+    state.ownerNodeMap = new Map(ownerData.nodes.map(n => [n.id, n]));
+    state.ownerAddressMap = new Map(ownerData.nodes.map(n => [n.addressLc, n]));
+    state.ownerMetrics = ownerData.metrics;
 
-    setupTimelineFromTransfers(transferBuckets);
+    const ownerEdges = buildOwnerEdges(Array.isArray(transferEdges) ? transferEdges : [], state.ownerAddressMap);
+    state.ownerEdges.holders = ownerEdges.holders;
+    state.ownerEdges.flow = ownerEdges.flow;
+    state.ownerTopNeighbors = ownerEdges.topNeighbors;
+
+    state.nodes = state.ownerNodes;
+    state.nodeMap = new Map(state.ownerNodes.map(n => [n.id, n]));
+    state.viewNodes = new Map(state.nodeMap);
 
     disposeSprites();
     state.graph.nodeThreeObject(node => buildSprite(node));
-  state.graph.graphData({ nodes: state.nodes, links: [] });
-  state.graph.d3ReheatSimulation();
-  state.graph.nodeThreeObject(node => buildSprite(node));
-  state.graph.nodeThreeObjectExtend(false);
-  updateNodeStyles();
-  await loadTraitFilters();
+    state.graph.nodeLabel(nodeLabel);
+    state.graph.graphData({ nodes: state.nodes, links: [] });
+    state.graph.d3ReheatSimulation();
+    state.graph.nodeThreeObject(node => buildSprite(node));
+    state.graph.nodeThreeObjectExtend(false);
+    updateNodeStyles();
+    await loadTraitFilters();
     requestAnimationFrame(() => {
       try { state.graph.zoomToFit(400, 50); } catch {}
       try { state.graph.refresh(); } catch {}
       state.lastZoomBucket = currentZoomBucket();
       try { window.__mammothDrawnFrame = true; } catch {}
     });
-    stopPulseLoop();
-    startPulseLoop();
     updateViewControls();
   } finally {
     stopUILoad();
   }
 }
 
-function buildNodes(tokens, fallback, preset) {
+function buildTokenNodes(tokens, fallback, preset) {
   const nodes = [];
   const fallbackMap = new Map(Array.isArray(fallback) ? fallback.map(n => [n.id, n]) : []);
   const total = determineNodeCount(tokens, fallback, preset);
@@ -285,6 +408,8 @@ function buildNodes(tokens, fallback, preset) {
   const ownerType = Array.isArray(preset?.ownerWalletType) ? preset.ownerWalletType : [];
   const lastActivity = Array.isArray(preset?.tokenLastActivity) ? preset.tokenLastActivity : [];
   const saleCountArr = Array.isArray(preset?.tokenSaleCount) ? preset.tokenSaleCount : [];
+  const saleCount30dArr = Array.isArray(preset?.tokenSaleCount30d) ? preset.tokenSaleCount30d : [];
+  const holdDaysArr = Array.isArray(preset?.tokenHoldDays) ? preset.tokenHoldDays : [];
   const rarityArr = Array.isArray(preset?.rarity) ? preset.rarity : [];
   const volumeArr = Array.isArray(tokens) ? tokens.map(t => Number(t.volumeAllTia ?? 0)) : [];
   const maxVolume = Math.max(1, ...volumeArr.filter(v => Number.isFinite(v)));
@@ -308,6 +433,7 @@ function buildNodes(tokens, fallback, preset) {
     const rarity = Number(rarityArr[idx] ?? 0.5) || 0;
     const volume = Number(token?.volumeAllTia ?? 0) || 0;
     const volumeUsd = Number(token?.volumeAllUsd ?? token?.volumeUsd ?? token?.volume_all_usd ?? 0) || 0;
+    const saleCount30d = Number(saleCount30dArr[idx] ?? token?.saleCount30d ?? 0) || 0;
 
     const xy = Array.isArray(token?.xy) ? token.xy : null;
     const [x, y] = xy ? xy : fallbackPosition(i, total);
@@ -319,6 +445,7 @@ function buildNodes(tokens, fallback, preset) {
     const story = extractStoryFromToken(token, fall);
     const traits = extractTraitsFromToken(token);
     const ownerAddr = token?.owner ?? token?.ownerAddr ?? fall.owner ?? null;
+    const holdDays = Number.isFinite(trading.holdDays) ? trading.holdDays : Number(holdDaysArr[idx] ?? fall.hold_days ?? null);
 
     nodes.push({
       id,
@@ -333,6 +460,7 @@ function buildNodes(tokens, fallback, preset) {
       rarity,
       volume,
       volumeUsd,
+      saleCount30d,
       x,
       y,
       z,
@@ -340,7 +468,6 @@ function buildNodes(tokens, fallback, preset) {
       displaySize: size,
       displayColor: baseColor.slice(),
       baseSize: size,
-      pulsePhase: Math.random() * Math.PI * 2,
       homeX: x,
       homeY: y,
       homeZ: z,
@@ -351,11 +478,194 @@ function buildNodes(tokens, fallback, preset) {
       ethos,
       trading,
       story,
-      traits
+      traits,
+      holdDays: Number.isFinite(holdDays) ? holdDays : null
     });
     applyNodeImportance(nodes[nodes.length - 1]);
   }
   return nodes;
+}
+
+function buildOwnerDataset(preset = {}) {
+  const owners = Array.isArray(preset?.owners) ? preset.owners : [];
+  const ownerIndex = Array.isArray(preset?.ownerIndex) ? preset.ownerIndex : [];
+  const ownerBuyVol = Array.isArray(preset?.ownerBuyVol) ? preset.ownerBuyVol : [];
+  const ownerSellVol = Array.isArray(preset?.ownerSellVol) ? preset.ownerSellVol : [];
+  const ownerWalletType = Array.isArray(preset?.ownerWalletType) ? preset.ownerWalletType : [];
+  const ownerCommunities = Array.isArray(preset?.ownerCommunityId) ? preset.ownerCommunityId : [];
+  const ownerEthos = Array.isArray(preset?.ownerEthos) ? preset.ownerEthos : [];
+
+  const holdings = new Array(owners.length).fill(0);
+  for (let i = 0; i < ownerIndex.length; i++) {
+    const idx = ownerIndex[i];
+    if (Number.isInteger(idx) && idx >= 0 && idx < holdings.length) holdings[idx] += 1;
+  }
+
+  const flow = owners.map((_, i) => {
+    const buy = Number(ownerBuyVol[i] ?? 0) || 0;
+    const sell = Number(ownerSellVol[i] ?? 0) || 0;
+    return buy + sell;
+  });
+
+  const p95Flow = percentile(flow, 0.95) || 0;
+  const p95Holdings = percentile(holdings, 0.95) || 0;
+
+  const nodes = owners.map((address, i) => {
+    const rawAddr = String(address || '').trim();
+    const addressLc = rawAddr.toLowerCase();
+    const walletType = String(ownerWalletType[i] || '').toLowerCase();
+    const community = Number.isFinite(ownerCommunities[i]) ? Number(ownerCommunities[i]) : null;
+    const baseColor = colorForWallet(walletType, community, i) || CSS_COLORS.nodeFill;
+    const strokeColor = rgbaMultiply(baseColor, 0.72);
+    const flowMetric = flow[i] || 0;
+    const holdingCount = holdings[i] || 0;
+    const radius = 3 + 2.4 * sqrtScale(flowMetric, p95Flow || 1);
+    const strokeWidth = 1 + sqrtScale(holdingCount, p95Holdings || 1);
+    const displaySize = Math.max(14, radius * 6);
+
+    return {
+      id: `owner-${i}`,
+      ownerIndex: i,
+      address: rawAddr,
+      addressLc,
+      walletType,
+      community,
+      ethosScore: Number(ownerEthos[i] ?? null) || null,
+      flowMetric,
+      holdingCount,
+      radius,
+      strokeWidth,
+      baseColor: baseColor.slice(0, 4),
+      displayColor: baseColor.slice(0, 4),
+      strokeColor: strokeColor.slice(0, 4),
+      displaySize,
+      baseSize: displaySize,
+      label: addressLc ? `${addressLc.slice(0, 6)}…${addressLc.slice(-4)}` : `owner-${i + 1}`,
+      x: 0,
+      y: 0,
+      z: 0,
+      fx: null,
+      fy: null,
+      fz: 0,
+      stage: 'owner'
+    };
+  });
+
+  return {
+    nodes,
+    metrics: {
+      holdings,
+      flow,
+      p95Flow,
+      p95Holdings
+    }
+  };
+}
+
+function seedOwnerLayout(nodes = []) {
+  if (!nodes.length) return;
+  const groups = new Map();
+  nodes.forEach(node => {
+    const key = node.walletType || 'other';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(node);
+  });
+  const keys = Array.from(groups.keys());
+  const majorRadius = Math.max(420, 140 * Math.sqrt(keys.length || 1));
+  keys.forEach((key, index) => {
+    const bucket = groups.get(key) || [];
+    if (!bucket.length) return;
+    const angle = (index / Math.max(1, keys.length)) * Math.PI * 2;
+    const centerX = Math.cos(angle) * majorRadius;
+    const centerY = Math.sin(angle) * majorRadius;
+    const innerRadius = Math.max(120, Math.sqrt(bucket.length) * 28);
+    bucket.forEach((node, i) => {
+      const theta = (i / Math.max(1, bucket.length)) * Math.PI * 2;
+      const x = centerX + Math.cos(theta) * innerRadius;
+      const y = centerY + Math.sin(theta) * innerRadius;
+      node.x = x;
+      node.y = y;
+      node.z = 0;
+      node.fx = x;
+      node.fy = y;
+      node.fz = 0;
+      node.homeX = x;
+      node.homeY = y;
+      node.homeZ = 0;
+    });
+  });
+}
+
+function buildOwnerEdges(edgeList = [], ownerMap = new Map()) {
+  const adjacency = new Map();
+  const holders = [];
+  const flow = [];
+  const topNeighbors = new Map();
+  const now = Date.now() / 1000;
+  const windowSeconds = 30 * 86400;
+
+  for (let i = 0; i < edgeList.length; i++) {
+    const edge = edgeList[i];
+    const from = ownerMap.get(String(edge?.from_addr || '').toLowerCase());
+    const to = ownerMap.get(String(edge?.to_addr || '').toLowerCase());
+    if (!from || !to || from.id === to.id) continue;
+    const salesCount = Number(edge?.sales_count ?? 0) || 0;
+    const recentCount = Number(edge?.sales_count_30d ?? 0) || 0;
+    const lastTs = Number(edge?.last_ts ?? 0) || null;
+    const totalTrades = Number(edge?.total_trades ?? salesCount) || salesCount;
+
+    if (!adjacency.has(from.id)) adjacency.set(from.id, []);
+    adjacency.get(from.id).push({
+      source: from.id,
+      target: to.id,
+      salesCount,
+      recentCount,
+      lastTs,
+      totalTrades
+    });
+  }
+
+  adjacency.forEach((list, sourceId) => {
+    const sorted = list.filter(item => item.salesCount >= 2).sort((a, b) => b.salesCount - a.salesCount);
+    const top = sorted.slice(0, 6);
+    topNeighbors.set(sourceId, top.map(item => item.target));
+    top.forEach(item => {
+      holders.push({
+        source: item.source,
+        target: item.target,
+        weight: item.salesCount,
+        width: Math.max(1, Math.log2(1 + item.salesCount)),
+        opacity: 0.12
+      });
+    });
+
+    list.forEach(item => {
+      if (item.recentCount <= 0 || !Number.isFinite(item.lastTs)) return;
+      const age = clamp((now - item.lastTs) / windowSeconds, 0, 1);
+      const opacity = 0.08 + (0.6 - 0.08) * (1 - age);
+      flow.push({
+        source: item.source,
+        target: item.target,
+        weight: item.recentCount,
+        width: Math.max(1, Math.log2(1 + item.recentCount)),
+        opacity: clamp(opacity, 0.08, 0.6)
+      });
+    });
+  });
+
+  return { holders, flow, topNeighbors };
+}
+
+function useOwnerDataset() {
+  state.nodes = state.ownerNodes;
+  state.nodeMap = state.ownerNodeMap;
+  state.viewNodes = new Map(state.ownerNodeMap);
+}
+
+function useTokenDataset() {
+  state.nodes = state.tokenNodes;
+  state.nodeMap = state.tokenNodeMap;
+  state.viewNodes = new Map(state.tokenNodeMap);
 }
 
 function determineNodeCount(tokens, fallback, preset) {
@@ -436,7 +746,7 @@ async function loadTraitFilters() {
 
 function buildTraitFallback() {
   const map = new Map();
-  state.nodes.forEach(node => {
+  state.tokenNodes.forEach(node => {
     (node.traits || []).forEach(({ key, value }) => {
       const type = (key || '').trim();
       const val = (value || '').trim();
@@ -467,7 +777,7 @@ function renderTraitGroups(container, groups) {
     (group.values || []).forEach(entry => {
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = 'trait-filter';
+      item.className = 'trait-filter chip';
       item.dataset.type = String(group.type || '').trim();
       item.dataset.value = String(entry?.value || '').trim();
       item.innerHTML = `<span class="trait-filter-label">${escapeHtml(item.dataset.value || '—')}</span><span class="trait-filter-count">${entry?.count ?? 0}</span>`;
@@ -558,7 +868,7 @@ async function getTraitTokenSet(type, value) {
     if (Array.isArray(resp?.tokens)) ids = resp.tokens.map(Number).filter(Number.isFinite);
   } catch {}
   if (!ids.length) {
-    ids = state.nodes.filter(node => (node.traits || []).some(t => t.key === type && t.value === value)).map(node => node.id);
+    ids = state.tokenNodes.filter(node => (node.traits || []).some(t => t.key === type && t.value === value)).map(node => node.id);
   }
   const set = new Set(ids);
   state.traitTokenCache.set(key, set);
@@ -655,14 +965,12 @@ function extractTraitsFromToken(token) {
 }
 
 function computeNodeColor(node, { isSelected, isHovered, isHighlighted }) {
-  let color;
-  if (state.colorMode === 'flow') {
-    color = FLOW_DIM_COLOR.slice();
-  } else if (Array.isArray(node.baseColor)) {
-    color = node.baseColor.slice();
-  } else {
-    color = COLORS.active.slice();
-  }
+  const base = Array.isArray(node.displayColor)
+    ? node.displayColor
+    : Array.isArray(node.baseColor)
+      ? node.baseColor
+      : COLORS.active;
+  const color = base.slice();
   let alpha = color[3] ?? 210;
   if (isSelected) alpha = 255;
   else if (isHovered) alpha = clamp(alpha + 40, 0, 255);
@@ -703,10 +1011,10 @@ function buildSprite(node) {
     map: spriteTexture || null,
     color: new THREE.Color(tint.r, tint.g, tint.b),
     transparent: true,
-    opacity: (baseColor[3] ?? 210) / 255,
-    depthWrite: false,
-    depthTest: false,
-    blending: THREE.AdditiveBlending
+    opacity: (baseColor[3] ?? 255) / 255,
+    depthWrite: true,
+    depthTest: true,
+    blending: THREE.NormalBlending
   });
   const sprite = new THREE.Sprite(material);
   const size = node.baseSize || node.displaySize || 20;
@@ -743,42 +1051,23 @@ function renderCurrentView() {
 
 function renderDotsView() {
   if (!state.graph) return;
+  useOwnerDataset();
   state.colorMode = 'default';
-  toggleControl('time', false);
   toggleControl('edges', true, 'Link density');
-  restoreHomePositions(true);
   state.graph.nodeThreeObject(node => buildSprite(node));
   state.graph.nodeThreeObjectExtend(false);
-  const toggles = currentToggles();
+  state.graph.numDimensions(2);
   const cap = effectiveEdgeCap();
-  const buckets = [
-    toggles.sales ? state.rawEdges.sales : [],
-    toggles.transfers ? state.rawEdges.transfers : [],
-    toggles.mints ? state.rawEdges.mints : [],
-    toggles.mixed ? state.rawEdges.mixed : [],
-    toggles.ownership ? state.rawEdges.ownership : [],
-    toggles.traits ? state.rawEdges.traits : [],
-    toggles.ambient ? state.rawEdges.ambient : []
-  ];
-  const links = [];
-  for (const bucket of buckets) {
-    if (!bucket || !bucket.length) continue;
-    const remain = cap - links.length;
-    if (remain <= 0) break;
-    links.push(...bucket.slice(0, remain));
-  }
+  const links = state.ownerEdges.holders.slice(0, cap);
   state.graph.graphData({ nodes: state.nodes, links });
-  state.graph.d3VelocityDecay(DEFAULT_DECAY);
-  state.graph.d3ReheatSimulation();
+  state.graph.d3VelocityDecay(1);
+  if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
   state.viewNodes = new Map(state.nodeMap);
   state.graph.linkColor(linkColor);
-  state.graph.linkOpacity(() => 0.28);
-  state.graph.linkWidth(linkWidth);
+  state.graph.linkOpacity(linkOpacity);
+  state.graph.linkWidth(link => link?.width || 1);
   if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(() => 0);
-  if (typeof state.graph.linkDirectionalParticleWidth === 'function') state.graph.linkDirectionalParticleWidth(() => 0.8);
-  if (typeof state.graph.linkDirectionalParticleSpeed === 'function') state.graph.linkDirectionalParticleSpeed(() => 0.008);
-  if (typeof state.graph.linkLineDash === 'function') state.graph.linkLineDash(linkDash);
-  applyLinkStylesForView();
+  if (typeof state.graph.linkLineDash === 'function') state.graph.linkLineDash(() => []);
   if (state.clusterMode) applyClusterModeIfNeeded();
   updateNodeStyles();
   scheduleZoomToFit();
@@ -786,34 +1075,22 @@ function renderDotsView() {
 
 function renderFlowView() {
   if (!state.graph) return;
+  useOwnerDataset();
   state.colorMode = 'flow';
-  restoreHomePositions(true);
   state.graph.nodeThreeObject(node => buildSprite(node));
   state.graph.nodeThreeObjectExtend(false);
+  state.graph.numDimensions(2);
   const cap = effectiveEdgeCap();
-  const pool = (state.rawEdges.transfers || []).filter(edge => {
-    const kind = String(edge?.kind || '').toLowerCase();
-    return kind === 'buy' || kind === 'sell';
-  });
-  const filtered = pool.filter(edge => inTimeWindow(edge?.ts)).slice(0, cap);
-  toggleControl('time', state.timeline.enabled, 'Time window');
+  const links = state.ownerEdges.flow.slice(0, cap);
   toggleControl('edges', true, 'Link density');
-  state.graph.graphData({ nodes: state.nodes, links: filtered });
-  state.graph.d3VelocityDecay(DEFAULT_DECAY);
-  state.graph.d3ReheatSimulation();
+  state.graph.graphData({ nodes: state.nodes, links });
+  state.graph.d3VelocityDecay(1);
+  if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
   state.viewNodes = new Map(state.nodeMap);
   state.graph.linkColor(linkColor);
-  state.graph.linkOpacity(() => 0.9);
+  state.graph.linkOpacity(linkOpacity);
   state.graph.linkWidth(linkWidth);
-  if (typeof state.graph.linkDirectionalParticles === 'function') {
-    state.graph.linkDirectionalParticles(link => inTimeWindow(link?.ts) ? (String(link.kind).toLowerCase() === 'buy' ? 2 : 1) : 0);
-  }
-  if (typeof state.graph.linkDirectionalParticleWidth === 'function') {
-    state.graph.linkDirectionalParticleWidth(link => String(link.kind).toLowerCase() === 'buy' ? 2 : 1.6);
-  }
-  if (typeof state.graph.linkDirectionalParticleSpeed === 'function') {
-    state.graph.linkDirectionalParticleSpeed(link => String(link.kind).toLowerCase() === 'buy' ? 0.012 : 0.008);
-  }
+  if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(() => 0);
   if (typeof state.graph.linkLineDash === 'function') state.graph.linkLineDash(linkDash);
   applyLinkStylesForView();
   updateNodeStyles();
@@ -822,36 +1099,48 @@ function renderFlowView() {
 
 function renderRhythmView() {
   if (!state.graph) return;
+  useTokenDataset();
   state.colorMode = 'rhythm';
+  state.highlighted = null;
   state.graph.nodeThreeObject(node => buildSprite(node));
   state.graph.nodeThreeObjectExtend(false);
-  const start = Number.isFinite(state.timeline.start) ? state.timeline.start : Date.now() / 1000 - 86400;
-  const end = Number.isFinite(state.timeline.value) ? state.timeline.value : (Number.isFinite(state.timeline.end) ? state.timeline.end : start + 86400);
-  const span = Math.max(1, end - start);
-  const clones = state.nodes.map(source => {
+  const saleRecentValues = state.tokenNodes.map(node => Number(node.saleCount30d ?? node.saleCount ?? 0));
+  const p95Recent = percentile(saleRecentValues, 0.95) || 1;
+  const turnoverValues = state.tokenNodes.map(node => {
+    const hold = Number.isFinite(node.holdDays) ? Math.max(1, node.holdDays) : 1;
+    return Math.log1p((Number(node.saleCount ?? 0) || 0) / hold);
+  });
+  const maxTurnover = Math.max(...turnoverValues.filter(v => Number.isFinite(v)), 1);
+  const width = 640;
+  const height = 420;
+  const ageRange = 180; // days
+
+  const clones = state.tokenNodes.map((source, i) => {
     const clone = { ...source };
-    const ts = Number(source.lastActivity || end);
-    const volume = Number.isFinite(source.volume) ? source.volume : 0;
-    const saleCount = Number.isFinite(source.saleCount) ? source.saleCount : 0;
-    const rarity = Number.isFinite(source.rarity) ? source.rarity : 0.5;
-    const timeNorm = clamp((ts - start) / span, 0, 1);
-    const priceNorm = Math.log1p(Math.max(0, volume));
-    clone.x = (saleCount - 5) * 26 + (rarity - 0.5) * 120;
-    clone.y = (priceNorm * 60) - 180;
-    clone.z = (timeNorm * 800) - 400;
+    const rarity = clamp(Number(source.rarity ?? 0.5), 0, 1);
+    const saleRecent = saleRecentValues[i] || 0;
+    const hold = Number.isFinite(source.holdDays) ? Math.max(1, source.holdDays) : 1;
+    const turnoverLog = Math.log1p((Number(source.saleCount ?? 0) || 0) / hold);
+    const turnoverNorm = maxTurnover > 0 ? turnoverLog / maxTurnover : 0;
+    const radius = 2 + 4 * sqrtScale(saleRecent, p95Recent);
+    const daysSince = Number.isFinite(source.daysSince) ? Math.max(0, source.daysSince) : ageRange;
+    const recencyFactor = 1 - clamp(daysSince / ageRange, 0, 1);
+    const color = blendColors(CSS_COLORS.muted, CSS_COLORS.accent, recencyFactor);
+
+    clone.x = (rarity - 0.5) * width;
+    clone.y = (turnoverNorm - 0.5) * height;
+    clone.z = 0;
     clone.fx = clone.x;
     clone.fy = clone.y;
-    clone.fz = clone.z;
-    const days = Number.isFinite(source.daysSince) ? source.daysSince : Infinity;
-    const baseColor = days <= 7 ? RHYTHM_GREEN.slice() : days >= 120 ? RHYTHM_RED.slice() : COLORS.active.slice();
-    clone.baseColor = baseColor.slice();
-    clone.displayColor = baseColor.slice();
-    const baseSize = 14 + Math.log1p(volume + saleCount) * 4;
-    clone.baseSize = clamp(baseSize, 12, 48);
-    clone.displaySize = clone.baseSize;
+    clone.fz = 0;
+    clone.baseColor = color;
+    clone.displayColor = color.slice();
+    const size = Math.max(12, radius * 5);
+    clone.baseSize = size;
+    clone.displaySize = size;
     return clone;
   });
-  toggleControl('time', state.timeline.enabled, 'Time window');
+  toggleControl('time', false);
   toggleControl('edges', false);
   state.graph.graphData({ nodes: clones, links: [] });
   state.viewNodes = new Map(clones.map(n => [n.id, n]));
@@ -905,96 +1194,56 @@ function currentZoomBucket() {
   return 'near';
 }
 
-function linkColor(link) {
-  const kindRaw = (link.kind || 'transfer').toLowerCase();
-  const flowKind = kindRaw === 'sale' ? 'sell' : kindRaw;
-  if (state.activeView === 'flow') {
-    if (flowKind === 'sell') return 'rgba(255, 77, 77, 0.95)';
-    if (flowKind === 'buy') return 'rgba(77, 237, 136, 0.9)';
-  }
-  if (kindRaw === 'sale') return 'rgba(255, 80, 80, 0.9)';
-  if (kindRaw === 'mixed') return 'rgba(255, 212, 64, 0.8)';
-  if (kindRaw === 'mint') return 'rgba(255, 255, 255, 0.85)';
-  if (kindRaw === 'traits') return 'rgba(190, 190, 255, 0.25)';
-  if (kindRaw === 'ownership') return 'rgba(0, 255, 102, 0.35)';
-  if (kindRaw === 'ambient') return 'rgba(0, 255, 102, 0.18)';
-  return 'rgba(68, 136, 255, 0.6)';
+function linkColor() {
+  const [r, g, b] = CSS_COLORS.link;
+  return `rgba(${r}, ${g}, ${b}, 1)`;
 }
 
 function linkWidth(link) {
-  if (state.activeView === 'flow') {
-    const value = Number(link?.valueUsd ?? link?.value ?? link?.weight ?? 1);
-    const base = Math.log1p(Math.max(1, value));
-    return 0.8 + base * 0.8;
-  }
+  if (state.activeView === 'tree') return 1;
+  if (!link) return 1;
+  if (typeof link.width === 'number') return link.width;
   const base = Math.log1p(Math.max(1, link.weight || 1));
-  if (link.kind === 'mixed') return 2.4 + base * 0.6;
-  if (link.kind === 'sale') return 2 + base * 0.5;
-  if (link.kind === 'mint') return 1.4 + base * 0.3;
-  if (link.kind === 'ownership') return 1.2;
-  if (link.kind === 'ambient') return 0.8;
-  if (link.kind === 'traits') return 0.6;
-  return 1.6 + base * 0.4;
+  return 1 + base * 0.5;
+}
+function linkOpacity(link) {
+  const defaultOpacity = typeof link?.opacity === 'number' ? link.opacity : 0.12;
+  const focus = state.selectedId;
+  if (focus == null) return defaultOpacity;
+  const sourceId = link?.source && typeof link.source === 'object' ? link.source.id : link?.source;
+  const targetId = link?.target && typeof link.target === 'object' ? link.target.id : link?.target;
+  const isConnected = focus === sourceId || focus === targetId;
+  if (isConnected) return 0.6;
+  return defaultOpacity;
 }
 
-function linkParticles(link) {
-  const kind = (link.kind || '').toLowerCase();
-  const flowKind = kind === 'sale' ? 'sell' : kind;
-  if (state.activeView === 'flow') {
-    if (flowKind === 'buy') return 2;
-    if (flowKind === 'sell') return 1;
-  }
-  if (link.kind === 'sale' || link.kind === 'mixed') return 2;
-  if (link.kind === 'transfer') return 1;
-  return 0;
-}
-
-function linkParticleWidth(link) {
-  const kind = (link.kind || '').toLowerCase();
-  const flowKind = kind === 'sale' ? 'sell' : kind;
-  if (state.activeView === 'flow') {
-    if (flowKind === 'buy') return 2;
-    if (flowKind === 'sell') return 1.6;
-  }
-  if (link.kind === 'sale') return 3;
-  if (link.kind === 'mixed') return 2.5;
-  if (link.kind === 'transfer') return 1.4;
-  return 0.8;
-}
-
-function linkDash(link) {
-  const kind = (link.kind || '').toLowerCase();
-  const flowKind = kind === 'sale' ? 'sell' : kind;
-  if (state.activeView === 'flow') {
-    if (flowKind === 'buy') return [1.2, 1.6];
-    if (flowKind === 'sell') return [];
-  }
-  if (link.kind === 'transfer') return [3, 2];
-  if (link.kind === 'mint') return [1, 3];
-  if (link.kind === 'mixed') return [2, 2];
-  if (link.kind === 'ambient') return [4, 6];
+function linkDash() {
   return [];
 }
 
 function applyLinkStylesForView() {
   if (!state.graph) return;
-  if (state.activeView === 'flow') {
-    if (typeof state.graph.linkCurvature === 'function') state.graph.linkCurvature(() => 0.2);
-    if (typeof state.graph.linkDirectionalArrowLength === 'function') state.graph.linkDirectionalArrowLength(() => 3);
-    if (typeof state.graph.linkVisibility === 'function') state.graph.linkVisibility(linkWithinWindow);
-  } else {
-    if (typeof state.graph.linkCurvature === 'function') state.graph.linkCurvature(() => 0);
-    if (typeof state.graph.linkDirectionalArrowLength === 'function') state.graph.linkDirectionalArrowLength(() => 0);
-    if (typeof state.graph.linkVisibility === 'function') {
-      if (state.activeView === 'rhythm') state.graph.linkVisibility(() => false);
-      else state.graph.linkVisibility(() => true);
-    }
+  if (typeof state.graph.linkCurvature === 'function') {
+    state.graph.linkCurvature(state.activeView === 'flow' ? () => 0.15 : () => 0);
+  }
+  if (typeof state.graph.linkDirectionalArrowLength === 'function') {
+    state.graph.linkDirectionalArrowLength(() => 0);
+  }
+  if (typeof state.graph.linkVisibility === 'function') {
+    state.graph.linkVisibility(() => true);
   }
 }
 
-function linkWithinWindow(link) {
-  const ts = Number(link?.ts ?? link?.timestamp ?? link?.time ?? link?.date);
-  return inTimeWindow(ts);
+function nodeLabel(node) {
+  if (!node) return '';
+  if (state.activeView === 'dots' || state.activeView === 'flow') {
+    const focus = state.selectedId;
+    if (!focus) return '';
+    if (node.id === focus) return node.label || node.address || '';
+    const neighbors = state.ownerTopNeighbors.get(focus) || [];
+    return neighbors.includes(node.id) ? (node.label || node.address || '') : '';
+  }
+  return `#${node.id}`;
 }
 
 function applyClusterModeIfNeeded() {
@@ -1111,6 +1360,8 @@ function restoreHomePositions(pin = true) {
 
 function renderTreeView(targetId) {
   if (!state.graph) return;
+  useTokenDataset();
+  state.highlighted = null;
   state.graph.nodeThreeObject(node => buildSprite(node));
   state.graph.nodeThreeObjectExtend(false);
   state.graph.nodeThreeObject(node => buildSprite(node));
@@ -1238,19 +1489,19 @@ function cloneNodeForView(source, stage) {
     stage,
     baseColor: color.slice(),
     displayColor: color.slice(),
-    baseSize: stage === 'root' ? (source.baseSize || 20) * 1.3 : source.baseSize,
-    displaySize: source.displaySize
+    baseSize: stage === 'root' ? 26 : 18,
+    displaySize: stage === 'root' ? 26 : 18
   };
 }
 
 function stageColor(stage) {
   const key = String(stage || '').toLowerCase();
   if (key === 'root') return [255, 255, 255, 255];
-  if (key === 'mint') return [255, 255, 255, 220];
-  if (key === 'buy') return [77, 237, 136, 235];
-  if (key === 'sell' || key === 'sale') return [255, 77, 77, 235];
-  if (key === 'branch') return [153, 255, 102, 220];
-  return COLORS.active.slice();
+  if (key === 'mint') return parseCssColor('#4c9aff', 1) || [76, 154, 255, 255];
+  if (key === 'buy') return CSS_COLORS.accent.slice();
+  if (key === 'sell' || key === 'sale') return parseCssColor('#ff9f43', 1) || [255, 159, 67, 255];
+  if (key === 'branch') return rgbaMultiply(CSS_COLORS.accent, 0.7);
+  return CSS_COLORS.nodeFill.slice();
 }
 
 function stageFromEdge(edge, fallback) {
@@ -1284,60 +1535,11 @@ function buildAdjacencyIndex() {
   return adjacency;
 }
 
-function setupTimelineFromTransfers(buckets) {
-  const timestamps = [];
-  ['transfers', 'sales', 'mints', 'mixed'].forEach(key => {
-    (buckets?.[key] || []).forEach(edge => {
-      const ts = Number(edge?.ts ?? edge?.timestamp ?? edge?.time ?? null);
-      if (Number.isFinite(ts)) timestamps.push(ts);
-    });
-  });
-  if (!timestamps.length) {
-    state.timeline.start = null;
-    state.timeline.end = null;
-    state.timeline.value = null;
-    state.timeline.enabled = false;
-    updateTimelineUI();
-    return;
-  }
-  state.timeline.start = Math.min(...timestamps);
-  state.timeline.end = Math.max(...timestamps);
-  state.timeline.value = state.timeline.end;
-  state.timeline.enabled = true;
-  updateTimelineUI();
-  updateViewControls();
-}
-
-function updateTimelineUI() {
-  const slider = document.getElementById('time-slider');
-  const label = document.getElementById('time-label');
-  if (!slider) return;
-  const hasRange = state.timeline.enabled && Number.isFinite(state.timeline.start) && Number.isFinite(state.timeline.end) && state.timeline.start !== state.timeline.end;
-  slider.disabled = !hasRange;
-  if (!hasRange) {
-    slider.value = '100';
-    if (label) label.textContent = '';
-    return;
-  }
-  slider.value = '100';
-  if (label) label.textContent = formatDate(state.timeline.value ?? state.timeline.end);
-}
-
 function updateViewControls() {
   const clusterRow = document.getElementById('cluster-mode-row');
   if (clusterRow) clusterRow.hidden = state.activeView !== 'dots';
   const clusterToggle = document.getElementById('dots-cluster-mode');
   if (clusterToggle) clusterToggle.checked = !!state.clusterMode;
-  if (state.activeView === 'flow' || state.activeView === 'rhythm') updateTimelineUI();
-}
-
-function inTimeWindow(ts) {
-  const time = Number(ts);
-  if (!Number.isFinite(time)) return true;
-  if (!state.timeline.enabled || !Number.isFinite(state.timeline.start)) return true;
-  const end = Number.isFinite(state.timeline.value) ? state.timeline.value : state.timeline.end;
-  if (!Number.isFinite(end)) return true;
-  return time >= state.timeline.start && time <= end;
 }
 
 function toggleControl(control, isVisible, labelText) {
@@ -1356,7 +1558,6 @@ function toggleControl(control, isVisible, labelText) {
     const labelEl = wrapper.querySelector('[data-ctrl-label]');
     if (labelEl) labelEl.textContent = labelText;
   }
-  if (control === 'time' && isVisible) updateTimelineUI();
   if (control === 'edges') {
     const valueEl = document.getElementById('edge-count');
     if (valueEl) valueEl.textContent = String(state.edgeCap);
@@ -1366,77 +1567,26 @@ function toggleControl(control, isVisible, labelText) {
 function updateNodeStyles() {
   if (!state.graph) return;
   const highlightSet = state.highlighted instanceof Set ? state.highlighted : null;
-  const hasHover = state.hoveredId != null;
   state.nodeSprites.forEach((sprite, id) => {
     const node = (state.viewNodes && state.viewNodes.get(id)) || state.nodeMap.get(id);
     if (!node || !sprite) return;
     const isSelected = state.selectedId === id;
-    const isHovered = state.hoveredId === id;
     const isHighlighted = highlightSet ? highlightSet.has(id) : false;
-    const color = computeNodeColor(node, { isSelected, isHovered, isHighlighted });
-    let boost = isSelected ? 1.6 : isHovered ? 1.35 : isHighlighted ? 1.2 : 1;
-    if (hasHover && !isHovered && !isSelected && !isHighlighted) boost *= 0.85;
+    const color = computeNodeColor(node, { isSelected, isHovered: false, isHighlighted });
     const material = sprite.material;
     if (material?.color && typeof material.color.setRGB === 'function') {
-      const tint = colorToThree(color, boost);
+      const tint = colorToThree(color, 1);
       material.color.setRGB(tint.r, tint.g, tint.b);
       if (!sprite.userData) sprite.userData = {};
       sprite.userData.baseAlpha = color[3] ?? 210;
       sprite.userData.nodeId = node.id;
     }
-    const hoverState = isSelected ? 'selected' : isHovered ? 'hovered' : isHighlighted ? 'highlighted' : (hasHover ? 'dim' : 'normal');
-    if (!sprite.userData) sprite.userData = {};
-    sprite.userData.hoverState = hoverState;
-
-    const emphasis = isSelected ? 1.8 : isHovered ? 1.4 : isHighlighted ? 1.2 : hasHover ? 0.9 : 1;
-    const bubbleBoost = state.showBubbles && node.isWhale ? 1.35 : 1;
     const base = node.baseSize || node.displaySize || 20;
-    const scale = base * emphasis * bubbleBoost;
+    const scale = base * (isSelected ? 1.25 : 1);
     if (sprite.scale?.set) sprite.scale.set(scale, scale, scale);
+    if (material) material.opacity = 1;
   });
   try { state.graph.refresh(); } catch {}
-}
-
-function startPulseLoop() {
-  if (typeof window?.requestAnimationFrame !== 'function') return;
-  const tick = () => {
-    const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-      ? performance.now()
-      : Date.now();
-    updatePulse(now / 1000);
-    state.pulseHandle = window.requestAnimationFrame(tick);
-  };
-  state.pulseHandle = window.requestAnimationFrame(tick);
-}
-
-function stopPulseLoop() {
-  if (typeof window?.cancelAnimationFrame !== 'function') return;
-  if (state.pulseHandle) {
-    window.cancelAnimationFrame(state.pulseHandle);
-    state.pulseHandle = null;
-  }
-}
-
-function updatePulse(time) {
-  state.nodeSprites.forEach((sprite, id) => {
-    const node = state.nodeMap.get(id);
-    const material = sprite?.material;
-    if (!node || !material) return;
-    const baseAlpha = sprite.userData?.baseAlpha ?? node.baseColor?.[3] ?? 210;
-    const pulse = 0.08 * Math.sin(time * 1.2 + (node.pulsePhase ?? 0));
-    const recency = Number.isFinite(node.daysSince) ? node.daysSince : Infinity;
-    const activityBoost = recency < 1 ? 0.28 : recency < 7 ? 0.12 : 0;
-    const bubbleBoost = state.showBubbles && node.isWhale ? 0.12 : 0;
-    let alpha = clamp(baseAlpha * (1 + pulse) + (activityBoost + bubbleBoost) * 255, 60, 255) / 255;
-    const hoverState = sprite.userData?.hoverState;
-    if (state.hoveredId) {
-      if (hoverState === 'hovered') alpha = Math.min(1, alpha + 0.2);
-      else if (hoverState === 'selected' || hoverState === 'highlighted') alpha = Math.min(1, alpha + 0.15);
-      else alpha *= 0.35;
-    }
-    if (hoverState === 'selected') alpha = Math.max(alpha, 0.95);
-    material.opacity = alpha;
-  });
 }
 
 function focusNode(id) {
@@ -1447,6 +1597,12 @@ function focusNode(id) {
   const node = (state.viewNodes && state.viewNodes.get(id)) || state.nodeMap.get(id);
   if (!node) return;
   state.selectedId = id;
+  if (state.activeView === 'dots' || state.activeView === 'flow') {
+    const neighbors = state.ownerTopNeighbors.get(id) || [];
+    state.highlighted = neighbors.length ? new Set([id, ...neighbors]) : new Set([id]);
+  } else {
+    state.highlighted = null;
+  }
   const cam = state.graph.camera();
   const target = state.controls?.target || new THREE.Vector3(0, 0, 0);
   const currentDist = cam.position.distanceTo(target);
@@ -1480,6 +1636,13 @@ async function updateSidebar(id) {
   const emptyEl = document.getElementById('sidebar-empty');
   const thumb = document.getElementById('thumb');
   if (!bodyEl || !emptyEl) return;
+  if (typeof id === 'string') {
+    const owner = state.ownerNodeMap.get(id);
+    if (owner) {
+      populateOwnerSidebar(owner);
+      return;
+    }
+  }
   if (!Number.isFinite(id)) {
     bodyEl.classList.add('hidden');
     bodyEl.hidden = true;
@@ -1612,6 +1775,41 @@ function populateSidebar(id, data) {
   updateNodeStyles();
 }
 
+function populateOwnerSidebar(owner) {
+  const bodyEl = document.getElementById('sidebar-body');
+  const emptyEl = document.getElementById('sidebar-empty');
+  const thumb = document.getElementById('thumb');
+  if (!bodyEl || !emptyEl) return;
+  bodyEl.classList.remove('hidden');
+  bodyEl.hidden = false;
+  emptyEl.classList.add('hidden');
+  emptyEl.hidden = true;
+  if (thumb) thumb.style.display = 'none';
+
+  const label = owner.label || owner.address || owner.id;
+  const walletType = owner.walletType ? owner.walletType.replace(/_/g, ' ').toUpperCase() : 'OWNER';
+  setFieldText('sb-id', label);
+  setFieldText('sb-name', walletType);
+  setFieldText('sb-owner', owner.address || '—');
+  setFieldText('sb-sales', formatNumber(owner.flowMetric || 0));
+  setFieldText('sb-last-sale', '—');
+  setFieldText('sb-hold', owner.holdingCount != null ? String(owner.holdingCount) : '—');
+
+  const ethosSection = document.getElementById('sb-ethos');
+  if (ethosSection) {
+    ethosSection.classList.add('hidden');
+    ethosSection.hidden = true;
+  }
+  setFieldHTML('sb-ethos-tags', '');
+  setFieldText('sb-ethos-blurb', '');
+  setFieldText('sb-ethos-score', '—');
+
+  const storySection = document.getElementById('sb-story');
+  if (storySection) storySection.classList.add('hidden');
+  setFieldText('sb-story-text', '');
+  setFieldHTML('sb-traits', '');
+}
+
 function setFieldText(id, value) {
   const el = document.getElementById(id);
   if (el) el.textContent = value ?? '';
@@ -1719,21 +1917,6 @@ function bindUI() {
     clusterToggle.addEventListener('change', () => {
       state.clusterMode = !!clusterToggle.checked;
       if (state.activeView === 'dots') renderCurrentView();
-    });
-  }
-
-  const timeSlider = document.getElementById('time-slider');
-  if (timeSlider && !timeSlider.dataset.threeBound) {
-    const label = document.getElementById('time-label');
-    timeSlider.dataset.threeBound = '1';
-    timeSlider.addEventListener('input', () => {
-      const pct = clamp(parseInt(timeSlider.value || '0', 10), 0, 100) / 100;
-      if (state.timeline.enabled && Number.isFinite(state.timeline.start) && Number.isFinite(state.timeline.end)) {
-        const span = state.timeline.end - state.timeline.start;
-        state.timeline.value = Math.round(state.timeline.start + span * pct);
-        if (label) label.textContent = formatDate(state.timeline.value);
-        if (state.activeView === 'flow' || state.activeView === 'rhythm') rebuildLinks();
-      }
     });
   }
 
@@ -2116,10 +2299,6 @@ function isChecked(id, fallback) {
   return !!el.checked;
 }
 
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
-
 function toFinite(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
@@ -2183,41 +2362,4 @@ function buildSimpleEdges(edges, kind) {
       return { id: `${kind}-${idx}`, source, target, weight: weight || 1, kind };
     })
     .filter(Boolean);
-}
-
-function buildTransferEdges(list) {
-  const sales = [];
-  const transfers = [];
-  const mints = [];
-  const mixed = [];
-  for (let i = 0; i < list.length; i++) {
-    const edge = list[i];
-    const a = Number(edge?.a);
-    const b = Number(edge?.b);
-    if (!state.nodeMap.has(a) || !state.nodeMap.has(b)) continue;
-    const type = String(edge?.type || '').toLowerCase();
-    const item = {
-      id: `tx-${i}`,
-      source: a,
-      target: b,
-      weight: Number(edge?.count ?? 1) || 1,
-      kind: type || 'transfer'
-    };
-    if (type === 'sale') {
-      sales.push(item);
-      transfers.push({ ...item, kind: 'sell' });
-    } else if (type === 'sell') {
-      transfers.push({ ...item, kind: 'sell' });
-    } else if (type === 'buy') {
-      transfers.push({ ...item, kind: 'buy' });
-    } else if (type === 'mint') {
-      mints.push(item);
-    } else if (type === 'mixed') {
-      mixed.push(item);
-    } else {
-      const normalized = type || 'transfer';
-      transfers.push({ ...item, kind: normalized });
-    }
-  }
-  return { sales, transfers, mints, mixed };
 }

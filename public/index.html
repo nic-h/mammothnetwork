@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/client/styles/fonts.css?v=20250919-2">
   <!-- Three.js bundle loaded via engine.js; no PIXI -->
   <link rel="stylesheet" href="/client/styles/tokens.css?v=20250919-2">
+  <link rel="stylesheet" href="/client/styles/base.css?v=20250919-2">
   <link rel="stylesheet" href="/style.css?v=20250919-2">
 </head>
 <body>
@@ -22,7 +23,7 @@
       <input
         id="search"
         type="search"
-        class="tooltipped"
+        class="input tooltipped"
         placeholder="Search token ID / ENS / 0x wallet"
         aria-label="Search token, ENS name, or 0x wallet address"
         autocomplete="off"
@@ -35,8 +36,8 @@
     <aside class="left-panel panel" id="left-panel">
       <div class="controls-section">
         <!-- VIEW at top; header left-aligned like others -->
-        <div class="view-selector panel-view" aria-label="Views" style="margin-bottom: var(--pad-12);">
-          <label class="panel-title" style="text-align:left;" for="view">VIEW</label>
+        <div class="view-selector panel-view" aria-label="Views">
+          <label class="panel-title" for="view">VIEW</label>
           <select id="view" aria-label="Views" hidden>
             <option value="dots">DOTS — OWNERSHIP STATE</option>
             <option value="flow">FLOW — MARKET FLOWS</option>
@@ -44,10 +45,10 @@
             <option value="rhythm">RHYTHM — TIME × PRICE</option>
           </select>
           <div class="view-buttons" id="view-buttons" role="group" aria-label="Views">
-            <button type="button" class="view-btn active" data-view-btn="dots">DOTS — OWNERSHIP STATE</button>
-            <button type="button" class="view-btn" data-view-btn="flow">FLOW — MARKET FLOWS</button>
-            <button type="button" class="view-btn" data-view-btn="tree">TREE — LIFECYCLE</button>
-            <button type="button" class="view-btn" data-view-btn="rhythm">RHYTHM — TIME × PRICE</button>
+            <button type="button" class="btn view-btn active" data-view-btn="dots">DOTS — OWNERSHIP STATE</button>
+            <button type="button" class="btn view-btn" data-view-btn="flow">FLOW — MARKET FLOWS</button>
+            <button type="button" class="btn view-btn" data-view-btn="tree">TREE — LIFECYCLE</button>
+            <button type="button" class="btn view-btn" data-view-btn="rhythm">RHYTHM — TIME × PRICE</button>
           </div>
           <div class="layer-toggle" id="cluster-mode-row" hidden>
             <label>Cluster mode</label><input type="checkbox" id="dots-cluster-mode">
@@ -64,15 +65,10 @@
         </div>
         <div class="edge-controls" data-ctrl="edges">
           <label data-ctrl-label>LINK DENSITY</label>
-          <input type="range" id="edges-slider" min="0" max="500" value="200">
+          <input class="slider" type="range" id="edges-slider" min="0" max="500" value="200">
           <span id="edge-count">200</span>
         </div>
-        <div class="edge-controls" id="time-controls" data-ctrl="time" style="margin-top: var(--pad-12);" hidden>
-          <label data-ctrl-label>TIME</label>
-          <input type="range" id="time-slider" min="0" max="100" value="100">
-          <span id="time-label"></span>
-        </div>
-        <div class="layer-toggles" style="margin-top: var(--pad-12);">
+        <div class="layer-toggles">
           <h4>DISPLAY</h4>
           <div class="layer-toggle"><label>Ambient Edges</label><input type="checkbox" id="ambient-edges"></div>
           <div class="layer-toggle"><label>Whale Bubbles</label><input type="checkbox" id="layer-bubbles"></div>
@@ -108,7 +104,7 @@
       <div class="traits-section">
         <div class="panel-title traits-header" role="button" tabindex="0" aria-expanded="false" aria-controls="traits-body">TRAITS <span class="twist">▶</span></div>
         <div id="traits-body" class="traits-body">
-          <button id="clear-filters" class="btn btn--preset preset-btn" style="width:100%;margin-bottom: var(--pad-12);">CLEAR FILTERS</button>
+          <button id="clear-filters" class="btn btn--ghost">CLEAR FILTERS</button>
           <div id="traits-container"></div>
         </div>
       </div>
@@ -117,7 +113,7 @@
     <aside class="right-panel panel" id="sidebar">
       <div class="sidebar-empty" id="sidebar-empty">Select a node…</div>
       <div class="sidebar-body hidden" id="sidebar-body">
-        <img id="thumb" alt="thumb" class="sidebar-thumb" style="display:none">
+        <img id="thumb" alt="thumb" class="sidebar-thumb">
         <div class="token-header">
           <div class="token-id" id="sb-id"></div>
           <div class="token-name" id="sb-name"></div>

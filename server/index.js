@@ -471,41 +471,42 @@ app.get(['/api/graph', '/api/network-graph'], (req, res) => {
   return sendWithCaching(req, res, key, result);
 });
 
-// Aggregated, directed transfer edges between wallets mapped to representative tokens
-// Query params: limit (max edges, default 500), nodes (cap token id space, default 10000)
+// Aggregated, directed sales edges between wallets (owner -> owner)
+// Returns shape: { from_addr, to_addr, sales_count, sales_count_30d, total_trades, last_ts }
 app.get('/api/transfer-edges', (req, res) => {
   if (!haveDb || !db) return res.json([]);
   const limit = clamp(parseInt(req.query.limit || '500', 10), 1, 2000);
-  const N = clamp(parseInt(req.query.nodes || '10000', 10), 100, 10000);
+  const now = Math.floor(Date.now() / 1000);
+  const windowStart = now - (30 * 86400);
   try {
     const rows = db.prepare(`
-      SELECT LOWER(from_addr) AS a,
-             LOWER(to_addr)   AS b,
-             COUNT(1)         AS cnt,
-             SUM(CASE WHEN price IS NOT NULL AND price>0 THEN 1 ELSE 0 END) AS sales,
-             SUM(CASE WHEN (price IS NULL OR price<=0) AND (event_type IS NULL OR event_type<>'mint') THEN 1 ELSE 0 END) AS transfers,
-             SUM(CASE WHEN (event_type='mint' OR from_addr IS NULL OR from_addr='') THEN 1 ELSE 0 END) AS mints
+      SELECT
+        LOWER(from_addr) AS from_addr,
+        LOWER(to_addr)   AS to_addr,
+        COUNT(1)         AS total_trades,
+        SUM(CASE WHEN price IS NOT NULL AND price > 0 THEN 1 ELSE 0 END) AS sales_count,
+        SUM(CASE WHEN price IS NOT NULL AND price > 0 AND timestamp >= ? THEN 1 ELSE 0 END) AS sales_count_30d,
+        MAX(timestamp)   AS last_ts
       FROM transfers
-      WHERE to_addr IS NOT NULL AND to_addr<>''
-      GROUP BY a,b
-      ORDER BY cnt DESC
+      WHERE from_addr IS NOT NULL AND from_addr <> ''
+        AND to_addr   IS NOT NULL AND to_addr   <> ''
+      GROUP BY from_addr, to_addr
+      HAVING sales_count > 0
+      ORDER BY sales_count DESC
       LIMIT ?
-    `).all(limit);
+    `).all(windowStart, limit);
 
-    const out = [];
-    for (const r of rows) {
-      const a = (r.a || '').toLowerCase();
-      const b = (r.b || '').toLowerCase();
-      if (!a || !b) continue;
-      const aTok = getRepToken(db, a, N);
-      const bTok = getRepToken(db, b, N);
-      if (!aTok || !bTok) continue;
-      let type = 'transfer';
-      if (r.mints > 0 && r.sales === 0) type = 'mint';
-      else if (r.sales > 0 && r.transfers === 0) type = 'sale';
-      else if (r.sales > 0 && r.transfers > 0) type = 'mixed';
-      out.push({ a: aTok, b: bTok, type, count: r.cnt, sales: r.sales, transfers: r.transfers, mints: r.mints });
-    }
+    const out = rows
+      .map(row => ({
+        from_addr: row.from_addr || '',
+        to_addr: row.to_addr || '',
+        sales_count: Number(row.sales_count || 0),
+        sales_count_30d: Number(row.sales_count_30d || 0),
+        total_trades: Number(row.total_trades || 0),
+        last_ts: row.last_ts ? Number(row.last_ts) : null
+      }))
+      .filter(edge => edge.from_addr && edge.to_addr);
+
     res.setHeader('Cache-Control', 'public, max-age=60');
     return res.json(out);
   } catch (e) {
