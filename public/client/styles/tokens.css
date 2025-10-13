@@ -1,30 +1,30 @@
 :root {
-  /* palette */
-  --bg: #040a07;
-  --panel: rgba(11, 19, 14, 0.85);
-  --ui: rgba(9, 16, 12, 0.76);
-  --text: #9bf7b2;
-  --muted: rgba(0, 255, 102, 0.55);
-  --accent: #00ff66;
-  --accent-2: #24ffa5;
-  --danger: #ff5f5f;
-  --grid: rgba(0, 255, 102, 0.08);
-  --frozen: #49a0ff;
-  --dormant: #4e6055;
+  /* brand palette */
+  --bg: #000000;
+  --panel: rgba(0, 255, 0, 0.04);
+  --ui: rgba(0, 255, 0, 0.06);
+  --text: #00ff00;
+  --muted: rgba(0, 255, 0, 0.65);
+  --accent: #00ff00;
+  --accent-2: #33ff66;
+  --danger: #ff3b3b;
+  --grid: rgba(0, 255, 0, 0.12);
+  --frozen: #44a4ff;
+  --dormant: rgba(0, 255, 0, 0.35);
 
   /* graph */
-  --node-fill: rgba(0, 255, 102, 0.25);
-  --node-stroke: rgba(0, 255, 102, 0.8);
-  --link: 80, 220, 142;
-  --link-dim-a: 0.1;
-  --link-focus-a: 0.55;
+  --node-fill: rgba(0, 255, 0, 0.28);
+  --node-stroke: rgba(0, 255, 0, 0.95);
+  --link: 0, 255, 0;
+  --link-dim-a: 0.12;
+  --link-focus-a: 0.65;
 
   /* typography */
-  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-mono: 'Fira Code', Menlo, 'SFMono-Regular', 'Courier New', monospace;
+  --font-sans: var(--font-mono);
   --fs-xs: 11px;
   --fs-sm: 12px;
-  --fs-md: 14px;
+  --fs-md: 13px;
   --fs-lg: 16px;
 
   /* spacing */
@@ -34,18 +34,11 @@
   --space-4: 16px;
 
   /* radii */
-  --radius: 10px;
-  --radius-lg: 14px;
+  --radius: 8px;
+  --radius-lg: 12px;
 
   /* borders & elevation */
-  --border-color: rgba(0, 255, 102, 0.18);
+  --border-color: rgba(0, 255, 0, 0.25);
   --border: 1px solid var(--border-color);
-  --shadow: 0 0 0 1px rgba(0, 255, 102, 0.08), 0 16px 48px rgba(0, 20, 10, 0.75);
-}
-
-html,
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-mono);
+  --shadow: 0 0 0 1px rgba(0, 255, 0, 0.08), 0 0 36px rgba(0, 255, 0, 0.12);
 }
