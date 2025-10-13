@@ -4,20 +4,11 @@ import { hierarchy, pack as d3pack } from 'd3-hierarchy';
 import { buildTopdownTree, attachTopdownTree, highlightBranch } from './layout/treeTopDown.js';
 import { bubbleMapLayout } from './layout/bubbleMap.js';
 
-const css = (typeof window !== 'undefined' && typeof document !== 'undefined')
-  ? getComputedStyle(document.documentElement)
-  : null;
-const theme = (key, fallback) => {
-  const value = css ? css.getPropertyValue(key) : '';
-  return (value || fallback).trim();
-};
-
-const COLORS = {
-  GREEN: new THREE.Color(theme('--green', '#00ff66')),
-  BLUE: new THREE.Color(theme('--blue', '#4488ff')),
-  RED: new THREE.Color(theme('--red', '#ff4466')),
-  FG: new THREE.Color(theme('--fg', '#e6ffe6')),
-  GRAY: new THREE.Color('#666666')
+const TOKENS = {
+  fg: [0, 255, 102],
+  fgBright: [153, 255, 102],
+  blue: [68, 136, 255],
+  gray: [102, 102, 102]
 };
 
 function clamp(value, min, max) {
@@ -60,14 +51,6 @@ function cssColor(name, fallback, alpha = 1) {
   const value = styles.getPropertyValue(name);
   const parsed = parseCssColor(value, alpha);
   return parsed || fallback;
-}
-
-function themeColorRgba(name, fallback, alpha = 1) {
-  const parsed = parseCssColor(theme(name, fallback), alpha);
-  if (parsed) return parsed;
-  const fallbackParsed = parseCssColor(fallback, alpha);
-  if (fallbackParsed) return fallbackParsed;
-  return [0, 0, 0, clamp(Math.round(alpha * 255), 0, 255)];
 }
 
 function rgbaMultiply(rgba, factor) {
@@ -151,19 +134,19 @@ function colorForWallet(type = '', community = null, index = 0) {
 
 const DEFAULT_DECAY = 0.22;
 
-const NODE_COLORS = {
-  active: themeColorRgba('--green', '#00ff66', 0.82),
-  whale: themeColorRgba('--green', '#00ff66', 0.9),
-  frozen: themeColorRgba('--blue', '#4488ff', 0.86),
-  dormant: themeColorRgba('--muted', '#666666', 0.7)
-};
-
 const View = Object.freeze({
   BUBBLE: 'bubble',
   TREE: 'tree',
   FLOW: 'flow',
   RHYTHM: 'rhythm'
 });
+
+const COLORS = {
+  active: [...TOKENS.fg, 210],
+  whale: [...TOKENS.fgBright, 230],
+  frozen: [...TOKENS.blue, 220],
+  dormant: [...TOKENS.gray, 180]
+};
 
 const PANEL_KEY = 'left-panel-hidden';
 
@@ -341,12 +324,8 @@ const API = {
 
   const graph = ForceGraph3D()(stageEl);
   state.graph = graph;
-  const renderer = typeof graph.renderer === 'function' ? graph.renderer() : null;
-  if (renderer?.setClearColor) {
-    renderer.setClearColor(theme('--bg', '#000000'), 1);
-  }
   graph.showNavInfo(false);
-  graph.backgroundColor(theme('--bg', '#000000'));
+  graph.backgroundColor('#020407');
   graph.enableNodeDrag(false);
   graph.enablePointerInteraction(true);
   graph.numDimensions(3);
@@ -900,10 +879,10 @@ function determineNodeCount(tokens, fallback, preset) {
 }
 
 function decideColor({ isWhale, isFrozen, isDormant }) {
-  if (isWhale) return NODE_COLORS.whale.slice();
-  if (isFrozen) return NODE_COLORS.frozen.slice();
-  if (isDormant) return NODE_COLORS.dormant.slice();
-  return NODE_COLORS.active.slice();
+  if (isWhale) return COLORS.whale.slice();
+  if (isFrozen) return COLORS.frozen.slice();
+  if (isDormant) return COLORS.dormant.slice();
+  return COLORS.active.slice();
 }
 
 function fallbackPosition(i, total) {
@@ -1190,7 +1169,7 @@ function computeNodeColor(node, { isSelected, isHovered, isHighlighted }) {
     ? node.displayColor
     : Array.isArray(node.baseColor)
       ? node.baseColor
-      : NODE_COLORS.active;
+      : COLORS.active;
   const color = base.slice();
   let alpha = color[3] ?? 210;
   if (isSelected) alpha = 255;
@@ -1226,7 +1205,7 @@ function buildSprite(node) {
       return existing;
     }
   }
-  const baseColor = node.baseColor || NODE_COLORS.active;
+  const baseColor = node.baseColor || COLORS.active;
   const tint = colorToThree(baseColor);
   const material = new THREE.SpriteMaterial({
     map: spriteTexture || null,
