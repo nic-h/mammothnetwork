@@ -196,6 +196,7 @@ const state = {
   traitTokenCache: new Map(),
   traitRequestId: 0
 };
+try { window.__MAMMOTH_STATE = state; } catch {}
 
 function resolveOwnerAddress(candidate) {
   if (!candidate) return null;
@@ -413,6 +414,7 @@ async function initData() {
     const ownerData = buildOwnerDataset(state.preset);
     seedOwnerLayout(ownerData.nodes);
     resolveOwnerCollisions(ownerData.nodes);
+    normalizeOwnerPositions(ownerData.nodes);
     state.ownerNodes = ownerData.nodes;
     state.ownerNodeMap = new Map(ownerData.nodes.map(n => [n.id, n]));
     state.ownerAddressMap = new Map(ownerData.nodes.map(n => [n.addressLc, n]));
@@ -437,11 +439,12 @@ async function initData() {
     updateNodeStyles();
     await loadTraitFilters();
     requestAnimationFrame(() => {
-      try { state.graph.zoomToFit(400, 50); } catch {}
+      fitCameraToNodes(state.nodes);
       try { state.graph.refresh(); } catch {}
       state.lastZoomBucket = currentZoomBucket();
       try { window.__mammothDrawnFrame = true; } catch {}
     });
+    setTimeout(() => { fitCameraToNodes(state.nodes); }, 1500);
     updateViewControls();
   } finally {
     stopUILoad();
@@ -741,6 +744,33 @@ function resolveOwnerCollisions(nodes) {
   }
 }
 
+function normalizeOwnerPositions(nodes) {
+  if (!Array.isArray(nodes) || !nodes.length) return;
+  let maxDist = 0;
+  nodes.forEach(node => {
+    const x = Number(node.x) || 0;
+    const y = Number(node.y) || 0;
+    const z = Number(node.z) || 0;
+    const dist = Math.hypot(x, y, z);
+    if (dist > maxDist) maxDist = dist;
+  });
+  if (maxDist <= 0) return;
+  const limit = 550;
+  if (maxDist <= limit) return;
+  const scale = limit / maxDist;
+  nodes.forEach(node => {
+    node.x = (Number(node.x) || 0) * scale;
+    node.y = (Number(node.y) || 0) * scale;
+    node.z = (Number(node.z) || 0) * scale;
+    node.fx = (Number(node.fx) || 0) * scale;
+    node.fy = (Number(node.fy) || 0) * scale;
+    node.fz = (Number(node.fz) || 0) * scale;
+    node.homeX = (Number(node.homeX) || 0) * scale;
+    node.homeY = (Number(node.homeY) || 0) * scale;
+    node.homeZ = (Number(node.homeZ) || 0) * scale;
+  });
+}
+
 function performCollisionSweeps(nodes, cellSize, maxSweeps) {
   let maxOverlap = Infinity;
   const padding = COLLISION_PADDING;
@@ -883,6 +913,55 @@ function decideColor({ isWhale, isFrozen, isDormant }) {
   if (isFrozen) return COLORS.frozen.slice();
   if (isDormant) return COLORS.dormant.slice();
   return COLORS.active.slice();
+}
+
+function fitCameraToNodes(nodes) {
+  if (!state.graph || !Array.isArray(nodes) || !nodes.length) return;
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  nodes.forEach(node => {
+    const x = Number(node?.x) || 0;
+    const y = Number(node?.y) || 0;
+    const z = Number(node?.z) || 0;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (z < minZ) minZ = z;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+    if (z > maxZ) maxZ = z;
+  });
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return;
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const centerZ = (minZ + maxZ) / 2;
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  const spanZ = maxZ - minZ;
+  const span = Math.max(spanX, spanY, spanZ, 1);
+  const distance = Math.max(6000, span * 2.5);
+  state.cameraFit = { centerX, centerY, centerZ, span, distance };
+  try {
+    const camera = state.graph.camera?.();
+    if (camera) {
+      camera.position.set(centerX, centerY, distance);
+      camera.lookAt(centerX, centerY, centerZ);
+    }
+    if (state.controls?.object) {
+      state.controls.object.position.set(centerX, centerY, distance);
+      state.controls.target.set(centerX, centerY, centerZ);
+      if (typeof state.controls.update === 'function') state.controls.update();
+    } else if (typeof state.graph.cameraPosition === 'function') {
+      state.graph.cameraPosition(
+        { x: centerX, y: centerY, z: distance },
+        { x: centerX, y: centerY, z: centerZ },
+        0
+      );
+    }
+  } catch {}
 }
 
 function fallbackPosition(i, total) {
@@ -1188,11 +1267,10 @@ function colorToThree(rgba, boost = 1) {
   return { r: scale(r), g: scale(g), b: scale(b) };
 }
 
-function scheduleZoomToFit(padding = 80, duration = 600) {
+function scheduleZoomToFit() {
   if (!state.graph) return;
-  requestAnimationFrame(() => {
-    try { state.graph.zoomToFit(duration, padding); } catch {}
-  });
+  const nodes = Array.from(state.viewNodes?.values?.() || state.nodes || []);
+  requestAnimationFrame(() => fitCameraToNodes(nodes));
 }
 
 function buildSprite(node) {
