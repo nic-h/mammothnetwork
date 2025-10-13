@@ -747,27 +747,44 @@ function resolveOwnerCollisions(nodes) {
 function normalizeOwnerPositions(nodes) {
   if (!Array.isArray(nodes) || !nodes.length) return;
   let maxDist = 0;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
   nodes.forEach(node => {
     const x = Number(node.x) || 0;
     const y = Number(node.y) || 0;
     const z = Number(node.z) || 0;
     const dist = Math.hypot(x, y, z);
     if (dist > maxDist) maxDist = dist;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
   });
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const centerZ = (minZ + maxZ) / 2;
   if (maxDist <= 0) return;
   const limit = 550;
-  if (maxDist <= limit) return;
-  const scale = limit / maxDist;
+  const scale = maxDist > limit ? limit / maxDist : 1;
   nodes.forEach(node => {
-    node.x = (Number(node.x) || 0) * scale;
-    node.y = (Number(node.y) || 0) * scale;
-    node.z = (Number(node.z) || 0) * scale;
-    node.fx = (Number(node.fx) || 0) * scale;
-    node.fy = (Number(node.fy) || 0) * scale;
-    node.fz = (Number(node.fz) || 0) * scale;
-    node.homeX = (Number(node.homeX) || 0) * scale;
-    node.homeY = (Number(node.homeY) || 0) * scale;
-    node.homeZ = (Number(node.homeZ) || 0) * scale;
+    const x = (Number(node.x) || 0) - centerX;
+    const y = (Number(node.y) || 0) - centerY;
+    const z = (Number(node.z) || 0) - centerZ;
+    node.x = x * scale;
+    node.y = y * scale;
+    node.z = z * scale;
+    node.fx = ((Number(node.fx) || 0) - centerX) * scale;
+    node.fy = ((Number(node.fy) || 0) - centerY) * scale;
+    node.fz = ((Number(node.fz) || 0) - centerZ) * scale;
+    node.homeX = ((Number(node.homeX) || 0) - centerX) * scale;
+    node.homeY = ((Number(node.homeY) || 0) - centerY) * scale;
+    node.homeZ = ((Number(node.homeZ) || 0) - centerZ) * scale;
   });
 }
 
@@ -942,7 +959,7 @@ function fitCameraToNodes(nodes) {
   const spanY = maxY - minY;
   const spanZ = maxZ - minZ;
   const span = Math.max(spanX, spanY, spanZ, 1);
-  const distance = Math.max(6000, span * 2.5);
+  const distance = Math.max(650, span * 0.95);
   state.cameraFit = { centerX, centerY, centerZ, span, distance };
   try {
     const camera = state.graph.camera?.();
@@ -1267,10 +1284,13 @@ function colorToThree(rgba, boost = 1) {
   return { r: scale(r), g: scale(g), b: scale(b) };
 }
 
-function scheduleZoomToFit() {
+function scheduleZoomToFit(padding = 160, duration = 900) {
   if (!state.graph) return;
   const nodes = Array.from(state.viewNodes?.values?.() || state.nodes || []);
-  requestAnimationFrame(() => fitCameraToNodes(nodes));
+  requestAnimationFrame(() => {
+    try { state.graph.zoomToFit(duration, padding); } catch {}
+    fitCameraToNodes(nodes);
+  });
 }
 
 function buildSprite(node) {
