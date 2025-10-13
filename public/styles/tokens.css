@@ -1,0 +1,20 @@
+:root {
+  /* colors */
+  --bg: #000000;
+  --fg: #e6ffe6;
+  --muted: #9aa39c;
+  --green: #00ff66;
+  --blue: #4488ff;
+  --red: #ff4466;
+  --grid-alpha: 0.12;
+
+  /* type */
+  --font-mono: "Fira Code", Menlo, SFMono-Regular, monospace;
+  --font-sans: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+
+  /* layout */
+  --header-h: 40px;
+  --panel-w: 320px;
+  --radius: 14px;
+  --shadow: 0 0 0 1px rgba(0,255,102,.15), 0 10px 20px rgba(0,0,0,.35);
+}

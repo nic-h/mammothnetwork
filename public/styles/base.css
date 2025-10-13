@@ -1,0 +1,40 @@
+@import url('https://rsms.me/inter/inter.css');
+@import url('https://cdn.jsdelivr.net/npm/firacode@6.2.0/distr/fira_code.css');
+
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 var(--font-sans);
+}
+code, pre, .mono { font-family: var(--font-mono); }
+a { color: var(--green); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* App shell that matches Mammoths Terminal */
+#header {
+  position: fixed; top:0; left:0; right:0; height: var(--header-h);
+  background: rgba(0,0,0,.65); display:flex; align-items:center; gap:12px; padding: 0 12px;
+  border-bottom: 1px solid rgba(255,255,255,.07); z-index: 20;
+}
+#left, #right {
+  position: fixed; top: var(--header-h); bottom: 0; width: var(--panel-w); z-index: 12;
+}
+#left { left: 0; border-right: 1px solid rgba(255,255,255,.07); }
+#right { right: 0; border-left: 1px solid rgba(255,255,255,.07); }
+
+#canvas-wrap { position: absolute; top: var(--header-h); left: var(--panel-w); right: var(--panel-w); bottom: 0; }
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255,255,255,var(--grid-alpha)) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,var(--grid-alpha)) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.btn { padding: 8px 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: rgba(255,255,255,.03); color: var(--fg); }
+.btn-primary { border-color: rgba(0,255,102,.3); box-shadow: var(--shadow); }
+.badge { padding: 2px 6px; border-radius: 999px; font: 12px/1 var(--font-mono); border: 1px solid rgba(255,255,255,.15); }
+.badge.green { border-color: rgba(0,255,102,.35); color: var(--green); }
