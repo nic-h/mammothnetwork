@@ -37,6 +37,17 @@ Current Status
 - Hovering a node now dims its neighbors and enlarges the target; clicks focus the right sidebar and keep the camera centered.
 - Panels and header sit above the canvas (orbit/pan pauses whenever the cursor is over UI); the time slider only appears in FLOW/RHYTHM, and “Link density” reflects the active view.
 
+### Known Regressions (Oct 2025)
+> These are active issues in the current branch. Treat them as high-priority fixes before shipping.
+
+- Bubble view is rendering **owner nodes** (≈9.1k wallets) instead of token nodes (10k NFTs). Consequences: sidebar lacks artwork/sale data, dormant/frozen coloring is wrong, and the layout collapses into dense rings.
+- A temporary **2‑D normalization** squeezes the owner layout into a flat disc, removing the depth spacing that avoided overlap. Combined with a single neon-green palette the clusters appear as a solid blob.
+- **Double Three.js import** (bundle + engine) triggers the browser warning “Multiple instances of Three.js”, causes GPU stalls, and breaks hover/click feedback. The build must return to a single three module.
+- Brand palette drift: frozen nodes are no longer blue (#4488ff) and dormant nodes are not the dark green/gray from the design tokens. Whale state uses the same green as active.
+- UI toggles (“Ambient edges”, “Whale bubbles”, “Relationships”, “Transactions”) still exist but their behaviors were partially removed when the view switched to owners; link density slider currently adjusts nothing.
+- Sidebar regressions: thumbnails, Ethos score, sale metrics, and trait rollups are missing because the node selection is not tied to `tokenNodes`.
+- First paint is noticeably slower (spins for several seconds) because the engine rebuilds sprites twice and merges owner edges on the fly. The older build relied on precomputed token presets and a single renderer init.
+
 Local setup
 1. `npm ci`
 2. `npm run db:migrate`

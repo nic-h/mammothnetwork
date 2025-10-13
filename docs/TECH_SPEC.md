@@ -31,6 +31,23 @@ Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → fallback t
 - Render port: server can run on 3000 or 3001; set `PORT` in env. Render config should match.
 - Presets beyond the current six (Hubs, Discovery, Activity timeline, etc.) are planned — not implemented yet.
 
+## UI Control Reference
+| Control | Intent | Data Source / Implementation Notes |
+|---------|--------|-------------------------------------|
+| **Link density** slider | Adjusts `state.edgeCap` (0‑500) and rebuilds edges so sparse or dense graphs can be inspected. | Currently ineffective because the bubble view is using owner nodes with no compatible edge layers. |
+| **Ambient edges** | Renders faint ownership edges to provide spatial context while no node is selected. | Depends on `state.rawEdges.ambient` (cloned holder edges). Missing while owner nodes are active. |
+| **Whale bubbles** | Expands nodes flagged as whales (wallet classification includes “whale”). Highlights treasury/large holders. | Requires token nodes with `isWhale` metadata. |
+| **Relationships ▸ Ownership / Rare traits** | Toggles long-term co-ownership and rare-trait similarity edges. | Backed by `/api/graph` holders + traits preset caches. |
+| **Transactions ▸ Recent trades / Sales / Transfers / Mints** | Filters directed trade edges built from `/api/transfer-edges` (sales_count, transfers, mints). | Token graph only; owner view shows nothing. |
+
+## Implementation Drift (Reality vs Spec — Oct 2025)
+- Bubble view renders **ownerNodes** instead of `tokenNodes`, breaking thumbnails, sales metrics, trait filters, and the whale palette.
+- A stopgap **2‑D normalization** flattens the layout, causing overlapping neon discs and hiding the intended grid background.
+- The bundle imports **Three.js twice** (engine loader + bundled module), leading to the browser warning “Multiple instances of Three.js,” GPU stalls, and missing hover/click state updates.
+- Brand palette drift: frozen nodes are no longer #4488ff, dormant nodes lack the dark green/gray tone, and whales share the active color.
+- Grid overlay and hover tooltips were removed during recent styling changes; reinstate the original CSS overlay and sprite material logic.
+- Link-density slider, ambient edges, and whale bubble toggles are present in the UI but disconnected from data while owner nodes are in use.
+
 ## API Surface
 - `/api/graph` (alias `/api/network-graph`) — nodes+edges with ETag
 - `/api/preset-data` — compact arrays for views (see “Preset Data Payload”)
