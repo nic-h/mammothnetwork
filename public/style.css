@@ -413,33 +413,44 @@ select.input {
 
 .trait-group-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--space-1);
 }
 
 .trait-filter {
-  composes: chip;
-}
-
-.trait-filter {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: 0 var(--space-2);
-  height: 28px;
-  border-radius: 999px;
-  background: var(--ui);
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 6px 10px;
   border: var(--border);
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  border-radius: 6px;
+  background: transparent;
+  font-size: var(--fs-sm);
+  text-transform: none;
+  letter-spacing: 0;
   cursor: pointer;
-  transition: filter 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease;
 }
 
-.trait-filter:hover { filter: brightness(1.04); }
-.trait-filter.active { background: rgba(var(--link), 0.2); border-color: rgba(var(--link), 0.4); }
-.trait-filter-count { font-family: var(--font-mono); color: var(--muted); }
+.trait-filter:hover {
+  background: rgba(0, 255, 102, 0.08);
+}
+
+.trait-filter.active {
+  background: rgba(0, 255, 102, 0.16);
+  border-color: rgba(0, 255, 102, 0.4);
+}
+
+.trait-filter-label {
+  font-family: var(--font-sans);
+}
+
+.trait-filter-count {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
 
 #clear-filters {
   width: 100%;
@@ -512,11 +523,31 @@ select.input {
 
 .traits-grid {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--space-1);
 }
 
-.traits-grid .chip {
+.traits-grid .trait-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+}
+
+.traits-grid .trait-row .trait-key {
+  min-width: 96px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.traits-grid .trait-row .trait-sep {
+  opacity: 0.6;
+}
+
+.traits-grid .trait-row .trait-value {
   font-family: var(--font-mono);
 }
 
