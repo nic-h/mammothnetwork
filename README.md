@@ -8,6 +8,15 @@ New here? Start with Onboarding:
 - docs/TECH_SPEC.md — deeper spec for views/data/engine
 - docs/DEV_TRIAGE.md — quick triage to verify data, endpoints, and canvas
 
+> ⚠️ **Non‑negotiable rule: every renderer view must visualize real Mammoths data.**
+>
+> - Use the hydrated SQLite database (`tokens`, `transfers`, `attributes`, etc.) and the precomputed layout endpoints (`/api/precomputed/tokens`, `/api/precomputed/wallets`, `/api/precomputed/edges`).
+> - Synthetic or “pretty” fallback layouts (spirals, donuts, random grids) are forbidden in the UI. If data is missing, surface an explicit error state rather than fabricating geometry.
+> - Frozen/dormant/whale state, sale metrics, and owner clustering come from the DB; do not hard‑code colors or sizes. The renderer must honor those flags.
+> - The only acceptable fallback is the legacy demo graph returned by `generateFallbackGraph()` **for automated smoke tests when the DB is empty**. It must never render in production or during normal local work.
+
+Keep this in mind whenever you touch `client/three/app.js`, jobs, or docs—if the visualization is not telling the story of the live dataset, it’s a regression.
+
 At‑a‑Glance System Overview
 - Frontend: Three.js + 3d-force-graph (custom gradient sprites, additive blending, LOD-aware edge throttling).
 - Renderer source: `client/three/app.js` bundles to `public/three.app.js` via `npm run build:client`.

@@ -5,13 +5,15 @@ Status: living specification for the repo. This doc tracks intent (spec) and imp
 ## Summary
 Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownership clusters, trading patterns, and trait relationships. The center canvas now runs on a Three.js + 3d-force-graph renderer with custom gradient sprites, additive blending, and zoom-aware level-of-detail controls. Data is served by a SQLite backend with cached endpoints and compact “preset-data” arrays.
 
+> **Data integrity mandate** — All layouts, node metadata, and styling cues must be derived from the hydrated SQLite database or the `/api/precomputed/*` endpoints built from it. Randomized “pretty” fallbacks (spirals, donuts, placeholder grids) are forbidden in the shipped UI. If upstream data is missing, the renderer should display an explicit empty/error state instead of fabricating geometry. The only sanctioned fallback is the legacy demo graph used by headless smoke tests when the DB has zero rows.
+
 ### Simple Views
 - DOTS — ownership state defaults; additive sprite glow, whale bubble toggle, optional cluster mode (circle packing via d3-hierarchy).
 - FLOW — curved transfer/sale arcs with directional particles, color-coded by trade type, filtered by the time slider.
 - TREE — radial lineage layout using d3.tree around the focused token or wallet; forces paused for clarity.
 - RHYTHM — time × price projection; recent activity pulses green, dormant holdings fade red, Z-axis lifts by recency.
 
-Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → fallback to live `/api/graph` nodes/edges (ensures canvas never blank).
+Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → live `/api/graph` nodes/edges. **Do not fabricate layouts** beyond a minimal collision pass—if both APIs are empty, the UI must surface an error state rather than draw synthetic shapes.
 
 ## Alignment Snapshot
 - Rendering: Three.js + 3d-force-graph (custom sprites, animated pulse, link styles) — Implemented

@@ -8,6 +8,7 @@ This guide gives Codex (and any new engineer) the minimum context needed to make
 - Data jobs: scripts in `jobs/` hydrate SQLite from Modularium + Ethos; run them with `node --env-file=.env jobs/<name>.js` or `npm run jobs:all`.
 - Graph data: `/api/graph?mode=holders|transfers|traits|wallets&edges=0..500`, `/api/preset-data?nodes=10000`, `/api/transfer-edges`.
 - Details: `/api/token/:id`, `/api/wallet/:address`, `/api/wallet/:address/meta`, `/api/ethos/profile`.
+- **Hard rule:** never ship synthetic layouts. Every view must use the real Mammoths dataset from SQLite or `/api/precomputed/*`. If the DB is empty, show an error/blank state—do **not** fall back to spirals, donuts, or randomized grids, and do not drop dormant/frozen/whale styling cues.
 
 ## How to Run (fast path)
 1. `npm ci`
