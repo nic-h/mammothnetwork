@@ -15,6 +15,13 @@ New here? Start with Onboarding:
 > - Frozen/dormant/whale state, sale metrics, and owner clustering come from the DB; do not hard‑code colors or sizes. The renderer must honor those flags.
 > - The only acceptable fallback is the legacy demo graph returned by `generateFallbackGraph()` **for automated smoke tests when the DB is empty**. It must never render in production or during normal local work.
 
+### Immediately Outstanding Renderer Work
+We are still violating the rule above—the current DOTS/BUBBLE/FLOW/TREE/RHYTHM views collapse into synthetic rings/bands and wash out the dormant/frozen palette. Fixes **must** happen in this order before adding new features:
+1. **Adopt the real layout**: use the exact coordinates from `token_layout` (`/api/precomputed/tokens`) with only minimal collision smoothing. Do not remap to polar or linear projections.
+2. **Restore the palettes**: ensure dormant (#666666), frozen (#4488ff), whale (danger red), and active green propagate to sprites without being overwritten.
+3. **Differentiate views**: FLOW should highlight transfer edges, TREE should render lineage, RHYTHM should map time × price. Each view must visually express its dataset, not the same token cloud.
+4. **Prove it**: regenerate `npm run test:ui` screenshots and keep them under `artifacts/ui/` so reviewers can verify the fixes.
+
 Keep this in mind whenever you touch `client/three/app.js`, jobs, or docs—if the visualization is not telling the story of the live dataset, it’s a regression.
 
 At‑a‑Glance System Overview

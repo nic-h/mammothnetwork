@@ -10,6 +10,14 @@ This guide gives Codex (and any new engineer) the minimum context needed to make
 - Details: `/api/token/:id`, `/api/wallet/:address`, `/api/wallet/:address/meta`, `/api/ethos/profile`.
 - **Hard rule:** never ship synthetic layouts. Every view must use the real Mammoths dataset from SQLite or `/api/precomputed/*`. If the DB is empty, show an error/blank state—do **not** fall back to spirals, donuts, or randomized grids, and do not drop dormant/frozen/whale styling cues.
 
+## Renderer TODOs (Do these before anything else)
+1. **Stop fabricating geometry** – strip the radial/linear projections from `buildTokenNodes`; read the canonical `token_layout` coordinates and only apply minimal collision smoothing.
+2. **Restore color semantics** – ensure dormant (#666), frozen (#4488ff), whale (danger red), active green survive all cloning/transforms.
+3. **Re-enable view-specific logic** – FLOW should render transfer arcs, TREE the lineage layout, RHYTHM the time × price projection. If all views look identical, you’re ignoring the data.
+4. **Regenerate screenshots** – after the fixes, run `npm run test:ui` and commit the updated captures to `artifacts/ui/` as proof.
+
+Treat the list above as blocking work. Do not add new features until these regressions are fixed and demonstrated with screenshots.
+
 ## How to Run (fast path)
 1. `npm ci`
 2. Load env + migrate:

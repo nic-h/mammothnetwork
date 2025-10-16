@@ -15,6 +15,12 @@ Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownershi
 
 Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → live `/api/graph` nodes/edges. **Do not fabricate layouts** beyond a minimal collision pass—if both APIs are empty, the UI must surface an error state rather than draw synthetic shapes.
 
+### Critical Fixes (Oct 2025)
+- **Layout reset**: DOTS/BUBBLE/FLOW/TREE/RHYTHM must consume the canonical XY from `token_layout` (via `/api/precomputed/tokens`). Remove the radial/band projections currently in `buildTokenNodes`.
+- **Palette restoration**: dormant/frozen/whale colors need to survive the cloning pipeline; sprites must respect the brand tokens instead of rendering all-white.
+- **View separation**: FLOW should render transfer arcs, TREE should render the lineage tree, RHYTHM should project time×price. If a change makes the views visually identical, it is a regression.
+- **Verification**: keep an up-to-date set of `npm run test:ui` screenshots in `artifacts/ui/` showing each view with real data. PRs touching the renderer must refresh these captures.
+
 ## Alignment Snapshot
 - Rendering: Three.js + 3d-force-graph (custom sprites, animated pulse, link styles) — Implemented
 - Nodes: colored circles only (no per-node images) — Implemented

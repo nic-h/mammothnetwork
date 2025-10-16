@@ -37,7 +37,7 @@ curl -s http://localhost:3000/api/precomputed/tokens | jq '.tokens|length'
 ```
 Notes:
 - If these return HTML, restart the server (old process didn’t load the new routes).
-- Simple views (DOTS/FLOW/TREE/RHYTHM) may read directly from `/api/graph` when the precompute tables are empty, **but they must still render the real data from SQLite**. Synthetic spirals/donuts are a bug—if both sources are empty, surface an error instead of drawing random geometry.
+- Simple views (DOTS/FLOW/TREE/RHYTHM) may read directly from `/api/graph` when the precompute tables are empty, **but they must still render the real data from SQLite**. Synthetic spirals/donuts/lines are a bug—if both sources are empty, surface an error instead of drawing random geometry. As a quick check, run `npm run test:ui` and confirm the DOTS screenshot is not a donut/band.
 
 ## 5) Images
 - Files: `data/thumbnails/:id.jpg` (or `data/images/:id.jpg`).
