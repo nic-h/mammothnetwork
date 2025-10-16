@@ -45,6 +45,22 @@ function parseCssColor(value, alpha = 1) {
   return null;
 }
 
+function seededNoise(value) {
+  const s = Math.sin(value * 104729) * 43758.5453123;
+  return s - Math.floor(s);
+}
+
+function jitterForId(id, saleCount = 0, saleRecent = 0) {
+  const base = seededNoise(id);
+  const angle = seededNoise(id + 17) * Math.PI * 2;
+  const magnitude = 18 + 6 * Math.min(6, saleCount) + 12 * Math.min(3, saleRecent);
+  const offset = (base - 0.5) * 0.6;
+  return {
+    x: Math.cos(angle + offset) * magnitude,
+    y: Math.sin(angle - offset) * magnitude
+  };
+}
+
 function cssColor(name, fallback, alpha = 1) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
   const styles = getComputedStyle(document.documentElement);
@@ -448,6 +464,10 @@ function buildTokenNodes(tokens, fallback, preset) {
   const volumeArr = Array.isArray(tokens) ? tokens.map(t => Number(t.volumeAllTia ?? 0)) : [];
   const maxVolume = Math.max(1, ...volumeArr.filter(v => Number.isFinite(v)));
   const now = Date.now() / 1000;
+  let maxSaleCount = 0;
+  let maxVolumeUsd = 0;
+
+  const decorated = [];
 
   for (let i = 0; i < total; i++) {
     const id = tokens?.[i]?.id ?? fallback?.[i]?.id ?? (i + 1);
@@ -474,7 +494,9 @@ function buildTokenNodes(tokens, fallback, preset) {
       && rawXY.length >= 2
       && rawXY.every(coord => Number.isFinite(coord))
       && !(Math.abs(rawXY[0]) < 1e-4 && Math.abs(rawXY[1]) < 1e-4);
-    const [x, y] = hasValidXY ? rawXY : fallbackPosition(i, total);
+    const [rawX, rawY] = hasValidXY ? rawXY : fallbackPosition(i, total);
+    const theta = Math.atan2(rawY, rawX);
+    const baseRadius = Math.hypot(rawX, rawY) || 1;
     const z = hasValidXY ? normalizedDepth(volume, maxVolume, rarity) : 0;
     const size = nodeSize(saleCount, isWhale) * 12;
 
@@ -484,8 +506,7 @@ function buildTokenNodes(tokens, fallback, preset) {
     const traits = extractTraitsFromToken(token);
     const ownerAddr = token?.owner ?? token?.ownerAddr ?? fall.owner ?? null;
     const holdDays = Number.isFinite(trading.holdDays) ? trading.holdDays : Number(holdDaysArr[idx] ?? fall.hold_days ?? null);
-
-    nodes.push({
+    const record = {
       id,
       ownerIndex: oi,
       typeRaw,
@@ -499,30 +520,61 @@ function buildTokenNodes(tokens, fallback, preset) {
       volume,
       volumeUsd,
       saleCount30d,
-      x,
-      y,
+      x: rawX,
+      y: rawY,
       z,
       baseColor,
       displaySize: size,
       displayColor: baseColor.slice(),
       baseSize: size,
-      homeX: x,
-      homeY: y,
+      homeX: rawX,
+      homeY: rawY,
       homeZ: z,
-      fx: x,
-      fy: y,
+      fx: rawX,
+      fy: rawY,
       fz: z,
       ownerAddr,
       ethos,
       trading,
       story,
       traits,
-      holdDays: Number.isFinite(holdDays) ? holdDays : null
-    });
-    const created = nodes[nodes.length - 1];
-    applyNodeImportance(created);
-    created.layoutSource = hasValidXY ? 'precomputed' : 'fallback';
+      holdDays: Number.isFinite(holdDays) ? holdDays : null,
+      __theta: theta,
+      __baseRadius: baseRadius,
+      __layoutSource: hasValidXY ? 'precomputed' : 'fallback'
+    };
+    applyNodeImportance(record);
+    nodes.push(record);
+    decorated.push(record);
+    if (saleCount > maxSaleCount) maxSaleCount = saleCount;
+    if (volumeUsd > maxVolumeUsd) maxVolumeUsd = volumeUsd;
   }
+  const logMaxVolumeUsd = Math.log1p(Math.max(1, maxVolumeUsd));
+  decorated.forEach(node => {
+    const rarityNorm = 1 - clamp(node.rarity ?? 0.5, 0, 1);
+    const saleNorm = maxSaleCount > 0 ? clamp(node.saleCount / maxSaleCount, 0, 1) : 0;
+    const volumeNorm = logMaxVolumeUsd > 0 ? Math.log1p(Math.max(0, node.volumeUsd || 0)) / logMaxVolumeUsd : 0;
+    const activityNorm = Number.isFinite(node.daysSince) ? clamp(1 - (node.daysSince / 365), 0, 1) : 0;
+    const freshnessBoost = Number.isFinite(node.trading?.holdDays) ? clamp(1 - (node.trading.holdDays / 365), 0, 1) : 0;
+    const radialScore = clamp((saleNorm * 0.3) + (volumeNorm * 0.25) + (activityNorm * 0.25) + (rarityNorm * 0.15) + (freshnessBoost * 0.05), 0, 1);
+    const baseRadius = 140 + radialScore * 720;
+    const jitter = jitterForId(node.id, node.saleCount, node.saleCount30d);
+    const theta = Number.isFinite(node.__theta) ? node.__theta : 0;
+    const x = Math.cos(theta) * baseRadius + jitter.x;
+    const y = Math.sin(theta) * baseRadius + jitter.y;
+    node.x = x;
+    node.y = y;
+    node.z = (volumeNorm * 180) - 90;
+    node.fx = x;
+    node.fy = y;
+    node.fz = node.z;
+    node.homeX = x;
+    node.homeY = y;
+    node.homeZ = node.z;
+    node.layoutSource = node.__layoutSource;
+    delete node.__theta;
+    delete node.__baseRadius;
+  });
   return nodes;
 }
 
