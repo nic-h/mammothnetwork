@@ -636,16 +636,26 @@ app.get('/api/precomputed/tokens', (req, res) => {
   if (!haveDb || !db) return res.status(404).json({ tokens: [] });
   const N = parseInt(req.query.limit || '0', 10) || null;
   try {
-    const list = N ? db.prepare('SELECT * FROM tokens ORDER BY id LIMIT ?').all(N) : db.prepare('SELECT * FROM tokens ORDER BY id').all();
-    const coords = new Map(db.prepare('SELECT token_id, x, y FROM token_layout').all().map(r=>[r.token_id, [r.x, r.y]]));
+    const list = N
+      ? db.prepare('SELECT * FROM tokens ORDER BY id LIMIT ?').all(N)
+      : db.prepare('SELECT * FROM tokens ORDER BY id').all();
+    const coords = new Map(
+      db.prepare('SELECT token_id, x, y FROM token_layout').all().map(r => [r.token_id, [r.x, r.y]])
+    );
     const out = list.map(r => ({
       id: r.id,
-      xy: coords.get(r.id) || [0,0],
-      rarityRank: r.rarity_rank || null,
-      ownerAddr: (r.owner||'').toLowerCase(),
-      lastSaleAt: r.last_sale_ts || null,
-      saleCount: r.sale_count || 0,
-      volumeAllTia: r.total_sale_volume_tia || 0,
+      xy: coords.get(r.id) || [0, 0],
+      rarityRank: r.rarity_rank ?? null,
+      ownerAddr: (r.owner || '').toLowerCase(),
+      lastSaleAt: r.last_sale_ts ?? null,
+      saleCount: r.sale_count ?? 0,
+      volumeAllTia: r.total_sale_volume_tia ?? 0,
+      lastActivity: r.last_activity ?? null,
+      holdDays: r.hold_days ?? null,
+      frozen: !!r.frozen,
+      dormant: !!r.dormant,
+      lastSalePrice: r.last_sale_price ?? null,
+      velocity: r.velocity ?? null
     }));
     return res.json({ tokens: out });
   } catch (e) { return res.status(500).json({ tokens: [] }); }

@@ -3,11 +3,31 @@ export function bubbleMapLayout(nodes, {
   radius = n => Math.max(4, Math.sqrt(n.trades || n.flowMetric || 1)),
   padding = 2
 } = {}) {
-  const groups = new Map();
+  const canonicalCount = nodes.filter(node => Number.isFinite(node?.layoutX) && Number.isFinite(node?.layoutY)).length;
   nodes.forEach(node => {
     const key = groupBy(node);
     node.groupKey = key;
     node.r = radius(node);
+  });
+  if (canonicalCount >= Math.max(1, Math.floor(nodes.length * 0.6))) {
+    nodes.forEach(node => {
+      const x = Number.isFinite(node.layoutX) ? node.layoutX : Number(node.x ?? 0) || 0;
+      const y = Number.isFinite(node.layoutY) ? node.layoutY : Number(node.y ?? 0) || 0;
+      node.x = x;
+      node.y = y;
+      node.z = 0;
+    });
+    resolveCollisions(nodes, {
+      iterations: 2,
+      cellSize: Math.max(24, 2 * medianRadius(nodes) + padding),
+      padding: Math.max(0.8, padding * 0.6)
+    });
+    return nodes;
+  }
+
+  const groups = new Map();
+  nodes.forEach(node => {
+    const key = node.groupKey;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(node);
   });

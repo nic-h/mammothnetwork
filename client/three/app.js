@@ -1,7 +1,7 @@
 import ForceGraph3D from '3d-force-graph';
 import * as THREE from 'three';
 import { hierarchy, pack as d3pack } from 'd3-hierarchy';
-import { buildTopdownTree, attachTopdownTree, highlightBranch } from './layout/treeTopDown.js';
+import { buildTopdownTree, highlightBranch } from './layout/treeTopDown.js';
 import { bubbleMapLayout } from './layout/bubbleMap.js';
 
 const TOKENS = {
@@ -159,7 +159,7 @@ const View = Object.freeze({
 
 const COLORS = {
   active: [...TOKENS.fg, 210],
-  whale: [...TOKENS.fgBright, 230],
+  whale: [...CSS_COLORS.danger.slice(0, 3), 230],
   frozen: [...TOKENS.blue, 220],
   dormant: [...TOKENS.gray, 180]
 };
@@ -197,6 +197,7 @@ const state = {
     mixed: [],
     ambient: []
   },
+  flowLinks: [],
   highlighted: null,
   selectedId: null,
   hoveredId: null,
@@ -381,9 +382,10 @@ const API = {
 async function initData() {
   startUILoad();
   try {
-    const [preset, tokensResp, holdersGraph, traitsGraph, transferEdges] = await Promise.all([
+    const [preset, tokensResp, walletsResp, holdersGraph, traitsGraph, transferEdges] = await Promise.all([
       jfetch(`${API.preset}?nodes=10000`),
       jfetch('/api/precomputed/tokens'),
+      jfetch('/api/precomputed/wallets'),
       jfetch(`${API.graph}?mode=holders&edges=500`),
       jfetch(`${API.graph}?mode=traits&edges=500`),
       jfetch('/api/transfer-edges?limit=1000&nodes=10000')
@@ -397,6 +399,22 @@ async function initData() {
     state.tokenNodes = tokenNodes;
     state.tokenNodeMap = new Map(tokenNodes.map(n => [n.id, n]));
     state.tokenOwnerMap = buildTokenOwnerMap(tokenNodes);
+    try {
+      window.__MAMMOTH_SAMPLE__ = {
+        tokenPayload: tokenList.slice(0, 12),
+        resolvedNodes: tokenNodes.slice(0, 12).map(n => ({
+          id: n.id,
+          x: n.x,
+          y: n.y,
+          layoutSource: n.layoutSource,
+          baseColor: n.baseColor,
+          owner: n.ownerAddr,
+          frozen: n.frozen,
+          dormant: n.dormant,
+          saleCount: n.saleCount
+        }))
+      };
+    } catch {}
 
     state.nodes = state.tokenNodes;
     state.nodeMap = new Map(state.tokenNodes.map(n => [n.id, n]));
@@ -418,10 +436,26 @@ async function initData() {
     state.ownerEdges.flow = tradeEdges.flow;
     state.ownerTopNeighbors = tradeEdges.topNeighbors;
 
-    const ownerData = buildOwnerDataset(state.preset);
-    seedOwnerLayout(ownerData.nodes);
-    resolveOwnerCollisions(ownerData.nodes);
-    normalizeOwnerPositions(ownerData.nodes);
+    const ownerData = buildOwnerDataset(state.preset, Array.isArray(walletsResp?.wallets) ? walletsResp.wallets : []);
+    if (ownerData.usesCanonicalLayout) {
+      applyMinimalLayoutJitter(ownerData.nodes, {
+        radiusOf: node => Math.max(3, (node.displaySize || node.baseSize || 15) * 0.2),
+        maxDistance: 12,
+        padding: 2
+      });
+    } else {
+      seedOwnerLayout(ownerData.nodes);
+      resolveOwnerCollisions(ownerData.nodes);
+      normalizeOwnerPositions(ownerData.nodes);
+    }
+    ownerData.nodes.forEach(node => {
+      node.homeX = Number.isFinite(node.homeX) ? node.homeX : node.x;
+      node.homeY = Number.isFinite(node.homeY) ? node.homeY : node.y;
+      node.homeZ = Number.isFinite(node.homeZ) ? node.homeZ : (node.z || 0);
+      node.fx = node.x;
+      node.fy = node.y;
+      node.fz = node.z || 0;
+    });
     state.ownerNodes = ownerData.nodes;
     state.ownerNodeMap = new Map(ownerData.nodes.map(n => [n.id, n]));
     state.ownerAddressMap = new Map(ownerData.nodes.map(n => [n.addressLc, n]));
@@ -450,8 +484,17 @@ async function initData() {
   }
 }
 
+function isValidCoordinatePair(pair) {
+  return Array.isArray(pair)
+    && pair.length >= 2
+    && Number.isFinite(pair[0])
+    && Number.isFinite(pair[1])
+    && !(Math.abs(pair[0]) < 1e-4 && Math.abs(pair[1]) < 1e-4);
+}
+
 function buildTokenNodes(tokens, fallback, preset) {
   const nodes = [];
+  const tokenMap = new Map(Array.isArray(tokens) ? tokens.map(token => [token.id, token]) : []);
   const fallbackMap = new Map(Array.isArray(fallback) ? fallback.map(n => [n.id, n]) : []);
   const total = determineNodeCount(tokens, fallback, preset);
   const ownerIndex = Array.isArray(preset?.ownerIndex) ? preset.ownerIndex : [];
@@ -464,41 +507,53 @@ function buildTokenNodes(tokens, fallback, preset) {
   const volumeArr = Array.isArray(tokens) ? tokens.map(t => Number(t.volumeAllTia ?? 0)) : [];
   const maxVolume = Math.max(1, ...volumeArr.filter(v => Number.isFinite(v)));
   const now = Date.now() / 1000;
-  let maxSaleCount = 0;
-  let maxVolumeUsd = 0;
-
-  const decorated = [];
 
   for (let i = 0; i < total; i++) {
     const id = tokens?.[i]?.id ?? fallback?.[i]?.id ?? (i + 1);
     if (!Number.isFinite(id)) continue;
-    const token = tokens?.find?.(t => t.id === id) || null;
+    const token = tokenMap.get(id) || null;
     const fall = fallbackMap.get(id) || {};
     const idx = id - 1;
     const oi = ownerIndex[idx] ?? null;
     const typeRaw = (oi != null && ownerType[oi]) ? String(ownerType[oi]).toLowerCase() : '';
     const isWhale = typeRaw.includes('whale');
-    const isFrozen = !!fall.frozen;
-    const lastAct = Number(lastActivity[idx] ?? 0) || 0;
-    const daysSince = lastAct ? (now - lastAct) / 86400 : Infinity;
-    const isDormant = (!isFrozen && daysSince >= 90) || !!fall.dormant;
+    const isFrozen = token?.frozen != null ? !!token.frozen : !!fall.frozen;
+    const tokenDormant = token?.dormant != null ? !!token.dormant : null;
+    const lastActivityRaw = token?.lastActivity ?? fall.last_activity ?? lastActivity[idx] ?? null;
+    const lastAct = Number.isFinite(lastActivityRaw) ? Number(lastActivityRaw) : null;
+    const daysSince = lastAct ? (now - lastAct) / 86400 : null;
+    const isDormant = tokenDormant != null
+      ? tokenDormant
+      : (!isFrozen && Number.isFinite(daysSince) ? daysSince >= 90 : !!fall.dormant);
     const baseColor = decideColor({ isWhale, isFrozen, isDormant });
     const saleCount = Number(saleCountArr[idx] ?? token?.saleCount ?? 0) || 0;
     const rarity = Number(rarityArr[idx] ?? 0.5) || 0;
-    const volume = Number(token?.volumeAllTia ?? 0) || 0;
+    const volume = Number(token?.volumeAllTia ?? token?.volume_all_tia ?? 0) || 0;
     const volumeUsd = Number(token?.volumeAllUsd ?? token?.volumeUsd ?? token?.volume_all_usd ?? 0) || 0;
     const saleCount30d = Number(saleCount30dArr[idx] ?? token?.saleCount30d ?? 0) || 0;
 
-    const rawXY = Array.isArray(token?.xy) ? token.xy : null;
-    const hasValidXY = Array.isArray(rawXY)
-      && rawXY.length >= 2
-      && rawXY.every(coord => Number.isFinite(coord))
-      && !(Math.abs(rawXY[0]) < 1e-4 && Math.abs(rawXY[1]) < 1e-4);
-    const [rawX, rawY] = hasValidXY ? rawXY : fallbackPosition(i, total);
-    const theta = Math.atan2(rawY, rawX);
-    const baseRadius = Math.hypot(rawX, rawY) || 1;
-    const z = hasValidXY ? normalizedDepth(volume, maxVolume, rarity) : 0;
-    const size = nodeSize(saleCount, isWhale) * 12;
+    let layoutX = null;
+    let layoutY = null;
+    let layoutSource = 'fallback';
+    if (isValidCoordinatePair(token?.xy)) {
+      layoutX = token.xy[0];
+      layoutY = token.xy[1];
+      layoutSource = 'precomputed';
+    } else if (isValidCoordinatePair(fall?.xy)) {
+      layoutX = fall.xy[0];
+      layoutY = fall.xy[1];
+    } else if (Number.isFinite(fall?.x) && Number.isFinite(fall?.y)) {
+      layoutX = fall.x;
+      layoutY = fall.y;
+    } else {
+      const fallbackXY = fallbackPosition(i, total);
+      layoutX = fallbackXY[0];
+      layoutY = fallbackXY[1];
+      layoutSource = 'generated';
+    }
+
+    const depth = normalizedDepth(volume, maxVolume, rarity) - 60;
+    const size = nodeSize(saleCount, isWhale);
 
     const ethos = extractEthosFromToken(token);
     const trading = extractTradingFromToken(token, fall, preset, idx);
@@ -506,6 +561,7 @@ function buildTokenNodes(tokens, fallback, preset) {
     const traits = extractTraitsFromToken(token);
     const ownerAddr = token?.owner ?? token?.ownerAddr ?? fall.owner ?? null;
     const holdDays = Number.isFinite(trading.holdDays) ? trading.holdDays : Number(holdDaysArr[idx] ?? fall.hold_days ?? null);
+
     const record = {
       id,
       ownerIndex: oi,
@@ -514,67 +570,57 @@ function buildTokenNodes(tokens, fallback, preset) {
       frozen: isFrozen,
       dormant: isDormant,
       lastActivity: lastAct,
-      daysSince,
+      daysSince: Number.isFinite(daysSince) ? daysSince : null,
       saleCount,
       rarity,
       volume,
       volumeUsd,
       saleCount30d,
-      x: rawX,
-      y: rawY,
-      z,
-      baseColor,
+      x: layoutX,
+      y: layoutY,
+      z: depth,
+      baseColor: baseColor.slice(),
       displaySize: size,
       displayColor: baseColor.slice(),
       baseSize: size,
-      homeX: rawX,
-      homeY: rawY,
-      homeZ: z,
-      fx: rawX,
-      fy: rawY,
-      fz: z,
+      homeX: layoutX,
+      homeY: layoutY,
+      homeZ: depth,
+      fx: layoutX,
+      fy: layoutY,
+      fz: depth,
+      layoutX,
+      layoutY,
+      layoutSource,
       ownerAddr,
       ethos,
       trading,
       story,
       traits,
-      holdDays: Number.isFinite(holdDays) ? holdDays : null,
-      __theta: theta,
-      __baseRadius: baseRadius,
-      __layoutSource: hasValidXY ? 'precomputed' : 'fallback'
+      holdDays: Number.isFinite(holdDays) ? holdDays : null
     };
     applyNodeImportance(record);
     nodes.push(record);
-    decorated.push(record);
-    if (saleCount > maxSaleCount) maxSaleCount = saleCount;
-    if (volumeUsd > maxVolumeUsd) maxVolumeUsd = volumeUsd;
   }
-  const logMaxVolumeUsd = Math.log1p(Math.max(1, maxVolumeUsd));
-  decorated.forEach(node => {
-    const rarityNorm = 1 - clamp(node.rarity ?? 0.5, 0, 1);
-    const saleNorm = maxSaleCount > 0 ? clamp(node.saleCount / maxSaleCount, 0, 1) : 0;
-    const volumeNorm = logMaxVolumeUsd > 0 ? Math.log1p(Math.max(0, node.volumeUsd || 0)) / logMaxVolumeUsd : 0;
-    const activityNorm = Number.isFinite(node.daysSince) ? clamp(1 - (node.daysSince / 365), 0, 1) : 0;
-    const freshnessBoost = Number.isFinite(node.trading?.holdDays) ? clamp(1 - (node.trading.holdDays / 365), 0, 1) : 0;
-    const radialScore = clamp((saleNorm * 0.3) + (volumeNorm * 0.25) + (activityNorm * 0.25) + (rarityNorm * 0.15) + (freshnessBoost * 0.05), 0, 1);
-    const baseRadius = 140 + radialScore * 720;
-    const jitter = jitterForId(node.id, node.saleCount, node.saleCount30d);
-    const theta = Number.isFinite(node.__theta) ? node.__theta : 0;
-    const x = Math.cos(theta) * baseRadius + jitter.x;
-    const y = Math.sin(theta) * baseRadius + jitter.y;
-    node.x = x;
-    node.y = y;
-    node.z = (volumeNorm * 180) - 90;
-    node.fx = x;
-    node.fy = y;
-    node.fz = node.z;
-    node.homeX = x;
-    node.homeY = y;
-    node.homeZ = node.z;
-    node.layoutSource = node.__layoutSource;
-    delete node.__theta;
-    delete node.__baseRadius;
+
+  applyMinimalLayoutJitter(nodes, {
+    radiusOf: node => Math.max(2.2, (node.displaySize || node.baseSize || 10) * 0.5),
+    maxDistance: 22,
+    padding: 2.2,
+    iterations: 5
   });
+  resolveTokenCollisions(nodes, node => Math.max(2.6, (node.displaySize || 10) * 0.55), 22, 2);
+
+  nodes.forEach(node => {
+    const z = Number.isFinite(node.z) ? node.z : 0;
+    node.homeX = node.x;
+    node.homeY = node.y;
+    node.homeZ = z;
+    node.fx = node.x;
+    node.fy = node.y;
+    node.fz = z;
+  });
+
   return nodes;
 }
 
@@ -766,7 +812,7 @@ function buildTokenTradeEdges(edgeList = [], ownerTokenMap = new Map()) {
   };
 }
 
-function buildOwnerDataset(preset = {}) {
+function buildOwnerDataset(preset = {}, walletList = []) {
   const owners = Array.isArray(preset?.owners) ? preset.owners : [];
   const ownerIndex = Array.isArray(preset?.ownerIndex) ? preset.ownerIndex : [];
   const ownerBuyVol = Array.isArray(preset?.ownerBuyVol) ? preset.ownerBuyVol : [];
@@ -774,6 +820,19 @@ function buildOwnerDataset(preset = {}) {
   const ownerWalletType = Array.isArray(preset?.ownerWalletType) ? preset.ownerWalletType : [];
   const ownerCommunities = Array.isArray(preset?.ownerCommunityId) ? preset.ownerCommunityId : [];
   const ownerEthos = Array.isArray(preset?.ownerEthos) ? preset.ownerEthos : [];
+  const walletMap = new Map(
+    Array.isArray(walletList)
+      ? walletList
+          .map(entry => {
+            const addr = String(entry?.addr || entry?.address || '').toLowerCase();
+            const xy = Array.isArray(entry?.xy) ? entry.xy : [entry?.x, entry?.y];
+            const x = Number(xy?.[0]);
+            const y = Number(xy?.[1]);
+            return addr ? [addr, { entry, x: Number.isFinite(x) ? x : null, y: Number.isFinite(y) ? y : null }] : null;
+          })
+          .filter(Boolean)
+      : []
+  );
 
   const holdings = new Array(owners.length).fill(0);
   for (let i = 0; i < ownerIndex.length; i++) {
@@ -790,6 +849,8 @@ function buildOwnerDataset(preset = {}) {
   const p95Flow = percentile(flow, 0.95) || 0;
   const p95Holdings = percentile(holdings, 0.95) || 0;
 
+  let canonicalCount = 0;
+
   const nodes = owners.map((address, i) => {
     const rawAddr = String(address || '').trim();
     const addressLc = rawAddr.toLowerCase();
@@ -802,6 +863,10 @@ function buildOwnerDataset(preset = {}) {
     const radius = 3 + 2.4 * sqrtScale(flowMetric, p95Flow || 1);
     const strokeWidth = 1 + sqrtScale(holdingCount, p95Holdings || 1);
     const displaySize = Math.max(14, radius * 6);
+    const layout = walletMap.get(addressLc);
+    const layoutX = Number.isFinite(layout?.x) ? layout.x : null;
+    const layoutY = Number.isFinite(layout?.y) ? layout.y : null;
+    if (layout && layoutX !== null && layoutY !== null) canonicalCount += 1;
 
     return {
       id: `owner-${i}`,
@@ -821,13 +886,15 @@ function buildOwnerDataset(preset = {}) {
       displaySize,
       baseSize: displaySize,
       label: addressLc ? `${addressLc.slice(0, 6)}…${addressLc.slice(-4)}` : `owner-${i + 1}`,
-      x: 0,
-      y: 0,
+      x: layoutX ?? 0,
+      y: layoutY ?? 0,
       z: 0,
       fx: null,
       fy: null,
       fz: 0,
-      stage: 'owner'
+      stage: 'owner',
+      layoutX: layoutX ?? null,
+      layoutY: layoutY ?? null
     };
   });
 
@@ -838,7 +905,8 @@ function buildOwnerDataset(preset = {}) {
       flow,
       p95Flow,
       p95Holdings
-    }
+    },
+    usesCanonicalLayout: canonicalCount > 0
   };
 }
 
@@ -1441,9 +1509,9 @@ function normalizedDepth(volume, maxVolume, rarity) {
 
 function nodeSize(saleCount, isWhale) {
   const metric = Math.log10(Math.max(1, saleCount + 1));
-  let size = 18 + metric * 6;
-  if (isWhale) size *= 1.35;
-  return clamp(size, 12, 42);
+  let size = 8 + metric * 3.2;
+  if (isWhale) size *= 1.4;
+  return clamp(size, 8, 28);
 }
 
 function extractEthosFromToken(token) {
@@ -1504,13 +1572,10 @@ function computeNodeColor(node, { isSelected, isHovered, isHighlighted }) {
   return color;
 }
 
-function colorToThree(rgba, boost = 1) {
-  const scale = (value) => {
-    const normalized = clamp(value ?? 0, 0, 255) / 255;
-    return clamp(Math.pow(normalized, 0.6) * 1.25 * boost, 0, 1);
-  };
+function colorToThree(rgba) {
   const [r, g, b] = Array.isArray(rgba) ? rgba : TOKENS.fg;
-  return { r: scale(r), g: scale(g), b: scale(b) };
+  const normalize = (value) => clamp(value ?? 0, 0, 255) / 255;
+  return { r: normalize(r), g: normalize(g), b: normalize(b) };
 }
 
 function scheduleZoomToFit(padding = 160, duration = 900, opts = {}) {
@@ -1616,8 +1681,7 @@ async function renderBubbleMapView() {
   if (!state.graph) return;
   startUILoad();
   try {
-    const preset = await jfetch(`${API.preset}?nodes=10000`);
-    const nodes = buildBubbleNodes(preset);
+    const nodes = buildBubbleNodes(state.ownerNodes);
     if (!nodes.length) {
       state.graph.graphData({ nodes: [], links: [] });
       state.viewNodes = new Map();
@@ -1671,43 +1735,31 @@ async function renderBubbleMapView() {
   }
 }
 
-function buildBubbleNodes(preset = {}) {
-  const owners = Array.isArray(preset?.owners) ? preset.owners : [];
-  if (!owners.length) return [];
-  const ownerIndex = Array.isArray(preset?.ownerIndex) ? preset.ownerIndex : [];
-  const ownerWalletType = Array.isArray(preset?.ownerWalletType) ? preset.ownerWalletType : [];
-  const ownerCommunity = Array.isArray(preset?.ownerCommunityId) ? preset.ownerCommunityId : [];
-  const ownerEthos = Array.isArray(preset?.ownerEthos) ? preset.ownerEthos : [];
-  const ownerBuyVol = Array.isArray(preset?.ownerBuyVol) ? preset.ownerBuyVol : [];
-  const ownerSellVol = Array.isArray(preset?.ownerSellVol) ? preset.ownerSellVol : [];
-
-  const holdings = new Array(owners.length).fill(0);
-  ownerIndex.forEach(idx => {
-    if (Number.isInteger(idx) && idx >= 0 && idx < holdings.length) holdings[idx] += 1;
-  });
-
-  return owners.map((wallet, i) => {
-    const address = String(wallet || '').toLowerCase();
-    const walletType = String(ownerWalletType[i] || '').toLowerCase();
-    const community = Number.isFinite(ownerCommunity[i]) ? Number(ownerCommunity[i]) : null;
-    const baseColor = colorForWallet(walletType, community, i);
-    const flow = (Number(ownerBuyVol[i] || 0) || 0) + (Number(ownerSellVol[i] || 0) || 0);
-    const ethosScore = Number(ownerEthos[i] || 0) || 0;
-
-    return {
-      id: address || `owner-${i}`,
-      address,
-      label: address ? `${address.slice(0, 6)}…${address.slice(-4)}` : `owner-${i + 1}`,
-      walletType,
-      community,
-      ethosScore,
-      flowMetric: flow,
-      holdingCount: holdings[i] || 0,
-      baseColor: baseColor.slice(0, 4),
-      displayColor: baseColor.slice(0, 4),
-      stage: 'owner',
-      groupKey: walletType || (community != null ? `community-${community}` : 'other')
-    };
+function buildBubbleNodes(ownerNodes = []) {
+  if (!Array.isArray(ownerNodes) || !ownerNodes.length) return [];
+  return ownerNodes.map((source, index) => {
+    const clone = { ...source };
+    const baseX = Number.isFinite(source.layoutX) ? source.layoutX : Number(source.homeX ?? source.x ?? 0) || 0;
+    const baseY = Number.isFinite(source.layoutY) ? source.layoutY : Number(source.homeY ?? source.y ?? 0) || 0;
+    clone.x = baseX;
+    clone.y = baseY;
+    clone.z = 0;
+    clone.fx = baseX;
+    clone.fy = baseY;
+    clone.fz = 0;
+    clone.stage = 'owner';
+    const flowMetric = Number(source.flowMetric || 0) || 0;
+    const holdingCount = Number(source.holdingCount || 0) || 0;
+    clone.flowMetric = flowMetric;
+    clone.holdingCount = holdingCount;
+    clone.groupKey = source.walletType || (Number.isFinite(source.community) ? `community-${source.community}` : 'other');
+    const radius = Math.max(3, Math.sqrt(flowMetric || holdingCount || 1) * 0.55);
+    clone.r = radius;
+    const size = Math.max(18, clone.baseSize || clone.displaySize || radius * 6);
+    clone.baseSize = size;
+    clone.displaySize = size;
+    clone.label = source.label || (source.addressLc ? `${source.addressLc.slice(0, 6)}…${source.addressLc.slice(-4)}` : `owner-${index + 1}`);
+    return clone;
   });
 }
 
@@ -1725,6 +1777,95 @@ function circle(node, r) {
   group.add(fill);
   group.add(ring);
   return group;
+}
+
+function applyMinimalLayoutJitter(nodes = [], {
+  radiusOf = node => Math.max(2, (node.displaySize || node.baseSize || 12) * 0.2),
+  maxDistance = 20,
+  padding = 1.6,
+  iterations = 4
+} = {}) {
+  if (!Array.isArray(nodes) || nodes.length === 0) return;
+  const basePositions = nodes.map(node => {
+    const baseX = Number.isFinite(node.layoutX) ? node.layoutX : Number(node.homeX ?? node.x ?? 0) || 0;
+    const baseY = Number.isFinite(node.layoutY) ? node.layoutY : Number(node.homeY ?? node.y ?? 0) || 0;
+    node.layoutX = baseX;
+    node.layoutY = baseY;
+    node.x = baseX;
+    node.y = baseY;
+    return { baseX, baseY };
+  });
+  if (nodes.length === 1) {
+    nodes[0].fx = nodes[0].x;
+    nodes[0].fy = nodes[0].y;
+    return;
+  }
+  const radii = nodes.map(n => Math.max(0.5, Number(radiusOf(n)) || 0.5));
+  const maxRadius = Math.max(...radii, 0.5);
+  const cellSize = Math.max(4, (maxRadius + padding) * 2);
+
+  for (let iter = 0; iter < Math.max(1, iterations); iter++) {
+    const grid = new Map();
+    nodes.forEach((node, idx) => {
+      const gx = Math.floor(node.x / cellSize);
+      const gy = Math.floor(node.y / cellSize);
+      const key = `${gx}:${gy}`;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(idx);
+    });
+
+    nodes.forEach((node, idx) => {
+      const radiusI = Math.max(0.5, Number(radiusOf(node)) || radii[idx]);
+      const gx = Math.floor(node.x / cellSize);
+      const gy = Math.floor(node.y / cellSize);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const bucket = grid.get(`${gx + dx}:${gy + dy}`);
+          if (!bucket) continue;
+          for (const otherIdx of bucket) {
+            if (otherIdx <= idx) continue;
+            const other = nodes[otherIdx];
+            const radiusJ = Math.max(0.5, Number(radiusOf(other)) || radii[otherIdx]);
+            const minDist = radiusI + radiusJ + padding;
+            let diffX = other.x - node.x;
+            let diffY = other.y - node.y;
+            let dist = Math.hypot(diffX, diffY);
+            if (dist === 0) {
+              const seed = seededNoise((idx + 1) * 997 + (otherIdx + 1) * 613);
+              const angle = seed * Math.PI * 2;
+              diffX = Math.cos(angle);
+              diffY = Math.sin(angle);
+              dist = 1;
+            }
+            if (dist < minDist) {
+              const overlap = minDist - dist;
+              const nx = diffX / dist;
+              const ny = diffY / dist;
+              const shift = overlap * 0.5;
+              node.x -= nx * shift;
+              node.y -= ny * shift;
+              other.x += nx * shift;
+              other.y += ny * shift;
+            }
+          }
+        }
+      }
+    });
+  }
+
+  nodes.forEach((node, idx) => {
+    const { baseX, baseY } = basePositions[idx];
+    const dx = node.x - baseX;
+    const dy = node.y - baseY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > maxDistance && dist > 0) {
+      const scale = maxDistance / dist;
+      node.x = baseX + dx * scale;
+      node.y = baseY + dy * scale;
+    }
+    node.fx = node.x;
+    node.fy = node.y;
+  });
 }
 
 function resolveTokenCollisions(nodes = [], radiusOf = node => Math.max(4, (node.displaySize || 10) / 2), bin = 16, iters = 2) {
@@ -1782,22 +1923,47 @@ function renderFlowView() {
   state.graph.nodeThreeObjectExtend(false);
   state.graph.numDimensions(3);
   const cap = effectiveEdgeCap();
-  const links = state.ownerEdges.flow.slice(0, cap);
+  const saleEdges = Array.isArray(state.rawEdges?.sales) ? state.rawEdges.sales : [];
+  const transferEdges = Array.isArray(state.rawEdges?.transfers) ? state.rawEdges.transfers : [];
+  const mixedEdges = Array.isArray(state.rawEdges?.mixed) ? state.rawEdges.mixed : [];
+  const combined = [...saleEdges, ...transferEdges, ...mixedEdges].map(edge => ({ ...edge }));
+  combined.sort((a, b) => (Number(b?.weight || 0) || 0) - (Number(a?.weight || 0) || 0));
+  const limited = cap > 0 ? combined.slice(0, cap) : combined;
   const flowWeights = [];
   const weightByNode = new Map();
-  links.forEach(link => {
+  const neighborAccumulator = new Map();
+  limited.forEach(link => {
     const weight = Number(link?.weight || 0) || 0;
-    if (weight <= 0) return;
     const src = linkEndpointId(link.source);
     const dst = linkEndpointId(link.target);
     if (src != null) {
       weightByNode.set(src, (weightByNode.get(src) || 0) + weight);
       flowWeights.push(weight);
+      if (!neighborAccumulator.has(src)) neighborAccumulator.set(src, []);
+      neighborAccumulator.get(src).push({ id: dst, weight });
     }
     if (dst != null) {
       weightByNode.set(dst, (weightByNode.get(dst) || 0) + weight * 0.6);
+      if (!neighborAccumulator.has(dst)) neighborAccumulator.set(dst, []);
+      neighborAccumulator.get(dst).push({ id: src, weight: weight * 0.7 });
     }
+    if (typeof link.opacity !== 'number') {
+      link.opacity = link.kind === 'sales' ? 0.72 : link.kind === 'transfers' ? 0.45 : 0.58;
+    }
+    if (typeof link.width !== 'number') {
+      link.width = Math.max(1.2, Math.log2(1 + Math.max(1, weight)));
+    }
+    link.curvature = 0.42;
   });
+  const flowNeighbors = new Map();
+  neighborAccumulator.forEach((list, key) => {
+    const sorted = list
+      .filter(item => Number.isFinite(item.weight) && item.id != null)
+      .sort((a, b) => (b.weight || 0) - (a.weight || 0));
+    flowNeighbors.set(key, sorted.slice(0, 6).map(item => item.id));
+  });
+  state.ownerTopNeighbors = flowNeighbors;
+  state.flowLinks = limited;
   const p95 = flowWeights.length ? percentile(flowWeights, 0.95) || 1 : 1;
   nodes.forEach(node => {
     const weight = weightByNode.get(node.id) || 0;
@@ -1815,7 +1981,7 @@ function renderFlowView() {
   });
   toggleControl('edges', true, 'Link density');
   state.nodes = nodes;
-  state.graph.graphData({ nodes, links });
+  state.graph.graphData({ nodes, links: limited });
   state.graph.d3VelocityDecay(1);
   if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
   state.viewNodes = new Map(nodes.map(n => [n.id, n]));
@@ -1840,53 +2006,51 @@ function renderRhythmView() {
   useTokenDataset();
   state.colorMode = 'rhythm';
   state.highlighted = null;
+  const clones = tokenNodesForView();
+  state.nodes = clones;
   state.graph.nodeThreeObject(node => buildSprite(node));
   state.graph.nodeThreeObjectExtend(false);
-  const saleRecentValues = state.tokenNodes.map(node => Number(node.saleCount30d ?? node.saleCount ?? 0));
-  const p95Recent = percentile(saleRecentValues, 0.95) || 1;
-  const turnoverValues = state.tokenNodes.map(node => {
-    const hold = Number.isFinite(node.holdDays) ? Math.max(1, node.holdDays) : 1;
-    return Math.log1p((Number(node.saleCount ?? 0) || 0) / hold);
+  state.graph.numDimensions(3);
+  const ageRange = 240;
+  const lastSaleValues = clones.map(node => {
+    const source = state.tokenNodeMap.get(node.id);
+    return Number(source?.trading?.lastSale ?? source?.volumeUsd ?? source?.volume ?? 0) || 0;
   });
-  const maxTurnover = Math.max(...turnoverValues.filter(v => Number.isFinite(v)), 1);
-  const width = 640;
-  const height = 420;
-  const ageRange = 180; // days
-
-  const clones = state.tokenNodes.map((source, i) => {
-    const clone = { ...source };
-    const rarity = clamp(Number(source.rarity ?? 0.5), 0, 1);
-    const saleRecent = saleRecentValues[i] || 0;
-    const hold = Number.isFinite(source.holdDays) ? Math.max(1, source.holdDays) : 1;
-    const turnoverLog = Math.log1p((Number(source.saleCount ?? 0) || 0) / hold);
-    const turnoverNorm = maxTurnover > 0 ? turnoverLog / maxTurnover : 0;
-    const radius = 2 + 4 * sqrtScale(saleRecent, p95Recent);
+  const saleRecentValues = clones.map(node => Number(node.saleCount30d ?? node.saleCount ?? 0) || 0);
+  const p95SaleRecent = percentile(saleRecentValues, 0.95) || 1;
+  const p95LastSale = percentile(lastSaleValues, 0.95) || 1;
+  clones.forEach((clone, index) => {
+    const source = state.tokenNodeMap.get(clone.id) || clone;
     const daysSince = Number.isFinite(source.daysSince) ? Math.max(0, source.daysSince) : ageRange;
-    const recencyFactor = 1 - clamp(daysSince / ageRange, 0, 1);
-    const color = blendColors(CSS_COLORS.muted, CSS_COLORS.accent, recencyFactor);
-
-    clone.x = (rarity - 0.5) * width;
-    clone.y = (turnoverNorm - 0.5) * height;
-    clone.z = 0;
+    const recency = 1 - clamp(daysSince / ageRange, 0, 1);
+    const saleRecent = saleRecentValues[index];
+    const salePulse = p95SaleRecent > 0 ? clamp(Math.sqrt(saleRecent / p95SaleRecent), 0, 1.6) : 0;
+    const lastSale = lastSaleValues[index];
+    const priceNorm = p95LastSale > 0 ? clamp(Math.log1p(lastSale) / Math.log1p(p95LastSale), 0, 1) : 0;
+    const height = (recency * 280) - 140;
+    clone.z = height;
+    clone.fz = height;
     clone.fx = clone.x;
     clone.fy = clone.y;
-    clone.fz = 0;
-    clone.baseColor = color;
-    clone.displayColor = color.slice();
-    const size = Math.max(12, radius * 5);
+    const baseSize = clone.baseSize || clone.displaySize || 20;
+    const boosted = baseSize * (0.85 + salePulse * 0.9 + priceNorm * 0.3);
+    const size = Math.max(16, boosted);
     clone.baseSize = size;
     clone.displaySize = size;
-    clone.radius = size / 2;
-    return clone;
+    if (Array.isArray(clone.displayColor)) {
+      const color = clone.displayColor.slice();
+      const alpha = color[3] ?? 210;
+      color[3] = clamp(Math.round(alpha * (0.55 + recency * 0.45)), 120, 255);
+      clone.displayColor = color;
+    }
   });
-  applyRhythmBeeswarm(clones);
   toggleControl('time', false);
   toggleControl('edges', false);
   state.graph.graphData({ nodes: clones, links: [] });
   state.viewNodes = new Map(clones.map(n => [n.id, n]));
   if (typeof state.graph.linkVisibility === 'function') state.graph.linkVisibility(() => false);
   state.graph.linkColor(() => 'rgba(255,255,255,0.12)');
-  state.graph.linkOpacity(() => 0.1);
+  state.graph.linkOpacity(() => 0.06);
   state.graph.linkWidth(() => 0.4);
   if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(() => 0);
   if (typeof state.graph.linkDirectionalParticleSpeed === 'function') state.graph.linkDirectionalParticleSpeed(() => 0.006);
@@ -1896,52 +2060,11 @@ function renderRhythmView() {
   applyLinkStylesForView();
   updateNodeStyles();
   state.userCameraOverride = false;
-  scheduleZoomToFit(140, 700, { force: true });
+  scheduleZoomToFit(150, 720, { force: true });
 }
 
 function rebuildLinks() {
   renderCurrentView();
-}
-
-function applyRhythmBeeswarm(nodes) {
-  if (!nodes.length) return;
-  const radii = nodes.map(n => Math.max(COLLISION_MIN_RADIUS, n.radius || (n.displaySize || 12) / 2));
-  const medianRadius = median(radii) || COLLISION_MIN_RADIUS;
-  const binWidth = Math.max(8, 2 * medianRadius + COLLISION_PADDING);
-  const padding = COLLISION_PADDING;
-  const bins = new Map();
-  nodes.forEach((node, index) => {
-    const radius = Math.max(COLLISION_MIN_RADIUS, node.radius || (node.displaySize || 12) / 2);
-    node.radius = radius;
-    const key = Math.round(node.x / binWidth);
-    if (!bins.has(key)) bins.set(key, []);
-    bins.get(key).push({ node, desiredY: node.y, index });
-  });
-  bins.forEach(items => {
-    items.sort((a, b) => a.desiredY - b.desiredY);
-    const placed = [];
-    items.forEach(item => {
-      const nodeRadius = item.node.radius;
-      const step = nodeRadius + padding;
-      let bestY = item.desiredY;
-      let attempt = 0;
-      const maxAttempts = placed.length * 4 + 4;
-      while (attempt < maxAttempts) {
-        const hasOverlap = placed.some(other => {
-          const required = nodeRadius + other.radius + padding;
-          return Math.abs(bestY - other.y) < required;
-        });
-        if (!hasOverlap) break;
-        attempt++;
-        const direction = attempt % 2 === 0 ? -1 : 1;
-        const offset = Math.ceil(attempt / 2) * step;
-        bestY = item.desiredY + direction * offset;
-      }
-      item.node.y = bestY;
-      item.node.fy = bestY;
-      placed.push({ y: bestY, radius: nodeRadius });
-    });
-  });
 }
 
 function currentToggles() {
@@ -1997,7 +2120,25 @@ function currentZoomBucket() {
   return 'near';
 }
 
-function linkColor() {
+function linkColor(link) {
+  if (state.activeView === View.FLOW && link) {
+    const kind = typeof link.kind === 'string' ? link.kind.toLowerCase() : '';
+    if (kind === 'sales') {
+      const [r, g, b] = CSS_COLORS.danger;
+      const alpha = clamp(typeof link.opacity === 'number' ? link.opacity * 1.05 : 0.78, 0.08, 0.95);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+    if (kind === 'transfers') {
+      const [r, g, b] = COLORS.active;
+      const alpha = clamp(typeof link.opacity === 'number' ? link.opacity * 1.1 : 0.72, 0.08, 0.88);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+    if (kind === 'mixed') {
+      const [r, g, b] = CSS_COLORS.accent2;
+      const alpha = clamp(typeof link.opacity === 'number' ? link.opacity : 0.64, 0.08, 0.82);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+  }
   const [r, g, b] = CSS_COLORS.link;
   return `rgba(${r}, ${g}, ${b}, 1)`;
 }
@@ -2010,14 +2151,20 @@ function linkWidth(link) {
   return 1 + base * 0.5;
 }
 function linkOpacity(link) {
-  const defaultOpacity = typeof link?.opacity === 'number' ? link.opacity : 0.12;
+  const baseOpacity = clamp(typeof link?.opacity === 'number' ? link.opacity : 0.12, 0, 1);
   const focus = state.selectedId;
-  if (focus == null) return defaultOpacity;
   const sourceId = link?.source && typeof link.source === 'object' ? link.source.id : link?.source;
   const targetId = link?.target && typeof link.target === 'object' ? link.target.id : link?.target;
+  if (state.activeView === View.FLOW) {
+    if (focus == null) return baseOpacity;
+    const isConnected = focus === sourceId || focus === targetId;
+    if (isConnected) return clamp(baseOpacity * 1.4, 0.18, 0.95);
+    return clamp(baseOpacity * 0.45, 0.04, 0.4);
+  }
+  if (focus == null) return baseOpacity;
   const isConnected = focus === sourceId || focus === targetId;
-  if (isConnected) return 0.6;
-  return defaultOpacity;
+  if (isConnected) return Math.max(0.6, baseOpacity);
+  return baseOpacity;
 }
 
 function linkDash() {
@@ -2229,27 +2376,61 @@ async function renderTreeTopdownView(rootCandidate) {
       return;
     }
 
-    state.treeTopdown = { root: converted.rootId ?? resolvedTokenId, data: converted, loading: false };
-    attachTopdownTree(state.graph, converted, {
-      levelDistance: 110,
-      radiusFn: node => Math.max(5, Math.sqrt(node.trades || 1) * 1.6)
+    const treeLinks = converted.links.map(link => ({
+      ...link,
+      curvature: 0.18
+    }));
+    const treeDataset = { ...converted, links: treeLinks };
+    const branchById = new Map(treeDataset.nodes.map(node => [node.id, node]));
+    const clones = tokenNodesForView();
+    const highlighted = new Set();
+    clones.forEach(node => {
+      if (branchById.has(node.id)) {
+        const branch = branchById.get(node.id);
+        highlighted.add(node.id);
+        node.treeLevel = branch.treeLevel ?? branch.level ?? null;
+        node.trades = branch.trades ?? node.trades ?? 0;
+        node.volume = branch.volume ?? node.volume ?? 0;
+        const emphasis = 1.2;
+        node.baseSize = Math.max(node.baseSize || node.displaySize || 20, 22) * emphasis;
+        node.displaySize = node.baseSize;
+        node.displayColor = node.baseColor = Array.isArray(node.baseColor)
+          ? node.baseColor.slice(0, 4)
+          : COLORS.active.slice(0, 4);
+        node.displayColor[3] = clamp((node.displayColor[3] ?? 210) + 35, 0, 255);
+      } else {
+        const color = Array.isArray(node.displayColor) ? node.displayColor.slice(0, 4) : COLORS.dormant.slice(0, 4);
+        color[3] = clamp(Math.round((color[3] ?? 180) * 0.25), 40, 120);
+        node.displayColor = color;
+        node.baseColor = color.slice(0, 4);
+        node.baseSize = Math.max(12, (node.baseSize || node.displaySize || 18) * 0.82);
+        node.displaySize = node.baseSize;
+      }
+      node.fx = node.x;
+      node.fy = node.y;
+      node.fz = node.z;
     });
+    state.treeTopdown = { root: treeDataset.rootId ?? resolvedTokenId, data: treeDataset, loading: false };
+    state.nodes = clones;
+    state.graph.graphData({ nodes: clones, links: treeLinks });
+    state.graph.nodeThreeObject(node => buildSprite(node));
     state.graph.nodeThreeObjectExtend(false);
     state.graph.numDimensions(3);
-    if (typeof state.graph.linkCurvature === 'function') state.graph.linkCurvature(() => 0.35);
-    if (typeof state.graph.linkDirectionalParticles === 'function') {
-      state.graph.linkDirectionalParticles(link => Math.min(8, Math.ceil((link.count || 0) / 2)));
-    }
+    if (typeof state.graph.d3VelocityDecay === 'function') state.graph.d3VelocityDecay(1);
+    if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
+    if (typeof state.graph.linkCurvature === 'function') state.graph.linkCurvature(() => 0.18);
+    if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(() => 0);
     state.graph.linkColor(() => 'rgba(255,255,255,0.22)');
     state.graph.linkOpacity(() => 0.6);
-    state.graph.linkWidth(link => Math.max(1, Math.log1p(link.count || 1)));
-    state.viewNodes = new Map(converted.nodes.map(n => [n.id, n]));
+    state.graph.linkWidth(link => Math.max(1.1, Math.log1p(link.count || 1)));
+    state.viewNodes = new Map(clones.map(n => [n.id, n]));
+    state.highlighted = highlighted;
     state.selectedId = state.treeTopdown.root;
-    highlightBranch(state.graph, null, converted);
+    highlightBranch(state.graph, null, treeDataset);
     updateSidebar(state.selectedId);
-    const summaryNode = converted.nodes.find(n => n.id === state.treeTopdown.root) || converted.nodes[0];
+    const summaryNode = treeDataset.nodes.find(n => n.id === state.treeTopdown.root) || treeDataset.nodes[0];
     if (summaryNode) {
-      showExplainOverlay(summarizeTopdownNode(summaryNode, converted), { rememberDefault: true });
+      showExplainOverlay(summarizeTopdownNode(summaryNode, treeDataset), { rememberDefault: true });
     } else {
       hideExplainOverlay();
     }
@@ -2371,7 +2552,7 @@ function updateNodeStyles() {
     const color = computeNodeColor(node, { isSelected, isHovered, isHighlighted });
     const material = sprite.material;
     if (material?.color && typeof material.color.setRGB === 'function') {
-      const tint = colorToThree(color, 1);
+      const tint = colorToThree(color);
       material.color.setRGB(tint.r, tint.g, tint.b);
       if (!sprite.userData) sprite.userData = {};
       sprite.userData.baseAlpha = color[3] ?? 210;
@@ -3349,7 +3530,11 @@ function summarizeTopdownNode(node, data) {
 }
 
 function summarizeFlowOverview() {
-  const links = Array.isArray(state.ownerEdges?.flow) ? state.ownerEdges.flow : [];
+  const links = Array.isArray(state.flowLinks) && state.flowLinks.length
+    ? state.flowLinks
+    : Array.isArray(state.ownerEdges?.flow)
+      ? state.ownerEdges.flow
+      : [];
   if (!links.length) return null;
   const weights = links.map(link => Number(link.weight || 0) || 0).filter(w => w >= 0);
   const total = weights.reduce((sum, value) => sum + value, 0);
@@ -3370,7 +3555,11 @@ function summarizeFlowOverview() {
 }
 
 function summarizeFlowNode(node) {
-  const links = Array.isArray(state.ownerEdges?.flow) ? state.ownerEdges.flow : [];
+  const links = Array.isArray(state.flowLinks) && state.flowLinks.length
+    ? state.flowLinks
+    : Array.isArray(state.ownerEdges?.flow)
+      ? state.ownerEdges.flow
+      : [];
   const edges = links.filter(link => {
     const src = linkEndpointId(link.source);
     const dst = linkEndpointId(link.target);
