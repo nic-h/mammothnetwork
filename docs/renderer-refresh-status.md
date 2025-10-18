@@ -32,6 +32,7 @@ NODE
    - `client/three/app.js:510-616` assigns `baseColor` correctly from `decideColor`.
    - `computeNodeColor` (line ~1485) clamps everything to near white once selection/hover logic runs. Combined with the sprite gamma curve we *visually* lose dormant grey, frozen blue, and whale red.
    - `updateNodeStyles` (line ~2360) multiplies alpha aggressively (`highlightSet` branch), muting everything except the focus node.
+   - Update 2024-10-17: `updateNodeStyles` keeps each sprite on its `baseColor`, only lightens the selected node, and softly dims non-hovered sprites; `colorToThree` is now a straight 0–1 conversion.
 
 2. **Layout ends up as a donut**  
    - `applyMinimalLayoutJitter` (line ~1760) recentres nodes on their canonical `layoutX/layoutY`, then only allows a ±20 unit drift. Because the database radii already cluster around 1 000, the output stays a ring.
@@ -76,7 +77,7 @@ The `token_layout` table appears to be generated from a wallet‑centric embeddi
 
 ## Next Steps Checklist
 
-- [ ] Revise color pipeline (`colorToThree`, `computeNodeColor`, highlight logic).
+- [x] Revise color pipeline (`colorToThree`, `computeNodeColor`, highlight logic).
 - [ ] Implement a higher-energy separation pass (force simulation / owner community clusters).
 - [ ] Rework Flow / Tree / Rhythm overlays to preserve palettes.
 - [ ] Capture new `npm run test:ui` screenshots once visuals match spec.

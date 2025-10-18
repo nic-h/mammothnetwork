@@ -1,7 +1,7 @@
 import ForceGraph3D from '3d-force-graph';
 import * as THREE from 'three';
 import { hierarchy, pack as d3pack } from 'd3-hierarchy';
-import { buildTopdownTree, highlightBranch } from './layout/treeTopDown.js';
+import { buildTopdownTree, attachTopdownTree, highlightBranch } from './layout/treeTopDown.js';
 import { bubbleMapLayout } from './layout/bubbleMap.js';
 
 const TOKENS = {
@@ -48,6 +48,15 @@ function parseCssColor(value, alpha = 1) {
 function seededNoise(value) {
   const s = Math.sin(value * 104729) * 43758.5453123;
   return s - Math.floor(s);
+}
+
+function hashStringToSeed(value) {
+  const input = typeof value === 'string' ? value : String(value ?? '');
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = Math.imul(31, hash) + input.charCodeAt(i);
+  }
+  return hash >>> 0;
 }
 
 function jitterForId(id, saleCount = 0, saleRecent = 0) {
@@ -109,10 +118,10 @@ function median(values = []) {
   return list.length % 2 === 0 ? (list[mid - 1] + list[mid]) / 2 : list[mid];
 }
 
-const COLLISION_PADDING = 2;
-const COLLISION_SWEEPS = 12;
-const COLLISION_FALLBACK_SWEEPS = 3;
-const COLLISION_DRIFT_CLAMP = 15;
+const COLLISION_PADDING = 3;
+const COLLISION_SWEEPS = 16;
+const COLLISION_FALLBACK_SWEEPS = 5;
+const COLLISION_DRIFT_CLAMP = 200;
 const COLLISION_EPSILON = 0.1;
 const COLLISION_MIN_RADIUS = 2;
 const CSS_COLORS = {
@@ -200,6 +209,7 @@ const state = {
   flowLinks: [],
   highlighted: null,
   selectedId: null,
+  selectedOwner: null,
   hoveredId: null,
   edgeCap: 200,
   mode: 'holders',
@@ -440,8 +450,9 @@ async function initData() {
     if (ownerData.usesCanonicalLayout) {
       applyMinimalLayoutJitter(ownerData.nodes, {
         radiusOf: node => Math.max(3, (node.displaySize || node.baseSize || 15) * 0.2),
-        maxDistance: 12,
-        padding: 2
+        maxDistance: 200,
+        padding: 2.6,
+        iterations: 6
       });
     } else {
       seedOwnerLayout(ownerData.nodes);
@@ -605,11 +616,11 @@ function buildTokenNodes(tokens, fallback, preset) {
 
   applyMinimalLayoutJitter(nodes, {
     radiusOf: node => Math.max(2.2, (node.displaySize || node.baseSize || 10) * 0.5),
-    maxDistance: 22,
-    padding: 2.2,
-    iterations: 5
+    maxDistance: 200,
+    padding: 3,
+    iterations: 6
   });
-  resolveTokenCollisions(nodes, node => Math.max(2.6, (node.displaySize || 10) * 0.55), 22, 2);
+  resolveTokenCollisions(nodes, node => Math.max(2.8, (node.displaySize || 10) * 0.55), 24, 3);
 
   nodes.forEach(node => {
     const z = Number.isFinite(node.z) ? node.z : 0;
@@ -1142,8 +1153,6 @@ function performCollisionSweeps(nodes, cellSize, maxSweeps) {
 
     if (maxOverlap <= COLLISION_EPSILON) break;
 
-    const groupCentroids = computeGroupCentroids(nodes);
-
     nodes.forEach((node, idx) => {
       node.x += displacement[idx].x;
       node.y += displacement[idx].y;
@@ -1153,15 +1162,12 @@ function performCollisionSweeps(nodes, cellSize, maxSweeps) {
       const dx = node.x - baseX;
       const dy = node.y - baseY;
       const drift = Math.hypot(dx, dy);
-      if (drift > COLLISION_DRIFT_CLAMP) {
-        const scale = COLLISION_DRIFT_CLAMP / drift;
+      const limit = Number.isFinite(node.layoutDriftLimit) ? Math.max(0, node.layoutDriftLimit) : COLLISION_DRIFT_CLAMP;
+      if (limit > 0 && drift > limit) {
+        const scale = limit / drift;
         node.x = baseX + dx * scale;
         node.y = baseY + dy * scale;
       }
-
-      const centroid = groupCentroids.get(node.walletType || 'owner') || { x: 0, y: 0 };
-      node.x += (centroid.x - node.x) * 0.05;
-      node.y += (centroid.y - node.y) * 0.05;
     });
   }
   return { maxOverlap };
@@ -1180,30 +1186,11 @@ function cellCoords(x, y, cellSize) {
   };
 }
 
-function computeGroupCentroids(nodes) {
-  const groups = new Map();
-  nodes.forEach(node => {
-    const key = node.walletType || 'owner';
-    if (!groups.has(key)) groups.set(key, { sumX: 0, sumY: 0, count: 0 });
-    const bucket = groups.get(key);
-    bucket.sumX += node.x;
-    bucket.sumY += node.y;
-    bucket.count += 1;
-  });
-  const centroids = new Map();
-  groups.forEach((bucket, key) => {
-    centroids.set(key, {
-      x: bucket.count ? bucket.sumX / bucket.count : 0,
-      y: bucket.count ? bucket.sumY / bucket.count : 0
-    });
-  });
-  return centroids;
-}
-
 function useOwnerDataset() {
-  state.nodes = state.ownerNodes;
-  state.nodeMap = state.ownerNodeMap;
-  state.viewNodes = new Map(state.ownerNodeMap);
+  state.nodes = state.tokenNodes;
+  state.nodeMap = state.tokenNodeMap;
+  state.viewNodes = new Map(state.tokenNodeMap);
+  if (state.graph) state.graph.graphData({ nodes: state.tokenNodes, links: [] });
 }
 
 function useTokenDataset() {
@@ -1557,25 +1544,33 @@ function extractTraitsFromToken(token) {
     .filter(Boolean);
 }
 
-function computeNodeColor(node, { isSelected, isHovered, isHighlighted }) {
-  const base = Array.isArray(node.displayColor)
-    ? node.displayColor
-    : Array.isArray(node.baseColor)
-      ? node.baseColor
-      : COLORS.active;
-  const color = base.slice();
-  let alpha = color[3] ?? 210;
-  if (isSelected) alpha = 255;
-  else if (isHovered) alpha = clamp(alpha + 40, 0, 255);
-  else if (isHighlighted) alpha = clamp(alpha + 30, 0, 255);
-  color[3] = alpha;
-  return color;
+function computeNodeColor(node) {
+  if (Array.isArray(node.displayColor)) return node.displayColor.slice(0, 4);
+  if (Array.isArray(node.baseColor)) return node.baseColor.slice(0, 4);
+  return COLORS.active.slice(0, 4);
 }
 
 function colorToThree(rgba) {
-  const [r, g, b] = Array.isArray(rgba) ? rgba : TOKENS.fg;
-  const normalize = (value) => clamp(value ?? 0, 0, 255) / 255;
-  return { r: normalize(r), g: normalize(g), b: normalize(b) };
+  const src = Array.isArray(rgba) ? rgba : TOKENS.fg;
+  const r = clamp(src[0] ?? 0, 0, 255) / 255;
+  const g = clamp(src[1] ?? 0, 0, 255) / 255;
+  const b = clamp(src[2] ?? 0, 0, 255) / 255;
+  return new THREE.Color(r, g, b);
+}
+
+function lighten(rgba, amt = 0.25) {
+  const src = Array.isArray(rgba) ? rgba : TOKENS.fg;
+  const t = clamp(amt ?? 0.25, 0, 1);
+  const r = clamp(src[0] ?? 0, 0, 255);
+  const g = clamp(src[1] ?? 0, 0, 255);
+  const b = clamp(src[2] ?? 0, 0, 255);
+  const alpha = clamp((src[3] ?? 255), 0, 255);
+  return [
+    Math.round(r + (255 - r) * t),
+    Math.round(g + (255 - g) * t),
+    Math.round(b + (255 - b) * t),
+    alpha
+  ];
 }
 
 function scheduleZoomToFit(padding = 160, duration = 900, opts = {}) {
@@ -1597,12 +1592,12 @@ function buildSprite(node) {
   const opacity = clamp((baseColor[3] ?? 210) / 255, 0.1, 1);
   const size = Math.max(6, node.baseSize || node.displaySize || 20);
   if (!mesh || !mesh.material) {
-    const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(tint.r, tint.g, tint.b), transparent: true, opacity, depthTest: true, depthWrite: true });
+    const material = new THREE.MeshBasicMaterial({ color: tint.clone(), transparent: true, opacity, depthTest: true, depthWrite: true });
     mesh = new THREE.Mesh(discGeometry, material);
     mesh.renderOrder = 1;
     state.nodeSprites.set(node.id, mesh);
   } else {
-    mesh.material.color.setRGB(tint.r, tint.g, tint.b);
+    mesh.material.color.copy(tint);
     mesh.material.opacity = opacity;
   }
   mesh.scale.set(size, size, 1);
@@ -1619,20 +1614,51 @@ function disposeSprites() {
   state.nodeSprites.clear();
 }
 
-function renderCurrentView() {
-  if (!state.graph) return Promise.resolve();
-  hideExplainOverlay();
+function normalizeViewName(name) {
+  if (!name) return null;
+  const value = String(name).toLowerCase();
+  switch (value) {
+    case View.BUBBLE:
+    case 'dots':
+    case 'default':
+      return View.BUBBLE;
+    case View.TREE:
+      return View.TREE;
+    case View.FLOW:
+      return View.FLOW;
+    case View.RHYTHM:
+      return View.RHYTHM;
+    default:
+      return null;
+  }
+}
+
+async function setSimpleView(name, options = {}) {
+  const view = normalizeViewName(name || state.activeView || View.BUBBLE) || View.BUBBLE;
+  state.activeView = view;
+  if (!state.graph) {
+    updateViewControls();
+    return;
+  }
   let result;
-  switch (state.activeView) {
+  switch (view) {
     case View.BUBBLE:
       result = renderDotsView();
-      break;
-    case View.TREE:
-      result = renderTreeTopdownView(state.treeTopdown?.root || state.selectedId || (state.tokenNodes[0]?.id ?? null));
       break;
     case View.FLOW:
       result = renderFlowView();
       break;
+    case View.TREE: {
+      const fallback = options.root ??
+        state.selectedOwner ??
+        state.treeTopdown?.root ??
+        state.selectedId ??
+        state.tokenNodes[0]?.ownerAddr ??
+        state.tokenNodes[0]?.id ??
+        null;
+      result = renderTreeTopdownView(fallback);
+      break;
+    }
     case View.RHYTHM:
       result = renderRhythmView();
       break;
@@ -1640,11 +1666,20 @@ function renderCurrentView() {
       result = renderDotsView();
       break;
   }
-  if (result && typeof result.then === 'function') {
-    return result.then(() => updateViewControls());
+  try {
+    if (result && typeof result.then === 'function') {
+      await result;
+    }
+  } catch (err) {
+    console.warn('three.app: setSimpleView failed', err?.message || err);
   }
+  updateNodeStyles();
   updateViewControls();
-  return Promise.resolve();
+}
+
+function renderCurrentView() {
+  if (!state.graph) return Promise.resolve();
+  return setSimpleView(state.activeView);
 }
 
 function renderDotsView() {
@@ -1768,11 +1803,11 @@ function circle(node, r) {
   const group = new THREE.Group();
   const fill = new THREE.Mesh(
     new THREE.CircleGeometry(r, 32),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(tint.r, tint.g, tint.b), opacity: 0.42, transparent: true })
+    new THREE.MeshBasicMaterial({ color: tint.clone(), opacity: 0.42, transparent: true })
   );
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(r + 0.9, r + 1.4, 32),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(tint.r, tint.g, tint.b), opacity: 0.65, transparent: true })
+    new THREE.MeshBasicMaterial({ color: tint.clone(), opacity: 0.65, transparent: true })
   );
   group.add(fill);
   group.add(ring);
@@ -2008,40 +2043,72 @@ function renderRhythmView() {
   state.highlighted = null;
   const clones = tokenNodesForView();
   state.nodes = clones;
+  const preset = state.preset || {};
+  const lastActivityArr = Array.isArray(preset?.tokenLastActivity) ? preset.tokenLastActivity : [];
+  const turnoverArrBase = Array.isArray(preset?.tokenSaleCount30d) && preset.tokenSaleCount30d.length
+    ? preset.tokenSaleCount30d
+    : Array.isArray(preset?.tokenSaleCount) ? preset.tokenSaleCount : [];
+  const lastSalePriceArr = Array.isArray(preset?.tokenLastSalePrice) ? preset.tokenLastSalePrice : [];
+  const now = Date.now() / 1000;
+
+  const ages = clones.map(node => {
+    const idx = Number(node.id) - 1;
+    const ts = Number(lastActivityArr[idx]) || null;
+    if (!Number.isFinite(ts) || ts <= 0) return null;
+    return Math.max(0, (now - ts) / 86400);
+  });
+  const turnovers = clones.map(node => {
+    const idx = Number(node.id) - 1;
+    const raw = Number(turnoverArrBase[idx]);
+    return Number.isFinite(raw) ? Math.max(0, raw) : 0;
+  });
+  const prices = clones.map(node => {
+    const idx = Number(node.id) - 1;
+    const raw = Number(lastSalePriceArr[idx]);
+    return Number.isFinite(raw) ? Math.max(0, raw) : 0;
+  });
+
+  const validAges = ages.filter(value => Number.isFinite(value));
+  const ageHorizon = validAges.length ? Math.max(percentile(validAges, 0.9) || 0, 14) : 30;
+  const validTurnover = turnovers.filter(value => Number.isFinite(value) && value > 0);
+  const turnoverP95 = validTurnover.length ? Math.max(percentile(validTurnover, 0.9) || 0, 1) : 1;
+  const validPrices = prices.filter(value => Number.isFinite(value) && value > 0);
+  const priceP95 = validPrices.length ? Math.max(percentile(validPrices, 0.9) || 0, 1) : 1;
+  const heightScale = 360;
+
   state.graph.nodeThreeObject(node => buildSprite(node));
   state.graph.nodeThreeObjectExtend(false);
   state.graph.numDimensions(3);
-  const ageRange = 240;
-  const lastSaleValues = clones.map(node => {
-    const source = state.tokenNodeMap.get(node.id);
-    return Number(source?.trading?.lastSale ?? source?.volumeUsd ?? source?.volume ?? 0) || 0;
-  });
-  const saleRecentValues = clones.map(node => Number(node.saleCount30d ?? node.saleCount ?? 0) || 0);
-  const p95SaleRecent = percentile(saleRecentValues, 0.95) || 1;
-  const p95LastSale = percentile(lastSaleValues, 0.95) || 1;
-  clones.forEach((clone, index) => {
-    const source = state.tokenNodeMap.get(clone.id) || clone;
-    const daysSince = Number.isFinite(source.daysSince) ? Math.max(0, source.daysSince) : ageRange;
-    const recency = 1 - clamp(daysSince / ageRange, 0, 1);
-    const saleRecent = saleRecentValues[index];
-    const salePulse = p95SaleRecent > 0 ? clamp(Math.sqrt(saleRecent / p95SaleRecent), 0, 1.6) : 0;
-    const lastSale = lastSaleValues[index];
-    const priceNorm = p95LastSale > 0 ? clamp(Math.log1p(lastSale) / Math.log1p(p95LastSale), 0, 1) : 0;
-    const height = (recency * 280) - 140;
+  clones.forEach((clone, idx) => {
+    const ageDays = Number.isFinite(ages[idx]) ? ages[idx] : ageHorizon;
+    const recencyNorm = 1 - clamp(ageDays / ageHorizon, 0, 1);
+    const height = (recencyNorm * heightScale) - heightScale * 0.5;
     clone.z = height;
     clone.fz = height;
     clone.fx = clone.x;
     clone.fy = clone.y;
-    const baseSize = clone.baseSize || clone.displaySize || 20;
-    const boosted = baseSize * (0.85 + salePulse * 0.9 + priceNorm * 0.3);
-    const size = Math.max(16, boosted);
+
+    const turnover = turnovers[idx];
+    const turnoverNorm = turnoverP95 > 0 ? Math.sqrt(clamp(turnover / turnoverP95, 0, 4)) : 0;
+    const baseSize = Math.max(14, clone.baseSize || clone.displaySize || 20);
+    const size = Math.max(14, baseSize * (0.75 + turnoverNorm * 0.8));
     clone.baseSize = size;
     clone.displaySize = size;
-    if (Array.isArray(clone.displayColor)) {
-      const color = clone.displayColor.slice();
-      const alpha = color[3] ?? 210;
-      color[3] = clamp(Math.round(alpha * (0.55 + recency * 0.45)), 120, 255);
-      clone.displayColor = color;
+
+    const price = prices[idx];
+    const priceNorm = priceP95 > 0 ? clamp(Math.log1p(price) / Math.log1p(priceP95), 0, 1) : 0;
+    const alphaFactor = 0.35 + priceNorm * 0.65;
+    if (Array.isArray(clone.baseColor)) {
+      const next = clone.baseColor.slice(0, 4);
+      const baseAlpha = next[3] ?? 210;
+      next[3] = clamp(Math.round(baseAlpha * alphaFactor), 48, 255);
+      clone.baseColor = next;
+      clone.displayColor = next.slice(0, 4);
+    } else if (Array.isArray(clone.displayColor)) {
+      const next = clone.displayColor.slice(0, 4);
+      const baseAlpha = next[3] ?? 210;
+      next[3] = clamp(Math.round(baseAlpha * alphaFactor), 48, 255);
+      clone.displayColor = next;
     }
   });
   toggleControl('time', false);
@@ -2338,29 +2405,33 @@ async function renderTreeTopdownView(rootCandidate) {
   toggleControl('time', false);
   state.colorMode = 'tree';
 
-  const resolvedTokenId = resolveTokenId(rootCandidate) ??
-    (state.tokenNodes.length ? state.tokenNodes[0].id : null);
+  disposeSprites();
+  state.highlighted = null;
+  state.hoveredId = null;
 
-  if (!Number.isFinite(resolvedTokenId)) {
-    state.graph.graphData({ nodes: [], links: [] });
-    state.treeTopdown = { root: null, data: null, loading: false };
-    return;
-  }
-
-  const seedNode = state.tokenNodeMap.get(resolvedTokenId) || null;
-  const primaryAddress = seedNode?.ownerAddr ? String(seedNode.ownerAddr).toLowerCase() : null;
-  const fallbackAddress = resolveOwnerAddress(rootCandidate);
-  const rootAddress = primaryAddress || fallbackAddress;
-
-  state.treeTopdown = { root: resolvedTokenId, data: state.treeTopdown?.data || null, loading: true };
+  const fallbackTokenId = state.tokenNodes.length ? state.tokenNodes[0]?.id ?? null : null;
+  const resolvedTokenId = resolveTokenId(rootCandidate) ?? fallbackTokenId;
+  const seedNode = Number.isFinite(resolvedTokenId) ? (state.tokenNodeMap.get(resolvedTokenId) || null) : null;
+  const seedAddress = seedNode?.ownerAddr ? String(seedNode.ownerAddr).toLowerCase() : null;
+  const candidateAddress = resolveOwnerAddress(rootCandidate);
+  const previousAddress = typeof state.treeTopdown?.root === 'string' ? state.treeTopdown.root : null;
+  const rootAddress = (candidateAddress || seedAddress || previousAddress || null);
 
   if (!rootAddress) {
-    state.treeTopdown = { root: resolvedTokenId, data: null, loading: false };
+    state.treeTopdown = { root: null, data: null, loading: false };
     state.graph.graphData({ nodes: [], links: [] });
-    updateSidebar(resolvedTokenId);
+    state.nodes = [];
+    state.viewNodes = new Map();
+    state.selectedOwner = null;
+    state.selectedId = null;
+    updateSidebar(null);
     hideExplainOverlay();
     return;
   }
+
+  state.treeTopdown = { root: rootAddress, data: state.treeTopdown?.data || null, loading: true };
+  state.selectedOwner = rootAddress;
+  state.selectedId = null;
 
   try {
     const data = await buildTopdownTree(rootAddress, {
@@ -2368,150 +2439,60 @@ async function renderTreeTopdownView(rootCandidate) {
       minTrades: 1,
       edgesLimit: 500
     });
-    const converted = convertTreeToTokenData(data, rootAddress, resolvedTokenId);
-    if (!converted.nodes.length) {
-      state.treeTopdown = { root: resolvedTokenId, data: null, loading: false };
+
+    if (!Array.isArray(data?.nodes) || data.nodes.length === 0) {
+      state.treeTopdown = { root: rootAddress, data: null, loading: false };
       state.graph.graphData({ nodes: [], links: [] });
+      state.nodes = [];
+      state.viewNodes = new Map();
+      state.selectedOwner = rootAddress;
+      state.selectedId = null;
+      updateSidebar(rootAddress || resolvedTokenId || null);
       hideExplainOverlay();
       return;
     }
 
-    const treeLinks = converted.links.map(link => ({
-      ...link,
-      curvature: 0.18
-    }));
-    const treeDataset = { ...converted, links: treeLinks };
-    const branchById = new Map(treeDataset.nodes.map(node => [node.id, node]));
-    const clones = tokenNodesForView();
-    const highlighted = new Set();
-    clones.forEach(node => {
-      if (branchById.has(node.id)) {
-        const branch = branchById.get(node.id);
-        highlighted.add(node.id);
-        node.treeLevel = branch.treeLevel ?? branch.level ?? null;
-        node.trades = branch.trades ?? node.trades ?? 0;
-        node.volume = branch.volume ?? node.volume ?? 0;
-        const emphasis = 1.2;
-        node.baseSize = Math.max(node.baseSize || node.displaySize || 20, 22) * emphasis;
-        node.displaySize = node.baseSize;
-        node.displayColor = node.baseColor = Array.isArray(node.baseColor)
-          ? node.baseColor.slice(0, 4)
-          : COLORS.active.slice(0, 4);
-        node.displayColor[3] = clamp((node.displayColor[3] ?? 210) + 35, 0, 255);
-      } else {
-        const color = Array.isArray(node.displayColor) ? node.displayColor.slice(0, 4) : COLORS.dormant.slice(0, 4);
-        color[3] = clamp(Math.round((color[3] ?? 180) * 0.25), 40, 120);
-        node.displayColor = color;
-        node.baseColor = color.slice(0, 4);
-        node.baseSize = Math.max(12, (node.baseSize || node.displaySize || 18) * 0.82);
-        node.displaySize = node.baseSize;
-      }
-      node.fx = node.x;
-      node.fy = node.y;
-      node.fz = node.z;
-    });
-    state.treeTopdown = { root: treeDataset.rootId ?? resolvedTokenId, data: treeDataset, loading: false };
-    state.nodes = clones;
-    state.graph.graphData({ nodes: clones, links: treeLinks });
-    state.graph.nodeThreeObject(node => buildSprite(node));
+    const dataset = { ...data, rootId: rootAddress };
+    attachTopdownTree(state.graph, dataset, {});
     state.graph.nodeThreeObjectExtend(false);
     state.graph.numDimensions(3);
     if (typeof state.graph.d3VelocityDecay === 'function') state.graph.d3VelocityDecay(1);
     if (typeof state.graph.cooldownTicks === 'function') state.graph.cooldownTicks(0);
-    if (typeof state.graph.linkCurvature === 'function') state.graph.linkCurvature(() => 0.18);
-    if (typeof state.graph.linkDirectionalParticles === 'function') state.graph.linkDirectionalParticles(() => 0);
-    state.graph.linkColor(() => 'rgba(255,255,255,0.22)');
-    state.graph.linkOpacity(() => 0.6);
-    state.graph.linkWidth(link => Math.max(1.1, Math.log1p(link.count || 1)));
-    state.viewNodes = new Map(clones.map(n => [n.id, n]));
-    state.highlighted = highlighted;
-    state.selectedId = state.treeTopdown.root;
-    highlightBranch(state.graph, null, treeDataset);
-    updateSidebar(state.selectedId);
-    const summaryNode = treeDataset.nodes.find(n => n.id === state.treeTopdown.root) || treeDataset.nodes[0];
+    if (typeof state.graph.linkCurvature === 'function') state.graph.linkCurvature(() => 0);
+    if (typeof state.graph.linkWidth === 'function') {
+      state.graph.linkWidth(link => Math.max(0.9, Math.log1p(Number(link?.count ?? link?.totalTrades ?? 0) || 0)));
+    }
+    if (typeof state.graph.linkOpacity === 'function') state.graph.linkOpacity(() => 0.7);
+
+    state.nodes = dataset.nodes;
+    state.viewNodes = new Map(dataset.nodes.map(n => [n.id, n]));
+    state.treeTopdown = { root: rootAddress, data: dataset, loading: false };
+
+    highlightBranch(state.graph, null, dataset);
+    state.selectedOwner = rootAddress;
+    state.selectedId = null;
+    updateSidebar(rootAddress || resolvedTokenId || null);
+    const summaryNode = dataset.nodes.find(n => n.id === rootAddress) || dataset.nodes[0];
     if (summaryNode) {
-      showExplainOverlay(summarizeTopdownNode(summaryNode, treeDataset), { rememberDefault: true });
+      showExplainOverlay(summarizeTopdownNode(summaryNode, dataset), { rememberDefault: true });
     } else {
       hideExplainOverlay();
     }
-    updateNodeStyles();
     state.userCameraOverride = false;
     scheduleZoomToFit(140, 800, { force: true });
   } catch (error) {
     console.warn('three.app: topdown tree error', error?.message || error);
-    state.treeTopdown = { root: resolvedTokenId, data: null, loading: false };
+    state.treeTopdown = { root: rootAddress, data: null, loading: false };
+    state.graph.graphData({ nodes: [], links: [] });
+    state.nodes = [];
+    state.viewNodes = new Map();
+    state.selectedOwner = rootAddress;
+    state.selectedId = null;
+    updateSidebar(rootAddress || resolvedTokenId || null);
     hideExplainOverlay();
   }
 }
 
-function convertTreeToTokenData(data, rootAddress, fallbackTokenId) {
-  const normalizedRoot = rootAddress ? String(rootAddress).toLowerCase() : null;
-  const nodes = [];
-  const links = [];
-  const nodeByAddress = new Map();
-  let rootId = Number.isFinite(fallbackTokenId) ? fallbackTokenId : null;
-
-  if (!data || !Array.isArray(data.nodes) || !data.nodes.length) {
-    if (Number.isFinite(fallbackTokenId) && state.tokenNodeMap.has(fallbackTokenId)) {
-      const seed = { ...state.tokenNodeMap.get(fallbackTokenId) };
-      nodes.push(seed);
-    }
-    return { nodes, links, rootId };
-  }
-
-  const ensureTokenNode = (addressValue, meta = null) => {
-    const addr = String(addressValue || '').toLowerCase();
-    if (!addr) return null;
-    if (nodeByAddress.has(addr)) return nodeByAddress.get(addr);
-    let token = null;
-    const bucket = state.tokenOwnerMap.get(addr);
-    if (bucket?.length) token = pickRepresentativeToken(bucket);
-    if (!token && Number.isFinite(fallbackTokenId) && state.tokenNodeMap.has(fallbackTokenId) && addr === normalizedRoot) {
-      token = state.tokenNodeMap.get(fallbackTokenId);
-    }
-    if (!token) return null;
-    const clone = { ...token };
-    if (meta) {
-      clone.treeLevel = meta.level;
-      clone.trades = meta.trades;
-      clone.volume = meta.volume;
-    }
-    nodes.push(clone);
-    nodeByAddress.set(addr, clone);
-    if (addr === normalizedRoot) rootId = clone.id;
-    return clone;
-  };
-
-  data.nodes.forEach(node => {
-    ensureTokenNode(node?.id ?? node, node);
-  });
-
-  if (!nodes.length && Number.isFinite(fallbackTokenId) && state.tokenNodeMap.has(fallbackTokenId)) {
-    const fallbackNode = { ...state.tokenNodeMap.get(fallbackTokenId) };
-    nodes.push(fallbackNode);
-    rootId = fallbackNode.id;
-  }
-
-  if (Array.isArray(data.links)) {
-    data.links.forEach(link => {
-      const sourceAddr = linkEndpointId(link.source);
-      const targetAddr = linkEndpointId(link.target);
-      const sourceToken = ensureTokenNode(sourceAddr);
-      const targetToken = ensureTokenNode(targetAddr);
-      if (!sourceToken || !targetToken || sourceToken.id === targetToken.id) return;
-      links.push({
-        source: sourceToken.id,
-        target: targetToken.id,
-        count: Number(link.count ?? 0) || 0,
-        recent: Number(link.recent ?? 0) || 0,
-        totalTrades: Number(link.totalTrades ?? 0) || 0,
-        lastTs: Number(link.lastTs ?? 0) || 0
-      });
-    });
-  }
-
-  return { nodes, links, rootId: rootId ?? fallbackTokenId ?? null };
-}
 
 function updateViewControls() {
   const clusterRow = document.getElementById('cluster-mode-row');
@@ -2547,29 +2528,43 @@ function updateNodeStyles() {
     const node = (state.viewNodes && state.viewNodes.get(id)) || state.nodeMap.get(id);
     if (!node || !sprite) return;
     const isSelected = state.selectedId === id;
-    const isHighlighted = highlightSet ? highlightSet.has(id) : false;
     const isHovered = state.hoveredId === id;
-    const color = computeNodeColor(node, { isSelected, isHovered, isHighlighted });
+    const isHoveredContext = state.hoveredId && state.hoveredId !== id;
+    const isHighlighted = highlightSet ? highlightSet.has(id) : false;
+    let baseColor = Array.isArray(node.baseColor) ? node.baseColor.slice(0, 4) : computeNodeColor(node);
+    if (!Array.isArray(baseColor) || baseColor.length < 3) baseColor = COLORS.active.slice(0, 4);
+    if (baseColor.length < 4) baseColor = baseColor.slice(0, 3).concat([clamp(baseColor[3] ?? 255, 0, 255)]);
+    let color = baseColor.slice(0, 4);
+    let alphaNorm = clamp((baseColor[3] ?? 255) / 255, 0, 1);
+    if (isSelected) {
+      color = lighten(baseColor, 0.35);
+      alphaNorm = Math.max(alphaNorm, 0.95);
+    } else {
+      color = baseColor.slice(0, 4);
+      if (isHighlighted) alphaNorm = Math.max(alphaNorm, 0.85);
+      if (isHoveredContext) {
+        alphaNorm = Math.max(alphaNorm * 0.75, 0.6);
+      } else if (isHovered) {
+        alphaNorm = Math.max(alphaNorm, 0.9);
+      }
+    }
+    const finalAlpha = clamp(alphaNorm, 0, 1);
+    color[3] = Math.round(finalAlpha * 255);
+    node.displayColor = color.slice(0, 4);
     const material = sprite.material;
-    if (material?.color && typeof material.color.setRGB === 'function') {
+    if (material?.color instanceof THREE.Color) {
       const tint = colorToThree(color);
-      material.color.setRGB(tint.r, tint.g, tint.b);
+      material.color.copy(tint);
       if (!sprite.userData) sprite.userData = {};
-      sprite.userData.baseAlpha = color[3] ?? 210;
+      sprite.userData.baseAlpha = color[3];
       sprite.userData.nodeId = node.id;
     }
     const base = node.baseSize || node.displaySize || 20;
-    const emphasis = isSelected ? 1.25 : isHovered ? 1.12 : isHighlighted ? 1.05 : 1;
+    const emphasis = isSelected ? 1.3 : isHovered ? 1.12 : isHighlighted ? 1.07 : 1;
     const scale = base * emphasis;
     if (sprite.scale?.set) sprite.scale.set(scale, scale, scale);
     if (material) {
-      if (state.activeView === View.TREE) {
-        material.opacity = highlightSet ? (isHighlighted ? 1 : 0.4) : 1;
-      } else if (state.activeView === View.BUBBLE) {
-        material.opacity = highlightSet ? (isHighlighted ? 1 : 0.3) : 1;
-      } else {
-        material.opacity = 1;
-      }
+      material.opacity = clamp(color[3] / 255, 0.05, 1);
     }
   });
   try { state.graph.refresh(); } catch {}
@@ -3080,23 +3075,24 @@ function bindResize() {
   } catch {}
 }
 
-function applySimpleView(name) {
-  const config = SIMPLE_VIEWS[name];
-  if (!config) return;
-  state.activeView = name;
+function applySimpleView(name, options = {}) {
+  const view = normalizeViewName(name);
+  if (!view) return Promise.resolve();
+  const config = SIMPLE_VIEWS[view];
+  if (!config) return Promise.resolve();
+  state.activeView = view;
   state.mode = config.mode;
   Object.entries(config.toggles).forEach(([id, value]) => {
     const el = document.getElementById(id);
     if (!el) return;
     el.checked = value;
   });
-  updateViewControls();
-  if (name !== View.BUBBLE) releaseClusterMode();
-  if (name !== View.TREE) {
+  if (view !== View.BUBBLE) releaseClusterMode();
+  if (view !== View.TREE) {
     state.treeTopdown = { root: state.treeTopdown?.root || null, data: null, loading: false };
   }
   state.highlighted = null;
-  renderCurrentView();
+  return setSimpleView(view, options);
 }
 
 function setActiveViewButton(name) {
@@ -3118,10 +3114,10 @@ function exposeApi() {
         updateNodeStyles();
         focusNode(id);
       },
-      setSimpleView: (name) => {
-        applySimpleView(name);
-        setActiveViewButton(name);
-        updateNodeStyles();
+      setSimpleView: async (name, options = {}) => {
+        const view = normalizeViewName(name) || View.BUBBLE;
+        await applySimpleView(view, options);
+        setActiveViewButton(view);
       }
     });
   } catch {}
