@@ -51,6 +51,8 @@ NODE
 | “BuildTokenNodes uses DB coordinates; no polar math.” | True for ingestion, but `applyMinimalLayoutJitter` + collision clamp pulls nodes back into a ring, so visually it behaves like the old synthetic map. | Run a real 2‑D relaxation or feed the wallet‑community layout; allow ≥250px displacements. |
 | “Each view looks different.” | Layout is identical; view-specific tweaks only recolor the same donut. | Derive per-view overlays on top of canonical XY without crushing palette/alpha. |
 
+> **Update 2025-10-17:** Tree view now consumes the lineage helper (`buildTopdownTree`/`attachTopdownTree`) and RHYTHM maps depth/scale/alpha from `/api/preset-data`. Flow overlays still need the same treatment.
+
 ## Immediate Action Plan
 
 1. **Color pipeline reset**
@@ -65,8 +67,8 @@ NODE
 
 3. **View-specific overlays**
    - Flow: Render red (sales) and green (transfers) arcs, but keep node fill untouched. Add detailing (width by weight) rather than recoloring tokens.
-   - Tree: Keep base constellation visible; overlay branch nodes with halos.
-   - Rhythm: Use Z/alpha to encode time/price while leaving XY intact.
+   - Tree: **Done** — lineage attaches via `layout/treeTopDown.js`, hovering highlights the active branch without recoloring the cloud.
+   - Rhythm: **Done** — preserves canonical XY while depth/scale/alpha come from preset recency/turnover/price arrays.
 
 4. **Diagnostics in UI**
    - Keep the window probe (`window.__MAMMOTH_SAMPLE__`) until we finish; it helps confirm ingestion.
@@ -79,7 +81,7 @@ The `token_layout` table appears to be generated from a wallet‑centric embeddi
 
 - [x] Revise color pipeline (`colorToThree`, `computeNodeColor`, highlight logic).
 - [ ] Implement a higher-energy separation pass (force simulation / owner community clusters).
-- [ ] Rework Flow / Tree / Rhythm overlays to preserve palettes.
+- [ ] Finish FLOW overlay work (sales vs transfers) without muting base palettes.
 - [ ] Capture new `npm run test:ui` screenshots once visuals match spec.
 - [ ] Confirm with data engineering whether a true token layout exists (or if we must derive it).
 

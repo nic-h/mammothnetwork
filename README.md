@@ -34,10 +34,10 @@ At‑a‑Glance System Overview
 
 Current Status
 - Three.js force-directed renderer (3d-force-graph + custom sprites/pulse loop)
-- TREE view renders a radial lineage layout around the focused token/wallet (forces paused for clarity).
+- TREE view loads the real top-down lineage for the focused wallet (via `/api/transfer-edges`) and draws it with the dedicated `layout/treeTopDown.js` helper so the branch hierarchy hangs above the base constellation.
 - DOTS view offers an optional Cluster mode bubble-map that circle-packs tokens by owner segment.
 - FLOW view highlights buys vs sells (green vs red) with curved arcs, directional arrows, and particle speed/volume scaling.
-- RHYTHM view maps tokens into time×price space (recent activity lifts in Z, buys glow green, dormant tokens fade red) for quick market cadence scans.
+- RHYTHM view keeps the canonical XY layout but remaps Z, radius, and alpha from `/api/preset-data` activity arrays (recency, turnover, last sale) to show cadence without recoloring the cloud.
 - Deterministic layouts (grid default + preset-specific)
 - Modes: `holders`, `transfers`, `traits`, `wallets`
 - Presets (6): Ownership, Trading, Rarity, Social, Whales, Frozen
@@ -52,6 +52,10 @@ Current Status
 - Header is sticky (40px row); grid background alpha ≈ 0.12
 - Hovering a node now dims its neighbors and enlarges the target; clicks focus the right sidebar and keep the camera centered.
 - Panels and header sit above the canvas (orbit/pan pauses whenever the cursor is over UI); the time slider only appears in FLOW/RHYTHM, and “Link density” reflects the active view.
+
+Automation hooks
+- `window.mammoths.setSimpleView(name[, options])` switches the live renderer without rebuilding tokens. Supported names: `bubble`, `flow`, `tree`, `rhythm`. When targeting the tree view you can pass `{ root: '0xowner…' }` to pick the wallet branch.
+- `window.mammoths.focusToken(id)` still recenters the camera on a specific token before Playwright captures screenshots.
 
 ### Known Regressions (Oct 2025)
 > These are active issues in the current branch. Treat them as high-priority fixes before shipping.

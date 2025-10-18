@@ -65,8 +65,8 @@ Three.js + 3d-force-graph (no PIXI). The left and right panels do not change; on
 ## Views
 - DOTS — ownership state with whale bubbles and optional cluster mode.
 - FLOW — transfer/sale arcs with directional particles and time slider.
-- TREE — radial lineage layout around the focused token/wallet.
-- RHYTHM — time × price mapping with recency pulses and dormant fades.
+- TREE — top-down wallet lineage via `/api/transfer-edges`; attaches the branch above the existing constellation.
+- RHYTHM — keeps canonical XY but lifts depth/scale/alpha from preset recency/turnover/pricing arrays.
 
 ## Screenshots
 - Generate desktop snapshots (1440 px):

@@ -10,8 +10,8 @@ Interactive WebGL network visualization for 10,000 Mammoth NFTs showing ownershi
 ### Simple Views
 - DOTS — ownership state defaults; additive sprite glow, whale bubble toggle, optional cluster mode (circle packing via d3-hierarchy).
 - FLOW — curved transfer/sale arcs with directional particles, color-coded by trade type, filtered by the time slider.
-- TREE — radial lineage layout using d3.tree around the focused token or wallet; forces paused for clarity.
-- RHYTHM — time × price projection; recent activity pulses green, dormant holdings fade red, Z-axis lifts by recency.
+- TREE — top-down ownership lineage anchored on the focused wallet address. Uses `layout/treeTopDown.js` to fetch `/api/transfer-edges`, build the branch hierarchy, and attach it directly to the Three.js graph.
+- RHYTHM — canonical XY preserved; Z height, sprite radius, and alpha come from `/api/preset-data` activity arrays (recency, turnover, last sale price) so cadence shows up as depth instead of palette swaps.
 
 Data source precedence: `/api/precomputed/{wallets,edges,tokens}` → live `/api/graph` nodes/edges. **Do not fabricate layouts** beyond a minimal collision pass—if both APIs are empty, the UI must surface an error state rather than draw synthetic shapes.
 
@@ -189,12 +189,17 @@ Ethos
 - Pulse loop: `requestAnimationFrame` adjusts sprite opacity with activity recency; hover/selection/highlight tweak tint/alpha before the pulse step.
 - Edges: zoom buckets (near=500, mid=300, far=100) clamp the slider. Styles follow spec (sales red, transfers blue dashed, mints white dotted, mixed gold, ownership/ambient green, traits violet).
 - FLOW view: arcs bend at 0.2, buys render green with double particles, sells render red with single particles/solid strokes, and the time slider filters edges to the selected window.
-- TREE view: lineage nodes are cloned, recolored, and pinned into a radial layout (d3.tree polar coordinates) around the focused token/wallet; simulation decay set to 1 while active.
+- TREE view: delegates to `layout/treeTopDown.js` (`buildTopdownTree` + `attachTopdownTree`) to draw the real wallet lineage without repainting the token cloud; forces stay paused.
 - DOTS cluster mode: optional circle-packing (d3.pack) by owner/segment with faint group rings; nodes pin until the toggle is cleared, then snap back to preset positions.
-- RHYTHM view: tokens are remapped into a time×price volume space (Z by recency, radius by turnover). Recent activity pulses green, dormant holdings fade red, and the time slider clips visible bands.
+- RHYTHM view: canonical XY retained; `/api/preset-data` arrays drive Z (recency), sprite radius (turnover), and alpha (last sale) so temporal/price movement lifts into depth.
 - Interactions: node click recenters the camera and sidebar; ENS/0x search resolves to wallet highlight; background click clears selection.
 - Sidebar order: Ethos (score/tags/blurb) → Story → Traits → Description; sections auto-hide when empty. Traits render in a two-column grid with single-line values and ellipsis.
 - Automation guard: the stage writes `window.__mammothDrawnFrame = true` after the first layout so Playwright captures wait on a filled canvas.
+
+## Automation & Testing Hooks
+- `window.mammoths.setSimpleView(name, options)` — switches between `bubble`, `flow`, `tree`, and `rhythm` without rebuilding token geometry. Pass `{ root: <walletAddr> }` to seed the tree view on a specific lineage.
+- `window.mammoths.focusToken(id)` — recenters the camera and sidebar on a token; used by Playwright screenshot scripts.
+- `window.__MAMMOTH_SAMPLE__` — debug snippet (first 12 tokens) exposed during development to confirm ingestion stays aligned with preset arrays.
 
 ## Performance Targets
 - Initial load < 500ms (with cache)
