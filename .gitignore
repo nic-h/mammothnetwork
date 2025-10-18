@@ -2,3 +2,4 @@
 node_modules/
 server.log
 artifacts/ui/*.tmp
+data/mammoths.db*
