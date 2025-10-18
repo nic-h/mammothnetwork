@@ -121,7 +121,7 @@ function median(values = []) {
 const COLLISION_PADDING = 3;
 const COLLISION_SWEEPS = 16;
 const COLLISION_FALLBACK_SWEEPS = 5;
-const COLLISION_DRIFT_CLAMP = 200;
+const COLLISION_DRIFT_CLAMP = Number.POSITIVE_INFINITY;
 const COLLISION_EPSILON = 0.1;
 const COLLISION_MIN_RADIUS = 2;
 const CSS_COLORS = {
@@ -328,7 +328,8 @@ const API = {
   stageEl.id = 'three-stage';
   stageEl.style.width = '100%';
   stageEl.style.height = '100%';
-  stageEl.style.position = 'relative';
+  // Let CSS control absolute sizing (#three-stage { position:absolute; inset:0 })
+  stageEl.style.position = '';
   stageEl.style.cursor = 'grab';
   center.innerHTML = '';
   center.appendChild(stageEl);
@@ -380,11 +381,16 @@ const API = {
   updateNodeStyles();
 
   window.addEventListener('keydown', evt => {
-    if (evt.key === 'Escape') {
+    const key = String(evt.key || '').toLowerCase();
+    if (key === 'escape') {
       state.selectedId = null;
       state.highlighted = null;
       updateNodeStyles();
       updateSidebar(null);
+      return;
+    }
+    if (key === 'r') {
+      fitCameraToNodes(state.tokenNodes);
     }
   });
 })();
@@ -450,7 +456,7 @@ async function initData() {
     if (ownerData.usesCanonicalLayout) {
       applyMinimalLayoutJitter(ownerData.nodes, {
         radiusOf: node => Math.max(3, (node.displaySize || node.baseSize || 15) * 0.2),
-        maxDistance: 200,
+        maxDistance: 480,
         padding: 2.6,
         iterations: 6
       });
@@ -473,12 +479,10 @@ async function initData() {
     state.ownerMetrics = ownerData.metrics;
 
     disposeSprites();
-    state.graph.nodeThreeObject(node => buildSprite(node));
     state.graph.nodeLabel(nodeLabel);
     state.graph.graphData({ nodes: state.tokenNodes, links: [] });
     state.graph.numDimensions(3);
     state.graph.d3ReheatSimulation();
-    state.graph.nodeThreeObject(node => buildSprite(node));
     state.graph.nodeThreeObjectExtend(false);
     updateNodeStyles();
     await loadTraitFilters();
@@ -616,7 +620,7 @@ function buildTokenNodes(tokens, fallback, preset) {
 
   applyMinimalLayoutJitter(nodes, {
     radiusOf: node => Math.max(2.2, (node.displaySize || node.baseSize || 10) * 0.5),
-    maxDistance: 200,
+    maxDistance: 520,
     padding: 3,
     iterations: 6
   });
@@ -1217,51 +1221,32 @@ function decideColor({ isWhale, isFrozen, isDormant }) {
 }
 
 function fitCameraToNodes(nodes) {
-  if (!state.graph || !Array.isArray(nodes) || !nodes.length) return;
-  let minX = Infinity;
-  let minY = Infinity;
-  let minZ = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  let maxZ = -Infinity;
+  if (!state.graph || !Array.isArray(nodes) || !nodes.length || !state.controls) return;
+  const camera = state.graph.camera();
+  const bounds = new THREE.Box3();
   nodes.forEach(node => {
     const x = Number(node?.x) || 0;
     const y = Number(node?.y) || 0;
     const z = Number(node?.z) || 0;
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (z < minZ) minZ = z;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-    if (z > maxZ) maxZ = z;
+    bounds.expandByPoint(new THREE.Vector3(x, y, z));
   });
-  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return;
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-  const centerZ = (minZ + maxZ) / 2;
-  const spanX = maxX - minX;
-  const spanY = maxY - minY;
-  const spanZ = maxZ - minZ;
-  const span = Math.max(spanX, spanY, spanZ, 1);
-  const distance = Math.max(650, span * 0.95);
-  state.cameraFit = { centerX, centerY, centerZ, span, distance };
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, Math.max(1, size.z || 0));
+  const dist = maxDim * 1.25;
+
+  state.controls.target.copy(center);
+  camera.position.set(center.x + dist, center.y + dist, center.z + dist * 0.35);
+  camera.near = Math.max(0.1, dist / 1000);
+  camera.far = Math.max(2000, dist * 10);
+  camera.updateProjectionMatrix();
+
+  state.controls.minDistance = dist * 0.4;
+  state.controls.maxDistance = dist * 3.5;
+  state.controls.update();
+
   try {
-    const camera = state.graph.camera?.();
-    if (camera) {
-      camera.position.set(centerX, centerY, distance);
-      camera.lookAt(centerX, centerY, centerZ);
-    }
-    if (state.controls?.object) {
-      state.controls.object.position.set(centerX, centerY, distance);
-      state.controls.target.set(centerX, centerY, centerZ);
-      if (typeof state.controls.update === 'function') state.controls.update();
-    } else if (typeof state.graph.cameraPosition === 'function') {
-      state.graph.cameraPosition(
-        { x: centerX, y: centerY, z: distance },
-        { x: centerX, y: centerY, z: centerZ },
-        0
-      );
-    }
+    state.graph.renderer()?.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   } catch {}
 }
 
@@ -1643,7 +1628,7 @@ async function setSimpleView(name, options = {}) {
   let result;
   switch (view) {
     case View.BUBBLE:
-      result = renderDotsView();
+      result = state.showBubbles ? renderBubbleMapView() : renderDotsView();
       break;
     case View.FLOW:
       result = renderFlowView();
@@ -1691,6 +1676,7 @@ function renderDotsView() {
   const nodes = tokenNodesForView();
   state.nodes = nodes;
   clearClusterMeshes();
+  state.clusterMode = false;
   restoreHomePositions(true);
   state.graph.nodeThreeObject(node => buildSprite(node));
   state.graph.nodeThreeObjectExtend(false);
@@ -1716,8 +1702,11 @@ async function renderBubbleMapView() {
   if (!state.graph) return;
   startUILoad();
   try {
+    disposeSprites();
     const nodes = buildBubbleNodes(state.ownerNodes);
     if (!nodes.length) {
+      state.clusterMode = false;
+      state.nodes = [];
       state.graph.graphData({ nodes: [], links: [] });
       state.viewNodes = new Map();
       hideExplainOverlay();
@@ -1754,6 +1743,9 @@ async function renderBubbleMapView() {
     state.graph.d3VelocityDecay(1);
     if (typeof state.graph.nodeOpacity === 'function') state.graph.nodeOpacity(() => 1);
 
+    state.clusterMode = true;
+    state.colorMode = 'bubble';
+    state.nodes = nodes;
     state.bubbleNodes = nodes;
     state.viewNodes = new Map(nodes.map(n => [n.id, n]));
     state.selectedId = null;
@@ -2348,6 +2340,7 @@ function clearClusterMeshes() {
 function releaseClusterMode() {
   clearClusterMeshes();
   restoreHomePositions(true);
+  state.clusterMode = false;
   if (!state.graph) return;
   state.graph.d3VelocityDecay(DEFAULT_DECAY);
   state.graph.d3ReheatSimulation();
@@ -2950,7 +2943,8 @@ function bindUI() {
       el.addEventListener('change', () => {
         if (id === 'layer-bubbles') {
           state.showBubbles = !!el.checked;
-          updateNodeStyles();
+          if (state.activeView === View.BUBBLE) renderCurrentView();
+          else updateNodeStyles();
         } else {
           rebuildLinks();
         }
@@ -3087,6 +3081,7 @@ function applySimpleView(name, options = {}) {
     if (!el) return;
     el.checked = value;
   });
+  state.showBubbles = isChecked('layer-bubbles', state.showBubbles);
   if (view !== View.BUBBLE) releaseClusterMode();
   if (view !== View.TREE) {
     state.treeTopdown = { root: state.treeTopdown?.root || null, data: null, loading: false };
@@ -3126,12 +3121,15 @@ function exposeApi() {
 function configureControls(ctrl, THREERef) {
   if (!ctrl) return;
   ctrl.enablePan = true;
-  ctrl.enableZoom = true;
   ctrl.enableRotate = true;
-  ctrl.dampingFactor = 0.08;
+  ctrl.enableZoom = true;
   ctrl.enableDamping = true;
-  ctrl.minDistance = 0.5;
-  ctrl.maxDistance = 3e7;
+  ctrl.dampingFactor = 0.08;
+  ctrl.rotateSpeed = 0.45;
+  ctrl.zoomSpeed = 0.85;
+  ctrl.panSpeed = 0.9;
+  ctrl.screenSpacePanning = true;
+  ctrl.enableKeys = false;
   ctrl.mouseButtons = {
     LEFT: THREERef.MOUSE.PAN,
     MIDDLE: THREERef.MOUSE.DOLLY,

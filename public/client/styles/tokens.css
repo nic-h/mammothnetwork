@@ -10,7 +10,7 @@
   --danger: #ff3b3b;
   --grid: rgba(0, 255, 0, 0.12);
   --frozen: #44a4ff;
-  --dormant: rgba(0, 255, 0, 0.35);
+  --dormant: #666666;
 
   /* graph */
   --node-fill: rgba(0, 255, 0, 0.28);
